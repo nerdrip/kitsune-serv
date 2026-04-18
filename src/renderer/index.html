@@ -1,0 +1,1609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>KitsuneServ</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- ===== TITLEBAR ===== -->
+  <header class="titlebar" id="titlebar">
+    <div class="titlebar-drag">
+      <span class="titlebar-logo">🦊</span>
+      <span class="titlebar-title">KitsuneServ</span>
+      <span class="titlebar-version">v1.0</span>
+    </div>
+    <div class="titlebar-controls">
+      <button class="titlebar-btn" id="btn-minimize">─</button>
+      <button class="titlebar-btn" id="btn-maximize">□</button>
+      <button class="titlebar-btn titlebar-btn-close" id="btn-close">✕</button>
+    </div>
+  </header>
+
+  <div class="app-container">
+    <!-- ===== SIDEBAR ===== -->
+    <nav class="sidebar">
+      <div class="sidebar-header"><h2>Services</h2><span class="sidebar-counter" id="running-counter">0/16 running</span></div>
+      <div class="sidebar-actions">
+        <button class="btn btn-start-all" id="btn-start-all">▶ Start All</button>
+        <button class="btn btn-stop-all" id="btn-stop-all">⏹ Stop All</button>
+      </div>
+      <ul class="sidebar-nav">
+        <li class="nav-item active" data-panel="dashboard">
+          <span class="nav-icon">📊</span><span class="nav-label">Dashboard</span>
+        </li>
+
+        <!-- Each service row has label + start/stop micro-controls -->
+        <li class="sidebar-group-label" data-group="webservers"><span class="group-label-text">Web Servers</span><span class="group-toggle">▾</span></li>
+        <li class="nav-item" data-panel="apache">
+          <span class="nav-icon">🪶</span>
+          <div class="nav-label-group"><span class="nav-label">Apache</span><span class="nav-version" id="nav-version-apache"></span></div>
+          <div class="nav-controls" data-service="apache">
+            <input type="checkbox" class="nav-group-check" data-service="apache" title="Include in Start All">
+            <button class="nav-btn nav-btn-start" title="Start">▶</button>
+            <button class="nav-btn nav-btn-stop hidden" title="Stop">⏹</button>
+            <button class="nav-btn nav-btn-restart hidden" title="Restart">🔄</button>
+            <span class="nav-status-dot"></span>
+          </div>
+        </li>
+        <li class="nav-item" data-panel="nginx">
+          <span class="nav-icon">🔄</span>
+          <div class="nav-label-group"><span class="nav-label">Nginx</span><span class="nav-version" id="nav-version-nginx"></span></div>
+          <div class="nav-controls" data-service="nginx">
+            <input type="checkbox" class="nav-group-check" data-service="nginx" title="Include in Start All">
+            <button class="nav-btn nav-btn-start" title="Start">▶</button>
+            <button class="nav-btn nav-btn-stop hidden" title="Stop">⏹</button>
+            <button class="nav-btn nav-btn-restart hidden" title="Restart">🔄</button>
+            <span class="nav-status-dot"></span>
+          </div>
+        </li>
+        <li class="nav-item" data-panel="caddy">
+          <span class="nav-icon">🔒</span>
+          <div class="nav-label-group"><span class="nav-label">Caddy</span><span class="nav-version" id="nav-version-caddy"></span></div>
+          <div class="nav-controls" data-service="caddy">
+            <input type="checkbox" class="nav-group-check" data-service="caddy" title="Include in Start All">
+            <button class="nav-btn nav-btn-start" title="Start">▶</button>
+            <button class="nav-btn nav-btn-stop hidden" title="Stop">⏹</button>
+            <button class="nav-btn nav-btn-restart hidden" title="Restart">🔄</button>
+            <span class="nav-status-dot"></span>
+          </div>
+        </li>
+        <li class="sidebar-group-label" data-group="databases"><span class="group-label-text">Databases</span><span class="group-toggle">▾</span></li>
+        <li class="nav-item" data-panel="postgresql">
+          <span class="nav-icon">🐘</span>
+          <div class="nav-label-group"><span class="nav-label">PostgreSQL</span><span class="nav-version" id="nav-version-postgresql"></span></div>
+          <div class="nav-controls" data-service="postgresql">
+            <input type="checkbox" class="nav-group-check" data-service="postgresql" title="Include in Start All">
+            <button class="nav-btn nav-btn-start" title="Start">▶</button>
+            <button class="nav-btn nav-btn-stop hidden" title="Stop">⏹</button>
+            <button class="nav-btn nav-btn-restart hidden" title="Restart">🔄</button>
+            <span class="nav-status-dot"></span>
+          </div>
+        </li>
+        <li class="nav-item" data-panel="mysql">
+          <span class="nav-icon">🐬</span>
+          <div class="nav-label-group"><span class="nav-label">MySQL</span><span class="nav-version" id="nav-version-mysql"></span></div>
+          <div class="nav-controls" data-service="mysql">
+            <input type="checkbox" class="nav-group-check" data-service="mysql" title="Include in Start All">
+            <button class="nav-btn nav-btn-start" title="Start">▶</button>
+            <button class="nav-btn nav-btn-stop hidden" title="Stop">⏹</button>
+            <button class="nav-btn nav-btn-restart hidden" title="Restart">🔄</button>
+            <span class="nav-status-dot"></span>
+          </div>
+        </li>
+        <li class="nav-item" data-panel="mariadb">
+          <span class="nav-icon">🦭</span>
+          <div class="nav-label-group"><span class="nav-label">MariaDB</span><span class="nav-version" id="nav-version-mariadb"></span></div>
+          <div class="nav-controls" data-service="mariadb">
+            <input type="checkbox" class="nav-group-check" data-service="mariadb" title="Include in Start All">
+            <button class="nav-btn nav-btn-start" title="Start">▶</button>
+            <button class="nav-btn nav-btn-stop hidden" title="Stop">⏹</button>
+            <button class="nav-btn nav-btn-restart hidden" title="Restart">🔄</button>
+            <span class="nav-status-dot"></span>
+          </div>
+        </li>
+        <li class="nav-item" data-panel="mongodb">
+          <span class="nav-icon">🍃</span>
+          <div class="nav-label-group"><span class="nav-label">MongoDB</span><span class="nav-version" id="nav-version-mongodb"></span></div>
+          <div class="nav-controls" data-service="mongodb">
+            <input type="checkbox" class="nav-group-check" data-service="mongodb" title="Include in Start All">
+            <button class="nav-btn nav-btn-start" title="Start">▶</button>
+            <button class="nav-btn nav-btn-stop hidden" title="Stop">⏹</button>
+            <button class="nav-btn nav-btn-restart hidden" title="Restart">🔄</button>
+            <span class="nav-status-dot"></span>
+          </div>
+        </li>
+        <li class="sidebar-group-label" data-group="languages"><span class="group-label-text">Languages</span><span class="group-toggle">▾</span></li>
+        <li class="nav-item" data-panel="php">
+          <span class="nav-icon">🐘</span>
+          <div class="nav-label-group"><span class="nav-label">PHP</span><span class="nav-version" id="nav-version-php"></span></div>
+          <div class="nav-controls" data-service="php">
+            <span class="nav-status-dot"></span>
+            <span class="nav-auto-label" title="Managed by Apache/Nginx">auto</span>
+          </div>
+        </li>
+        <li class="nav-item" data-panel="node">
+          <span class="nav-icon">💚</span>
+          <div class="nav-label-group"><span class="nav-label">Node.js</span><span class="nav-version" id="nav-version-node"></span></div>
+          <div class="nav-controls" data-service="node">
+            <input type="checkbox" class="nav-group-check" data-service="node" title="Include in Start All">
+            <button class="nav-btn nav-btn-start" title="Start">▶</button>
+            <button class="nav-btn nav-btn-stop hidden" title="Stop">⏹</button>
+            <button class="nav-btn nav-btn-restart hidden" title="Restart">🔄</button>
+            <span class="nav-status-dot"></span>
+          </div>
+        </li>
+        <li class="nav-item" data-panel="go">
+          <span class="nav-icon">🔵</span>
+          <div class="nav-label-group"><span class="nav-label">Go</span><span class="nav-version" id="nav-version-go"></span></div>
+          <div class="nav-controls" data-service="go">
+            <input type="checkbox" class="nav-group-check" data-service="go" title="Include in Start All">
+            <button class="nav-btn nav-btn-start" title="Start">▶</button>
+            <button class="nav-btn nav-btn-stop hidden" title="Stop">⏹</button>
+            <button class="nav-btn nav-btn-restart hidden" title="Restart">🔄</button>
+            <span class="nav-status-dot"></span>
+          </div>
+        </li>
+        <li class="nav-item" data-panel="bun">
+          <span class="nav-icon">🧅</span>
+          <div class="nav-label-group"><span class="nav-label">Bun</span><span class="nav-version" id="nav-version-bun"></span></div>
+          <div class="nav-controls" data-service="bun">
+            <input type="checkbox" class="nav-group-check" data-service="bun" title="Include in Start All">
+            <button class="nav-btn nav-btn-start" title="Start">▶</button>
+            <button class="nav-btn nav-btn-stop hidden" title="Stop">⏹</button>
+            <button class="nav-btn nav-btn-restart hidden" title="Restart">🔄</button>
+            <span class="nav-status-dot"></span>
+          </div>
+        </li>
+        <li class="sidebar-group-label" data-group="cache"><span class="group-label-text">Cache</span><span class="group-toggle">▾</span></li>
+        <li class="nav-item" data-panel="redis">
+          <span class="nav-icon">🔴</span>
+          <div class="nav-label-group"><span class="nav-label">Redis</span><span class="nav-version" id="nav-version-redis"></span></div>
+          <div class="nav-controls" data-service="redis">
+            <input type="checkbox" class="nav-group-check" data-service="redis" title="Include in Start All">
+            <button class="nav-btn nav-btn-start" title="Start">▶</button>
+            <button class="nav-btn nav-btn-stop hidden" title="Stop">⏹</button>
+            <button class="nav-btn nav-btn-restart hidden" title="Restart">🔄</button>
+            <span class="nav-status-dot"></span>
+          </div>
+        </li>
+        <li class="nav-item" data-panel="memcached">
+          <span class="nav-icon">⚡</span>
+          <div class="nav-label-group"><span class="nav-label">Memcached</span><span class="nav-version" id="nav-version-memcached"></span></div>
+          <div class="nav-controls" data-service="memcached">
+            <input type="checkbox" class="nav-group-check" data-service="memcached" title="Include in Start All">
+            <button class="nav-btn nav-btn-start" title="Start">▶</button>
+            <button class="nav-btn nav-btn-stop hidden" title="Stop">⏹</button>
+            <button class="nav-btn nav-btn-restart hidden" title="Restart">🔄</button>
+            <span class="nav-status-dot"></span>
+          </div>
+        </li>
+        <li class="sidebar-group-label" data-group="storage"><span class="group-label-text">Storage</span><span class="group-toggle">▾</span></li>
+        <li class="nav-item" data-panel="minio">
+          <span class="nav-icon">📦</span>
+          <div class="nav-label-group"><span class="nav-label">MinIO</span><span class="nav-version" id="nav-version-minio"></span></div>
+          <div class="nav-controls" data-service="minio">
+            <input type="checkbox" class="nav-group-check" data-service="minio" title="Include in Start All">
+            <button class="nav-btn nav-btn-start" title="Start">▶</button>
+            <button class="nav-btn nav-btn-stop hidden" title="Stop">⏹</button>
+            <button class="nav-btn nav-btn-restart hidden" title="Restart">🔄</button>
+            <span class="nav-status-dot"></span>
+          </div>
+        </li>
+        <li class="nav-item" data-panel="python">
+          <span class="nav-icon">🐍</span>
+          <div class="nav-label-group"><span class="nav-label">Python</span><span class="nav-version" id="nav-version-python"></span></div>
+          <div class="nav-controls" data-service="python">
+            <input type="checkbox" class="nav-group-check" data-service="python" title="Include in Start All">
+            <button class="nav-btn nav-btn-start" title="Start">▶</button>
+            <button class="nav-btn nav-btn-stop hidden" title="Stop">⏹</button>
+            <button class="nav-btn nav-btn-restart hidden" title="Restart">🔄</button>
+            <span class="nav-status-dot"></span>
+          </div>
+        </li>
+        <li class="nav-item" data-panel="deno">
+          <span class="nav-icon">🦕</span>
+          <div class="nav-label-group"><span class="nav-label">Deno</span><span class="nav-version" id="nav-version-deno"></span></div>
+          <div class="nav-controls" data-service="deno">
+            <input type="checkbox" class="nav-group-check" data-service="deno" title="Include in Start All">
+            <button class="nav-btn nav-btn-start" title="Start">▶</button>
+            <button class="nav-btn nav-btn-stop hidden" title="Stop">⏹</button>
+            <button class="nav-btn nav-btn-restart hidden" title="Restart">🔄</button>
+            <span class="nav-status-dot"></span>
+          </div>
+        </li>
+
+        <li class="sidebar-divider"></li>
+        <li class="nav-item" data-panel="appstore">
+          <span class="nav-icon">📦</span><span class="nav-label">App Store</span>
+        </li>
+        <li class="nav-item" data-panel="terminal">
+          <span class="nav-icon">💻</span><span class="nav-label">Terminal</span>
+        </li>
+        <li class="nav-item" data-panel="general">
+          <span class="nav-icon">⚙️</span><span class="nav-label">General</span>
+        </li>
+      </ul>
+      <div class="sidebar-footer">
+        <button class="btn btn-reset" id="btn-reset">↻ Reset Defaults</button>
+      </div>
+    </nav>
+
+    <!-- ===== MAIN CONTENT ===== -->
+    <main class="content">
+
+      <!-- DASHBOARD -->
+      <section class="panel active" id="panel-dashboard">
+        <div class="panel-header"><h1>Dashboard</h1><p class="panel-subtitle">Overview of all services</p></div>
+        <div class="dashboard-toolbar">
+          <input type="text" class="dashboard-search" id="dash-search" placeholder="🔍 Filter services..." autocomplete="off" spellcheck="false">
+          <button class="btn btn-toolbar" id="dash-start-all" title="Start All Services">▶ Start All</button>
+          <button class="btn btn-toolbar" id="dash-stop-all" title="Stop All Services">⏹ Stop All</button>
+          <button class="btn btn-toolbar" id="dash-health-all" title="Run Health Check on All Services">🩺 Health Check All</button>
+          <button class="btn btn-toolbar" id="dash-download-all" title="Download all missing service binaries">⬇ Download Missing</button>
+        </div>
+        <div class="dashboard-grid" id="dashboard-grid"></div>
+      </section>
+
+      <!-- APACHE -->
+      <section class="panel" id="panel-apache">
+        <div class="panel-header">
+          <div class="panel-header-left"><h1>Apache HTTP Server</h1><p class="panel-subtitle">Configure Apache web server</p></div>
+        </div>
+        <div class="profile-strip" id="profile-strip-apache"></div>
+        <div class="progress-bar-container hidden" id="progress-apache">
+          <div class="progress-label"><span id="progress-label-apache">Downloading...</span></div>
+          <div class="progress-track"><div class="progress-fill" id="progress-fill-apache"></div></div>
+        </div>
+        <div class="install-status" id="install-status-apache"></div>
+        <div class="sub-tabs">
+          <div class="sub-tab-nav">
+            <button class="sub-tab-btn active" data-subtab="config-apache">⚙️ Server</button>
+            <button class="sub-tab-btn" data-subtab="modules-apache">🧩 Modules</button>
+            <button class="sub-tab-btn" data-subtab="advanced-apache">🔧 Advanced</button>
+            <button class="sub-tab-btn" data-subtab="logs-apache">📋 Logs</button>
+          </div>
+          <div class="sub-tab-pane active" id="subtab-config-apache">
+          <div class="panel-body" id="panel-body-apache">
+          <div class="config-section">
+            <h3 class="section-title">Version</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Apache Version</label><select id="apache-version" data-pkey="version"></select></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Network</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>HTTP Port</label><input type="number" id="apache-port" data-pkey="port" min="1" max="65535"></div>
+              <div class="form-group"><label>HTTPS Port</label><input type="number" id="apache-sslPort" data-pkey="sslPort" min="1" max="65535"></div>
+              <div class="form-group"><label>Listen Host</label><input type="text" id="apache-host" data-pkey="host" placeholder="0.0.0.0"></div>
+              <div class="form-group"><label>Server Name</label><input type="text" id="apache-serverName" data-pkey="serverName"></div>
+              <div class="form-group form-group-toggle"><label>Enable SSL</label><label class="toggle-switch small"><input type="checkbox" id="apache-sslEnabled" data-pkey="sslEnabled"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Document Root</h3>
+            <div class="form-grid"><div class="form-group full-width"><label>Document Root Path</label><div class="input-with-btn"><input type="text" id="apache-documentRoot" data-pkey="documentRoot"><button class="btn btn-folder" id="btn-open-apache-docroot" title="Open Document Root">📂</button></div></div></div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Directory Index</h3>
+            <div class="form-grid">
+              <div class="form-group full-width"><label>Index Files</label><input type="text" id="apache-directoryIndex" data-pkey="directoryIndex"></div>
+            </div>
+          </div>
+        </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-modules-apache">
+          <div class="panel-body">
+          <div class="config-section">
+            <h3 class="section-title">Apache Modules</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>mod_rewrite</label><label class="toggle-switch small"><input type="checkbox" id="apache-modRewrite" data-pkey="modRewrite"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>mod_ssl</label><label class="toggle-switch small"><input type="checkbox" id="apache-modSsl" data-pkey="modSsl"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>mod_proxy</label><label class="toggle-switch small"><input type="checkbox" id="apache-modProxy" data-pkey="modProxy"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>mod_proxy_http</label><label class="toggle-switch small"><input type="checkbox" id="apache-modProxyHttp" data-pkey="modProxyHttp"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>mod_proxy_fcgi</label><label class="toggle-switch small"><input type="checkbox" id="apache-modProxyFcgi" data-pkey="modProxyFcgi"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>mod_headers</label><label class="toggle-switch small"><input type="checkbox" id="apache-modHeaders" data-pkey="modHeaders"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>mod_deflate</label><label class="toggle-switch small"><input type="checkbox" id="apache-modDeflate" data-pkey="modDeflate"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>mod_expires</label><label class="toggle-switch small"><input type="checkbox" id="apache-modExpires" data-pkey="modExpires"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>mod_security</label><label class="toggle-switch small"><input type="checkbox" id="apache-modSecurity" data-pkey="modSecurity"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>mod_php</label><label class="toggle-switch small"><input type="checkbox" id="apache-modPhp" data-pkey="modPhp"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-advanced-apache">
+          <div class="panel-body">
+          <div class="config-section">
+            <h3 class="section-title">Performance</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Max Request Workers</label><input type="number" id="apache-maxRequestWorkers" data-pkey="maxRequestWorkers" min="1"></div>
+              <div class="form-group"><label>Server Limit</label><input type="number" id="apache-serverLimit" data-pkey="serverLimit" min="1"></div>
+              <div class="form-group"><label>Keepalive Timeout (s)</label><input type="number" id="apache-keepaliveTimeout" data-pkey="keepaliveTimeout" min="0"></div>
+              <div class="form-group"><label>Max Keep-Alive Requests</label><input type="number" id="apache-maxKeepAliveRequests" data-pkey="maxKeepAliveRequests" min="0"></div>
+              <div class="form-group"><label>Timeout (s)</label><input type="number" id="apache-timeout" data-pkey="timeout" min="1"></div>
+              <div class="form-group form-group-toggle"><label>Keep-Alive</label><label class="toggle-switch small"><input type="checkbox" id="apache-keepAlive" data-pkey="keepAlive"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Logging</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Access Log</label><label class="toggle-switch small"><input type="checkbox" id="apache-accessLog" data-pkey="accessLog"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Error Log</label><label class="toggle-switch small"><input type="checkbox" id="apache-errorLog" data-pkey="errorLog"><span class="toggle-slider"></span></label></div>
+              <div class="form-group"><label>Log Level</label><select id="apache-logLevel" data-pkey="logLevel"><option value="emerg">Emergency</option><option value="alert">Alert</option><option value="crit">Critical</option><option value="error">Error</option><option value="warn">Warning</option><option value="notice">Notice</option><option value="info">Info</option><option value="debug">Debug</option></select></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Service Behavior</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Auto Start</label><label class="toggle-switch small"><input type="checkbox" id="apache-autoStart" data-pkey="autoStart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Auto Restart on Crash</label><label class="toggle-switch small"><input type="checkbox" id="apache-autoRestart" data-pkey="autoRestart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Start All Group</label><label class="toggle-switch small"><input type="checkbox" id="apache-startAllGroup" data-pkey="startAllGroup"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section"><h3 class="section-title">Custom httpd.conf</h3><div class="form-group full-width"><textarea id="apache-customConfig" data-pkey="customConfig" rows="6" class="code-textarea" spellcheck="false"></textarea></div></div>
+          </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-logs-apache">
+          <div class="log-viewer" id="log-viewer-apache"></div>
+        </div>
+        </div>
+      </section>
+
+      <!-- NGINX -->
+      <section class="panel" id="panel-nginx">
+        <div class="panel-header">
+          <div class="panel-header-left"><h1>Nginx</h1><p class="panel-subtitle">Configure Nginx reverse proxy &amp; web server</p></div>
+        </div>
+        <div class="profile-strip" id="profile-strip-nginx"></div>
+        <div class="progress-bar-container hidden" id="progress-nginx">
+          <div class="progress-label"><span id="progress-label-nginx">Downloading...</span></div>
+          <div class="progress-track"><div class="progress-fill" id="progress-fill-nginx"></div></div>
+        </div>
+        <div class="install-status" id="install-status-nginx"></div>
+        <div class="sub-tabs">
+          <div class="sub-tab-nav">
+            <button class="sub-tab-btn active" data-subtab="config-nginx">⚙️ Server</button>
+            <button class="sub-tab-btn" data-subtab="proxy-nginx">🔀 Reverse Proxy</button>
+            <button class="sub-tab-btn" data-subtab="advanced-nginx">🔧 Advanced</button>
+            <button class="sub-tab-btn" data-subtab="logs-nginx">📋 Logs</button>
+          </div>
+          <div class="sub-tab-pane active" id="subtab-config-nginx">
+          <div class="panel-body" id="panel-body-nginx">
+          <div class="config-section">
+            <h3 class="section-title">Version</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Nginx Version</label><select id="nginx-version" data-pkey="version"></select></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Network</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>HTTP Port</label><input type="number" id="nginx-port" data-pkey="port" min="1" max="65535"></div>
+              <div class="form-group"><label>HTTPS Port</label><input type="number" id="nginx-sslPort" data-pkey="sslPort" min="1" max="65535"></div>
+              <div class="form-group"><label>Listen Host</label><input type="text" id="nginx-host" data-pkey="host" placeholder="0.0.0.0"></div>
+              <div class="form-group"><label>Server Name</label><input type="text" id="nginx-serverName" data-pkey="serverName"></div>
+              <div class="form-group form-group-toggle"><label>Enable SSL</label><label class="toggle-switch small"><input type="checkbox" id="nginx-sslEnabled" data-pkey="sslEnabled"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Document Root</h3>
+            <div class="form-grid"><div class="form-group full-width"><label>Document Root Path</label><div class="input-with-btn"><input type="text" id="nginx-documentRoot" data-pkey="documentRoot"><button class="btn btn-folder" id="btn-open-nginx-docroot" title="Open Document Root">📂</button></div></div></div>
+          </div>
+        </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-proxy-nginx">
+          <div class="panel-body">
+          <div class="config-section">
+            <h3 class="section-title">Reverse Proxy</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Enable Reverse Proxy</label><label class="toggle-switch small"><input type="checkbox" id="nginx-reverseProxy" data-pkey="reverseProxy"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Enable CORS</label><label class="toggle-switch small"><input type="checkbox" id="nginx-corsEnabled" data-pkey="corsEnabled"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Upstream / Backend</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Upstream Name</label><input type="text" id="nginx-upstreamName" data-pkey="upstreamName"></div>
+              <div class="form-group"><label>Backend Address</label><input type="text" id="nginx-upstreamServer" data-pkey="upstreamServer"></div>
+              <div class="form-group"><label>Backend Port</label><input type="number" id="nginx-upstreamPort" data-pkey="upstreamPort" min="1" max="65535"></div>
+              <div class="form-group"><label>Load Balancing</label><select id="nginx-loadBalancing" data-pkey="loadBalancing"><option value="round_robin">Round Robin</option><option value="least_conn">Least Connections</option><option value="ip_hash">IP Hash</option><option value="hash">Hash</option></select></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Proxy Settings</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Proxy Pass URL</label><input type="text" id="nginx-proxyPass" data-pkey="proxyPass"></div>
+              <div class="form-group"><label>Proxy Connect Timeout (s)</label><input type="number" id="nginx-proxyConnectTimeout" data-pkey="proxyConnectTimeout" min="1"></div>
+              <div class="form-group"><label>Proxy Read Timeout (s)</label><input type="number" id="nginx-proxyReadTimeout" data-pkey="proxyReadTimeout" min="1"></div>
+              <div class="form-group"><label>Proxy Send Timeout (s)</label><input type="number" id="nginx-proxySendTimeout" data-pkey="proxySendTimeout" min="1"></div>
+              <div class="form-group form-group-toggle"><label>Proxy Buffering</label><label class="toggle-switch small"><input type="checkbox" id="nginx-proxyBuffering" data-pkey="proxyBuffering"><span class="toggle-slider"></span></label></div>
+              <div class="form-group"><label>Proxy Buffer Size</label><input type="text" id="nginx-proxyBufferSize" data-pkey="proxyBufferSize"></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Proxy Headers</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>X-Real-IP</label><label class="toggle-switch small"><input type="checkbox" id="nginx-headerRealIp" data-pkey="headerRealIp"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>X-Forwarded-For</label><label class="toggle-switch small"><input type="checkbox" id="nginx-headerForwardedFor" data-pkey="headerForwardedFor"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>X-Forwarded-Proto</label><label class="toggle-switch small"><input type="checkbox" id="nginx-headerForwardedProto" data-pkey="headerForwardedProto"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Host Header</label><label class="toggle-switch small"><input type="checkbox" id="nginx-headerHost" data-pkey="headerHost"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>WebSocket Support</label><label class="toggle-switch small"><input type="checkbox" id="nginx-websocket" data-pkey="websocket"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-advanced-nginx">
+          <div class="panel-body">
+          <div class="config-section">
+            <h3 class="section-title">Performance</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Worker Processes</label><input type="text" id="nginx-workerProcesses" data-pkey="workerProcesses"></div>
+              <div class="form-group"><label>Worker Connections</label><input type="number" id="nginx-workerConnections" data-pkey="workerConnections" min="1"></div>
+              <div class="form-group"><label>Keepalive Timeout (s)</label><input type="number" id="nginx-keepaliveTimeout" data-pkey="keepaliveTimeout" min="0"></div>
+              <div class="form-group"><label>Client Max Body Size</label><input type="text" id="nginx-clientMaxBodySize" data-pkey="clientMaxBodySize"></div>
+              <div class="form-group form-group-toggle"><label>Gzip</label><label class="toggle-switch small"><input type="checkbox" id="nginx-gzip" data-pkey="gzip"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Sendfile</label><label class="toggle-switch small"><input type="checkbox" id="nginx-sendfile" data-pkey="sendfile"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Rate Limiting</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Enable Rate Limit</label><label class="toggle-switch small"><input type="checkbox" id="nginx-rateLimitEnabled" data-pkey="rateLimitEnabled"><span class="toggle-slider"></span></label></div>
+              <div class="form-group"><label>Requests/second</label><input type="text" id="nginx-rateLimitRate" data-pkey="rateLimitRate"></div>
+              <div class="form-group"><label>Burst</label><input type="number" id="nginx-rateLimitBurst" data-pkey="rateLimitBurst" min="0"></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Caching</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Proxy Cache</label><label class="toggle-switch small"><input type="checkbox" id="nginx-proxyCacheEnabled" data-pkey="proxyCacheEnabled"><span class="toggle-slider"></span></label></div>
+              <div class="form-group"><label>Cache Valid (s)</label><input type="text" id="nginx-proxyCacheValid" data-pkey="proxyCacheValid"></div>
+              <div class="form-group"><label>Cache Path</label><input type="text" id="nginx-proxyCachePath" data-pkey="proxyCachePath"></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Logging</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Access Log</label><label class="toggle-switch small"><input type="checkbox" id="nginx-accessLog" data-pkey="accessLog"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Error Log</label><label class="toggle-switch small"><input type="checkbox" id="nginx-errorLog" data-pkey="errorLog"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Service Behavior</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Auto Start</label><label class="toggle-switch small"><input type="checkbox" id="nginx-autoStart" data-pkey="autoStart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Auto Restart on Crash</label><label class="toggle-switch small"><input type="checkbox" id="nginx-autoRestart" data-pkey="autoRestart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Start All Group</label><label class="toggle-switch small"><input type="checkbox" id="nginx-startAllGroup" data-pkey="startAllGroup"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section"><h3 class="section-title">Custom nginx.conf</h3><div class="form-group full-width"><textarea id="nginx-customConfig" data-pkey="customConfig" rows="6" class="code-textarea" spellcheck="false"></textarea></div></div>
+          </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-logs-nginx">
+          <div class="log-viewer" id="log-viewer-nginx"></div>
+        </div>
+        </div>
+      </section>
+
+      <!-- CADDY -->
+      <section class="panel" id="panel-caddy">
+        <div class="panel-header">
+          <div class="panel-header-left"><h1>Caddy</h1><p class="panel-subtitle">Configure Caddy web server with automatic HTTPS</p></div>
+        </div>
+        <div class="profile-strip" id="profile-strip-caddy"></div>
+        <div class="progress-bar-container hidden" id="progress-caddy"><div class="progress-label"><span id="progress-label-caddy">Downloading...</span></div><div class="progress-track"><div class="progress-fill" id="progress-fill-caddy"></div></div></div>
+        <div class="install-status" id="install-status-caddy"></div>
+        <div class="sub-tabs">
+          <div class="sub-tab-nav">
+            <button class="sub-tab-btn active" data-subtab="config-caddy">⚙️ Server</button>
+            <button class="sub-tab-btn" data-subtab="advanced-caddy">🔧 Advanced</button>
+            <button class="sub-tab-btn" data-subtab="logs-caddy">📋 Logs</button>
+          </div>
+          <div class="sub-tab-pane active" id="subtab-config-caddy">
+          <div class="panel-body" id="panel-body-caddy">
+          <div class="config-section">
+            <h3 class="section-title">Version</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Caddy Version</label><select id="caddy-version" data-pkey="version"></select></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Network</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>HTTPS Port</label><input type="number" id="caddy-port" data-pkey="port" min="1" max="65535"></div>
+              <div class="form-group"><label>HTTP Port</label><input type="number" id="caddy-httpPort" data-pkey="httpPort" min="1" max="65535"></div>
+              <div class="form-group"><label>Server Name</label><input type="text" id="caddy-serverName" data-pkey="serverName"></div>
+              <div class="form-group"><label>Document Root</label><div class="input-with-btn"><input type="text" id="caddy-documentRoot" data-pkey="documentRoot"><button class="btn btn-folder" id="btn-open-caddy-docroot" title="Open Document Root">📂</button></div></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Features</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Auto HTTPS</label><label class="toggle-switch small"><input type="checkbox" id="caddy-autoHttps" data-pkey="autoHttps"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>File Server</label><label class="toggle-switch small"><input type="checkbox" id="caddy-fileServer" data-pkey="fileServer"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Encode (gzip/zstd)</label><label class="toggle-switch small"><input type="checkbox" id="caddy-encode" data-pkey="encode"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Access Log</label><label class="toggle-switch small"><input type="checkbox" id="caddy-accessLog" data-pkey="accessLog"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>CORS Headers</label><label class="toggle-switch small"><input type="checkbox" id="caddy-corsEnabled" data-pkey="corsEnabled"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Reverse Proxy</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Proxy Path</label><input type="text" id="caddy-reverseProxy" data-pkey="reverseProxy" placeholder="/api/*"></div>
+              <div class="form-group"><label>Proxy Target</label><input type="text" id="caddy-reverseProxyTarget" data-pkey="reverseProxyTarget" placeholder="localhost:3000"></div>
+            </div>
+          </div>
+          </div>
+          </div>
+          <div class="sub-tab-pane" id="subtab-advanced-caddy">
+          <div class="panel-body">
+          <div class="config-section">
+            <h3 class="section-title">Logging</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Log Level</label><select id="caddy-logLevel" data-pkey="logLevel"><option value="DEBUG">Debug</option><option value="INFO">Info</option><option value="WARN">Warning</option><option value="ERROR">Error</option></select></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Service Behavior</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Auto Start</label><label class="toggle-switch small"><input type="checkbox" id="caddy-autoStart" data-pkey="autoStart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Auto Restart on Crash</label><label class="toggle-switch small"><input type="checkbox" id="caddy-autoRestart" data-pkey="autoRestart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Start All Group</label><label class="toggle-switch small"><input type="checkbox" id="caddy-startAllGroup" data-pkey="startAllGroup"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section"><h3 class="section-title">Custom Caddyfile</h3><div class="form-group full-width"><textarea id="caddy-customConfig" data-pkey="customConfig" rows="6" class="code-textarea" spellcheck="false"></textarea></div></div>
+          </div>
+          </div>
+          <div class="sub-tab-pane" id="subtab-logs-caddy">
+            <div class="log-viewer" id="log-viewer-caddy"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- POSTGRESQL -->
+      <section class="panel" id="panel-postgresql">
+        <div class="panel-header">
+          <div class="panel-header-left"><h1>PostgreSQL</h1><p class="panel-subtitle">Configure PostgreSQL server</p></div>
+
+        </div>
+        <div class="profile-strip" id="profile-strip-postgresql"></div>
+        <div class="progress-bar-container hidden" id="progress-postgresql"><div class="progress-label"><span id="progress-label-postgresql">Downloading...</span></div><div class="progress-track"><div class="progress-fill" id="progress-fill-postgresql"></div></div></div>
+        <div class="install-status" id="install-status-postgresql"></div>
+        <div class="sub-tabs">
+          <div class="sub-tab-nav">
+            <button class="sub-tab-btn active" data-subtab="config-postgresql">⚙️ Connection</button>
+            <button class="sub-tab-btn" data-subtab="tuning-postgresql">🔧 Tuning</button>
+            <button class="sub-tab-btn" data-subtab="explorer-postgresql">🗄️ Explorer</button>
+            <button class="sub-tab-btn" data-subtab="logs-postgresql">📋 Logs</button>
+          </div>
+          <div class="sub-tab-pane active" id="subtab-config-postgresql">
+          <div class="panel-body" id="panel-body-postgresql">
+          <div class="config-section">
+            <h3 class="section-title">Version</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Version</label><select id="postgresql-version" data-pkey="version"></select></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Connection</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Host</label><input type="text" id="postgresql-host" data-pkey="host"></div>
+              <div class="form-group"><label>Port</label><input type="number" id="postgresql-port" data-pkey="port" min="1" max="65535"></div>
+              <div class="form-group"><label>Username</label><input type="text" id="postgresql-username" data-pkey="username"></div>
+              <div class="form-group"><label>Password</label><input type="password" id="postgresql-password" data-pkey="password" placeholder="Leave empty for no auth"></div>
+              <div class="form-group full-width"><label>Data Directory</label><input type="text" id="postgresql-dataDir" data-pkey="dataDir"></div>
+            </div>
+          </div>
+        </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-tuning-postgresql">
+          <div class="panel-body">
+          <div class="config-section">
+            <h3 class="section-title">Performance</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Max Connections</label><input type="number" id="postgresql-maxConnections" data-pkey="maxConnections" min="1"></div>
+              <div class="form-group"><label>Shared Buffers</label><input type="text" id="postgresql-sharedBuffers" data-pkey="sharedBuffers"></div>
+              <div class="form-group"><label>Work Memory</label><input type="text" id="postgresql-workMem" data-pkey="workMem"></div>
+              <div class="form-group"><label>Maintenance Work Mem</label><input type="text" id="postgresql-maintenanceWorkMem" data-pkey="maintenanceWorkMem"></div>
+              <div class="form-group"><label>Effective Cache Size</label><input type="text" id="postgresql-effectiveCacheSize" data-pkey="effectiveCacheSize"></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">WAL & Logging</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>WAL Level</label><select id="postgresql-walLevel" data-pkey="walLevel"><option value="minimal">Minimal</option><option value="replica">Replica</option><option value="logical">Logical</option></select></div>
+              <div class="form-group form-group-toggle"><label>Logging</label><label class="toggle-switch small"><input type="checkbox" id="postgresql-logging" data-pkey="logging"><span class="toggle-slider"></span></label></div>
+              <div class="form-group"><label>Log Level</label><select id="postgresql-logLevel" data-pkey="logLevel"><option value="debug">Debug</option><option value="info">Info</option><option value="warning">Warning</option><option value="error">Error</option></select></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Service Behavior</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Auto Start</label><label class="toggle-switch small"><input type="checkbox" id="postgresql-autoStart" data-pkey="autoStart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Auto Restart on Crash</label><label class="toggle-switch small"><input type="checkbox" id="postgresql-autoRestart" data-pkey="autoRestart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Start All Group</label><label class="toggle-switch small"><input type="checkbox" id="postgresql-startAllGroup" data-pkey="startAllGroup"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section"><h3 class="section-title">Custom Config</h3><div class="form-group full-width"><textarea id="postgresql-customConfig" data-pkey="customConfig" rows="6" class="code-textarea" spellcheck="false"></textarea></div></div>
+          </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-explorer-postgresql">
+          <div class="db-viewer-container" id="db-viewer-postgresql" data-section="postgresql"></div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-logs-postgresql">
+          <div class="log-viewer" id="log-viewer-postgresql"></div>
+        </div>
+        </div>
+      </section>
+
+      <!-- MYSQL -->
+      <section class="panel" id="panel-mysql">
+        <div class="panel-header">
+          <div class="panel-header-left"><h1>MySQL</h1><p class="panel-subtitle">Configure MySQL server</p></div>
+
+        </div>
+        <div class="profile-strip" id="profile-strip-mysql"></div>
+        <div class="progress-bar-container hidden" id="progress-mysql"><div class="progress-label"><span id="progress-label-mysql">Downloading...</span></div><div class="progress-track"><div class="progress-fill" id="progress-fill-mysql"></div></div></div>
+        <div class="install-status" id="install-status-mysql"></div>
+        <div class="sub-tabs">
+          <div class="sub-tab-nav">
+            <button class="sub-tab-btn active" data-subtab="config-mysql">⚙️ Connection</button>
+            <button class="sub-tab-btn" data-subtab="tuning-mysql">🔧 Tuning</button>
+            <button class="sub-tab-btn" data-subtab="explorer-mysql">🗄️ Explorer</button>
+            <button class="sub-tab-btn" data-subtab="logs-mysql">📋 Logs</button>
+          </div>
+          <div class="sub-tab-pane active" id="subtab-config-mysql">
+          <div class="panel-body" id="panel-body-mysql">
+          <div class="config-section">
+            <h3 class="section-title">Version</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Version</label><select id="mysql-version" data-pkey="version"></select></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Connection</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Host</label><input type="text" id="mysql-host" data-pkey="host"></div>
+              <div class="form-group"><label>Port</label><input type="number" id="mysql-port" data-pkey="port" min="1" max="65535"></div>
+              <div class="form-group"><label>Username</label><input type="text" id="mysql-username" data-pkey="username"></div>
+              <div class="form-group"><label>Password</label><input type="password" id="mysql-password" data-pkey="password" placeholder="Leave empty for no auth"></div>
+              <div class="form-group full-width"><label>Data Directory</label><input type="text" id="mysql-dataDir" data-pkey="dataDir"></div>
+            </div>
+          </div>
+        </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-tuning-mysql">
+          <div class="panel-body">
+          <div class="config-section">
+            <h3 class="section-title">Performance</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Max Connections</label><input type="number" id="mysql-maxConnections" data-pkey="maxConnections" min="1"></div>
+              <div class="form-group"><label>InnoDB Buffer Pool Size</label><input type="text" id="mysql-innodbBufferPoolSize" data-pkey="innodbBufferPoolSize"></div>
+              <div class="form-group"><label>InnoDB Log File Size</label><input type="text" id="mysql-innodbLogFileSize" data-pkey="innodbLogFileSize"></div>
+              <div class="form-group"><label>Key Buffer Size</label><input type="text" id="mysql-keyBufferSize" data-pkey="keyBufferSize"></div>
+              <div class="form-group"><label>Sort Buffer Size</label><input type="text" id="mysql-sortBufferSize" data-pkey="sortBufferSize"></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Logging</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Logging</label><label class="toggle-switch small"><input type="checkbox" id="mysql-logging" data-pkey="logging"><span class="toggle-slider"></span></label></div>
+              <div class="form-group"><label>Log Level</label><select id="mysql-logLevel" data-pkey="logLevel"><option value="debug">Debug</option><option value="info">Info</option><option value="warning">Warning</option><option value="error">Error</option></select></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Service Behavior</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Auto Start</label><label class="toggle-switch small"><input type="checkbox" id="mysql-autoStart" data-pkey="autoStart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Auto Restart on Crash</label><label class="toggle-switch small"><input type="checkbox" id="mysql-autoRestart" data-pkey="autoRestart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Start All Group</label><label class="toggle-switch small"><input type="checkbox" id="mysql-startAllGroup" data-pkey="startAllGroup"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section"><h3 class="section-title">Custom Config</h3><div class="form-group full-width"><textarea id="mysql-customConfig" data-pkey="customConfig" rows="6" class="code-textarea" spellcheck="false"></textarea></div></div>
+          </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-explorer-mysql">
+          <div class="db-viewer-container" id="db-viewer-mysql" data-section="mysql"></div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-logs-mysql">
+          <div class="log-viewer" id="log-viewer-mysql"></div>
+        </div>
+        </div>
+      </section>
+
+      <!-- MONGODB -->
+      <section class="panel" id="panel-mongodb">
+        <div class="panel-header">
+          <div class="panel-header-left"><h1>MongoDB</h1><p class="panel-subtitle">Configure MongoDB server</p></div>
+
+        </div>
+        <div class="profile-strip" id="profile-strip-mongodb"></div>
+        <div class="progress-bar-container hidden" id="progress-mongodb"><div class="progress-label"><span id="progress-label-mongodb">Downloading...</span></div><div class="progress-track"><div class="progress-fill" id="progress-fill-mongodb"></div></div></div>
+        <div class="install-status" id="install-status-mongodb"></div>
+        <div class="sub-tabs">
+          <div class="sub-tab-nav">
+            <button class="sub-tab-btn active" data-subtab="config-mongodb">⚙️ Configuration</button>
+            <button class="sub-tab-btn" data-subtab="explorer-mongodb">🗄️ Explorer</button>
+            <button class="sub-tab-btn" data-subtab="logs-mongodb">📋 Logs</button>
+          </div>
+          <div class="sub-tab-pane active" id="subtab-config-mongodb">
+          <div class="panel-body" id="panel-body-mongodb">
+          <div class="config-section">
+            <h3 class="section-title">Version</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Version</label><select id="mongodb-version" data-pkey="version"></select></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Connection</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Host</label><input type="text" id="mongodb-host" data-pkey="host"></div>
+              <div class="form-group"><label>Port</label><input type="number" id="mongodb-port" data-pkey="port" min="1" max="65535"></div>
+              <div class="form-group"><label>Max Connections</label><input type="number" id="mongodb-maxConnections" data-pkey="maxConnections" min="1"></div>
+              <div class="form-group"><label>WiredTiger Cache (GB)</label><input type="text" id="mongodb-wiredTigerCacheSizeGB" data-pkey="wiredTigerCacheSizeGB" placeholder="Leave empty for auto"></div>
+              <div class="form-group form-group-toggle"><label>Authentication</label><label class="toggle-switch small"><input type="checkbox" id="mongodb-auth" data-pkey="auth"><span class="toggle-slider"></span></label></div>
+              <div class="form-group full-width"><label>Data Directory</label><input type="text" id="mongodb-dataDir" data-pkey="dataDir"></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Logging</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Logging</label><label class="toggle-switch small"><input type="checkbox" id="mongodb-logging" data-pkey="logging"><span class="toggle-slider"></span></label></div>
+              <div class="form-group"><label>Log Level</label><select id="mongodb-logLevel" data-pkey="logLevel"><option value="debug">Debug</option><option value="info">Info</option><option value="warning">Warning</option><option value="error">Error</option></select></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Service Behavior</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Auto Start</label><label class="toggle-switch small"><input type="checkbox" id="mongodb-autoStart" data-pkey="autoStart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Auto Restart on Crash</label><label class="toggle-switch small"><input type="checkbox" id="mongodb-autoRestart" data-pkey="autoRestart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Start All Group</label><label class="toggle-switch small"><input type="checkbox" id="mongodb-startAllGroup" data-pkey="startAllGroup"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section"><h3 class="section-title">Custom Config</h3><div class="form-group full-width"><textarea id="mongodb-customConfig" data-pkey="customConfig" rows="6" class="code-textarea" spellcheck="false"></textarea></div></div>
+        </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-explorer-mongodb">
+          <div class="db-viewer-container" id="db-viewer-mongodb" data-section="mongodb"></div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-logs-mongodb">
+          <div class="log-viewer" id="log-viewer-mongodb"></div>
+        </div>
+        </div>
+      </section>
+
+      <!-- MARIADB -->
+      <section class="panel" id="panel-mariadb">
+        <div class="panel-header">
+          <div class="panel-header-left"><h1>MariaDB</h1><p class="panel-subtitle">Configure MariaDB server</p></div>
+
+        </div>
+        <div class="profile-strip" id="profile-strip-mariadb"></div>
+        <div class="progress-bar-container hidden" id="progress-mariadb"><div class="progress-label"><span id="progress-label-mariadb">Downloading...</span></div><div class="progress-track"><div class="progress-fill" id="progress-fill-mariadb"></div></div></div>
+        <div class="install-status" id="install-status-mariadb"></div>
+        <div class="sub-tabs">
+          <div class="sub-tab-nav">
+            <button class="sub-tab-btn active" data-subtab="config-mariadb">⚙️ Connection</button>
+            <button class="sub-tab-btn" data-subtab="tuning-mariadb">🔧 Tuning</button>
+            <button class="sub-tab-btn" data-subtab="explorer-mariadb">🗄️ Explorer</button>
+            <button class="sub-tab-btn" data-subtab="logs-mariadb">📋 Logs</button>
+          </div>
+          <div class="sub-tab-pane active" id="subtab-config-mariadb">
+          <div class="panel-body" id="panel-body-mariadb">
+          <div class="config-section">
+            <h3 class="section-title">Version</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Version</label><select id="mariadb-version" data-pkey="version"></select></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Connection</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Host</label><input type="text" id="mariadb-host" data-pkey="host"></div>
+              <div class="form-group"><label>Port</label><input type="number" id="mariadb-port" data-pkey="port" min="1" max="65535"></div>
+              <div class="form-group"><label>Username</label><input type="text" id="mariadb-username" data-pkey="username"></div>
+              <div class="form-group"><label>Password</label><input type="password" id="mariadb-password" data-pkey="password" placeholder="Leave empty for no auth"></div>
+              <div class="form-group full-width"><label>Data Directory</label><input type="text" id="mariadb-dataDir" data-pkey="dataDir"></div>
+            </div>
+          </div>
+        </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-tuning-mariadb">
+          <div class="panel-body">
+          <div class="config-section">
+            <h3 class="section-title">Performance</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Max Connections</label><input type="number" id="mariadb-maxConnections" data-pkey="maxConnections" min="1"></div>
+              <div class="form-group"><label>InnoDB Buffer Pool Size</label><input type="text" id="mariadb-innodbBufferPoolSize" data-pkey="innodbBufferPoolSize"></div>
+              <div class="form-group"><label>InnoDB Log File Size</label><input type="text" id="mariadb-innodbLogFileSize" data-pkey="innodbLogFileSize"></div>
+              <div class="form-group"><label>Key Buffer Size</label><input type="text" id="mariadb-keyBufferSize" data-pkey="keyBufferSize"></div>
+              <div class="form-group"><label>Sort Buffer Size</label><input type="text" id="mariadb-sortBufferSize" data-pkey="sortBufferSize"></div>
+              <div class="form-group form-group-toggle"><label>Query Cache</label><label class="toggle-switch small"><input type="checkbox" id="mariadb-queryCache" data-pkey="queryCache"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Logging</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Logging</label><label class="toggle-switch small"><input type="checkbox" id="mariadb-logging" data-pkey="logging"><span class="toggle-slider"></span></label></div>
+              <div class="form-group"><label>Log Level</label><select id="mariadb-logLevel" data-pkey="logLevel"><option value="debug">Debug</option><option value="info">Info</option><option value="warning">Warning</option><option value="error">Error</option></select></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Service Behavior</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Auto Start</label><label class="toggle-switch small"><input type="checkbox" id="mariadb-autoStart" data-pkey="autoStart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Auto Restart on Crash</label><label class="toggle-switch small"><input type="checkbox" id="mariadb-autoRestart" data-pkey="autoRestart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Start All Group</label><label class="toggle-switch small"><input type="checkbox" id="mariadb-startAllGroup" data-pkey="startAllGroup"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section"><h3 class="section-title">Custom Config</h3><div class="form-group full-width"><textarea id="mariadb-customConfig" data-pkey="customConfig" rows="6" class="code-textarea" spellcheck="false"></textarea></div></div>
+          </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-explorer-mariadb">
+          <div class="db-viewer-container" id="db-viewer-mariadb" data-section="mariadb"></div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-logs-mariadb">
+          <div class="log-viewer" id="log-viewer-mariadb"></div>
+        </div>
+        </div>
+      </section>
+
+      <!-- PHP -->
+      <section class="panel" id="panel-php">
+        <div class="panel-header">
+          <div class="panel-header-left"><h1>PHP</h1><p class="panel-subtitle">Configure PHP interpreter</p></div>
+
+        </div>
+        <div class="profile-strip" id="profile-strip-php"></div>
+        <div class="progress-bar-container hidden" id="progress-php"><div class="progress-label"><span id="progress-label-php">Downloading...</span></div><div class="progress-track"><div class="progress-fill" id="progress-fill-php"></div></div></div>
+        <div class="install-status" id="install-status-php"></div>
+        <div class="sub-tabs">
+          <div class="sub-tab-nav">
+            <button class="sub-tab-btn active" data-subtab="config-php">⚙️ Configuration</button>
+            <button class="sub-tab-btn" data-subtab="extensions-php">🧩 Extensions</button>
+            <button class="sub-tab-btn" data-subtab="composer-php">📦 Composer</button>
+            <button class="sub-tab-btn" data-subtab="xdebug-php">🔧 Xdebug</button>
+            <button class="sub-tab-btn" data-subtab="logs-php">📋 Logs</button>
+          </div>
+          <div class="sub-tab-pane active" id="subtab-config-php">
+          <div class="panel-body" id="panel-body-php">
+          <div class="config-section">
+            <h3 class="section-title">Version</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>PHP Version</label><select id="php-version" data-pkey="version"><option value="8.3.4">8.3.4</option><option value="8.2.17">8.2.17</option><option value="8.1.27">8.1.27</option><option value="7.4.33">7.4.33</option></select></div>
+              <div class="form-group"><label>FPM Port</label><input type="number" id="php-port" data-pkey="port" min="1" max="65535"></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Runtime</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Max Execution Time (s)</label><input type="number" id="php-maxExecutionTime" data-pkey="maxExecutionTime" min="0"></div>
+              <div class="form-group"><label>Memory Limit</label><input type="text" id="php-memoryLimit" data-pkey="memoryLimit"></div>
+              <div class="form-group"><label>Upload Max Filesize</label><input type="text" id="php-uploadMaxFilesize" data-pkey="uploadMaxFilesize"></div>
+              <div class="form-group"><label>Post Max Size</label><input type="text" id="php-postMaxSize" data-pkey="postMaxSize"></div>
+              <div class="form-group"><label>Timezone</label><input type="text" id="php-timezone" data-pkey="timezone"></div>
+              <div class="form-group"><label>Error Reporting</label><select id="php-errorReporting" data-pkey="errorReporting"><option value="E_ALL">E_ALL</option><option value="E_ALL & ~E_NOTICE">E_ALL & ~E_NOTICE</option><option value="0">Off</option></select></div>
+              <div class="form-group form-group-toggle"><label>Display Errors</label><label class="toggle-switch small"><input type="checkbox" id="php-displayErrors" data-pkey="displayErrors"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>OPcache</label><label class="toggle-switch small"><input type="checkbox" id="php-opcache" data-pkey="opcache"><span class="toggle-slider"></span></label></div>
+              <div class="form-group"><label>OPcache Memory (MB)</label><input type="number" id="php-opcacheMemory" data-pkey="opcacheMemory" min="8"></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">FPM Pool Tuning</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Max Children</label><input type="number" id="php-fpmMaxChildren" data-pkey="fpmMaxChildren" min="1" max="512"></div>
+              <div class="form-group"><label>Start Servers</label><input type="number" id="php-fpmStartServers" data-pkey="fpmStartServers" min="1" max="64"></div>
+              <div class="form-group"><label>Min Spare Servers</label><input type="number" id="php-fpmMinSpare" data-pkey="fpmMinSpare" min="1" max="64"></div>
+              <div class="form-group"><label>Max Spare Servers</label><input type="number" id="php-fpmMaxSpare" data-pkey="fpmMaxSpare" min="1" max="64"></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Service Behavior</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Auto Start</label><label class="toggle-switch small"><input type="checkbox" id="php-autoStart" data-pkey="autoStart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Auto Restart on Crash</label><label class="toggle-switch small"><input type="checkbox" id="php-autoRestart" data-pkey="autoRestart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Start All Group</label><label class="toggle-switch small"><input type="checkbox" id="php-startAllGroup" data-pkey="startAllGroup"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section"><h3 class="section-title">Custom php.ini</h3><div class="form-group full-width"><textarea id="php-customIni" data-pkey="customIni" rows="6" class="code-textarea" spellcheck="false"></textarea></div></div>
+        </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-extensions-php">
+          <div class="panel-body">
+            <div class="config-section">
+              <h3 class="section-title">PHP Extensions</h3>
+              <div class="extensions-toolbar">
+                <input type="text" id="php-ext-search" class="ext-search-input" placeholder="Search extensions...">
+                <select id="php-ext-category" class="ext-category-select">
+                  <option value="all">All Categories</option>
+                </select>
+                <button class="btn btn-add" id="btn-add-php-ext">+ Add Custom</button>
+              </div>
+              <div class="extensions-grid" id="php-extensions-grid"></div>
+            </div>
+          </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-composer-php">
+          <div class="panel-body">
+            <div class="config-section">
+              <h3 class="section-title">Composer</h3>
+              <p class="section-desc">PHP dependency manager. Requires PHP to be installed.</p>
+              <div class="composer-toolbar">
+                <span class="composer-status" id="composer-status">Checking...</span>
+                <button class="btn btn-add" id="btn-install-composer">📥 Install Composer</button>
+              </div>
+            </div>
+            <div class="config-section">
+              <h3 class="section-title">Run Command</h3>
+              <div class="composer-run">
+                <div class="form-grid">
+                  <div class="form-group"><label>Working Directory</label><div class="input-with-btn"><input type="text" id="composer-cwd" placeholder="Project path..."><button class="btn btn-folder" id="btn-composer-cwd" title="Browse">📂</button></div></div>
+                </div>
+                <div class="composer-quick-actions">
+                  <button class="btn btn-add composer-cmd-btn" data-cmd="install">install</button>
+                  <button class="btn btn-add composer-cmd-btn" data-cmd="update">update</button>
+                  <button class="btn btn-add composer-cmd-btn" data-cmd="require">require</button>
+                  <button class="btn btn-add composer-cmd-btn" data-cmd="dump-autoload">dump-autoload</button>
+                </div>
+                <div class="composer-custom-cmd">
+                  <input type="text" id="composer-custom-input" placeholder="composer command (e.g. require laravel/framework)" class="composer-input">
+                  <button class="btn btn-save" id="btn-composer-run">▶ Run</button>
+                </div>
+                <div class="composer-output" id="composer-output"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-xdebug-php">
+          <div class="panel-body">
+            <div class="config-section">
+              <h3 class="section-title">Xdebug Configuration</h3>
+              <div class="form-grid">
+                <div class="form-group"><label>Mode</label><select id="php-xdebug-mode" data-pkey="xdebug.mode"><option value="off">Off</option><option value="debug">Debug</option><option value="develop">Develop</option><option value="coverage">Coverage</option><option value="profile">Profile</option></select></div>
+                <div class="form-group"><label>Start With Request</label><select id="php-xdebug-startWithRequest" data-pkey="xdebug.startWithRequest"><option value="yes">Yes</option><option value="no">No</option><option value="trigger">Trigger</option></select></div>
+                <div class="form-group"><label>Client Port</label><input type="number" id="php-xdebug-clientPort" data-pkey="xdebug.clientPort" min="1" max="65535"></div>
+                <div class="form-group"><label>Client Host</label><input type="text" id="php-xdebug-clientHost" data-pkey="xdebug.clientHost"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-logs-php">
+          <div class="log-viewer" id="log-viewer-php"></div>
+        </div>
+        </div>
+      </section>
+
+      <!-- NODE.JS -->
+      <section class="panel" id="panel-node">
+        <div class="panel-header">
+          <div class="panel-header-left"><h1>Node.js</h1><p class="panel-subtitle">Configure Node.js runtime</p></div>
+
+        </div>
+        <div class="profile-strip" id="profile-strip-node"></div>
+        <div class="progress-bar-container hidden" id="progress-node"><div class="progress-label"><span id="progress-label-node">Downloading...</span></div><div class="progress-track"><div class="progress-fill" id="progress-fill-node"></div></div></div>
+        <div class="install-status" id="install-status-node"></div>
+        <div class="sub-tabs">
+          <div class="sub-tab-nav">
+            <button class="sub-tab-btn active" data-subtab="config-node">⚙️ Configuration</button>
+            <button class="sub-tab-btn" data-subtab="projects-node">📁 Projects</button>
+            <button class="sub-tab-btn" data-subtab="logs-node">📋 Logs</button>
+          </div>
+          <div class="sub-tab-pane active" id="subtab-config-node">
+          <div class="panel-body" id="panel-body-node">
+          <div class="config-section">
+            <h3 class="section-title">Version & Entry</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Node Version</label><select id="node-version" data-pkey="version"><option value="22.0.0">22.0.0</option><option value="20.11.1">20.11.1 (LTS)</option><option value="18.19.1">18.19.1</option><option value="16.20.2">16.20.2</option></select></div>
+              <div class="form-group"><label>Port</label><input type="number" id="node-port" data-pkey="port" min="1" max="65535"></div>
+              <div class="form-group"><label>Project</label><select id="node-project"></select></div>
+              <div class="form-group"><label>Entry Point</label><input type="text" id="node-entryPoint" data-pkey="entryPoint"></div>
+              <div class="form-group"><label>Environment</label><select id="node-env" data-pkey="env"><option value="development">Development</option><option value="production">Production</option><option value="test">Test</option></select></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Runtime</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Auto Start</label><label class="toggle-switch small"><input type="checkbox" id="node-autoStart" data-pkey="autoStart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Auto Restart</label><label class="toggle-switch small"><input type="checkbox" id="node-autoRestart" data-pkey="autoRestart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Start All Group</label><label class="toggle-switch small"><input type="checkbox" id="node-startAllGroup" data-pkey="startAllGroup"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Watch Mode</label><label class="toggle-switch small"><input type="checkbox" id="node-watchMode" data-pkey="watchMode"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Inspector</label><label class="toggle-switch small"><input type="checkbox" id="node-inspectEnabled" data-pkey="inspectEnabled"><span class="toggle-slider"></span></label></div>
+              <div class="form-group"><label>Inspector Port</label><input type="number" id="node-inspectPort" data-pkey="inspectPort" min="1" max="65535"></div>
+            </div>
+          </div>
+          <div class="config-section"><h3 class="section-title">Environment Variables</h3><div id="node-envVars-container" class="env-vars-container"></div><button class="btn btn-add" id="btn-add-node-env">+ Add Variable</button></div>
+        </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-projects-node">
+          <div class="projects-manager" id="projects-node">
+            <div class="projects-toolbar">
+              <h3 class="section-title">Node.js Projects</h3>
+              <div class="projects-actions">
+                <input type="text" id="project-name-node" placeholder="Project name..." class="project-name-input">
+                <button class="btn btn-add" id="btn-create-project-node">+ Create Project</button>
+                <button class="btn btn-folder" id="btn-open-projects-node" title="Open Projects Folder">📂 Open Folder</button>
+              </div>
+            </div>
+            <div class="projects-list" id="projects-list-node"></div>
+          </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-logs-node">
+          <div class="log-viewer" id="log-viewer-node"></div>
+        </div>
+        </div>
+      </section>
+
+      <!-- GO -->
+      <section class="panel" id="panel-go">
+        <div class="panel-header">
+          <div class="panel-header-left"><h1>Go</h1><p class="panel-subtitle">Configure Go runtime</p></div>
+
+        </div>
+        <div class="profile-strip" id="profile-strip-go"></div>
+        <div class="progress-bar-container hidden" id="progress-go"><div class="progress-label"><span id="progress-label-go">Downloading...</span></div><div class="progress-track"><div class="progress-fill" id="progress-fill-go"></div></div></div>
+        <div class="install-status" id="install-status-go"></div>
+        <div class="sub-tabs">
+          <div class="sub-tab-nav">
+            <button class="sub-tab-btn active" data-subtab="config-go">⚙️ Configuration</button>
+            <button class="sub-tab-btn" data-subtab="projects-go">📁 Projects</button>
+            <button class="sub-tab-btn" data-subtab="logs-go">📋 Logs</button>
+          </div>
+          <div class="sub-tab-pane active" id="subtab-config-go">
+          <div class="panel-body" id="panel-body-go">
+          <div class="config-section">
+            <h3 class="section-title">Version & Entry</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Go Version</label><select id="go-version" data-pkey="version"><option value="1.22.1">1.22.1</option><option value="1.21.8">1.21.8</option><option value="1.20.14">1.20.14</option></select></div>
+              <div class="form-group"><label>Port</label><input type="number" id="go-port" data-pkey="port" min="1" max="65535"></div>
+              <div class="form-group"><label>Project</label><select id="go-project"></select></div>
+              <div class="form-group"><label>Entry Point</label><input type="text" id="go-entryPoint" data-pkey="entryPoint"></div>
+              <div class="form-group"><label>Build Flags</label><input type="text" id="go-buildFlags" data-pkey="buildFlags"></div>
+              <div class="form-group"><label>Environment</label><select id="go-env" data-pkey="env"><option value="development">Development</option><option value="production">Production</option></select></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Runtime</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Auto Start</label><label class="toggle-switch small"><input type="checkbox" id="go-autoStart" data-pkey="autoStart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Auto Restart</label><label class="toggle-switch small"><input type="checkbox" id="go-autoRestart" data-pkey="autoRestart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Start All Group</label><label class="toggle-switch small"><input type="checkbox" id="go-startAllGroup" data-pkey="startAllGroup"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section"><h3 class="section-title">Environment Variables</h3><div id="go-envVars-container" class="env-vars-container"></div><button class="btn btn-add" id="btn-add-go-env">+ Add Variable</button></div>
+        </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-projects-go">
+          <div class="projects-manager" id="projects-go">
+            <div class="projects-toolbar">
+              <h3 class="section-title">Go Projects</h3>
+              <div class="projects-actions">
+                <input type="text" id="project-name-go" placeholder="Project name..." class="project-name-input">
+                <button class="btn btn-add" id="btn-create-project-go">+ Create Project</button>
+                <button class="btn btn-folder" id="btn-open-projects-go" title="Open Projects Folder">📂 Open Folder</button>
+              </div>
+            </div>
+            <div class="projects-list" id="projects-list-go"></div>
+          </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-logs-go">
+          <div class="log-viewer" id="log-viewer-go"></div>
+        </div>
+        </div>
+      </section>
+
+      <!-- BUN -->
+      <section class="panel" id="panel-bun">
+        <div class="panel-header">
+          <div class="panel-header-left"><h1>Bun</h1><p class="panel-subtitle">Configure Bun runtime</p></div>
+        </div>
+        <div class="profile-strip" id="profile-strip-bun"></div>
+        <div class="progress-bar-container hidden" id="progress-bun"><div class="progress-label"><span id="progress-label-bun">Downloading...</span></div><div class="progress-track"><div class="progress-fill" id="progress-fill-bun"></div></div></div>
+        <div class="install-status" id="install-status-bun"></div>
+        <div class="sub-tabs">
+          <div class="sub-tab-nav">
+            <button class="sub-tab-btn active" data-subtab="config-bun">⚙️ Configuration</button>
+            <button class="sub-tab-btn" data-subtab="projects-bun">📁 Projects</button>
+            <button class="sub-tab-btn" data-subtab="logs-bun">📋 Logs</button>
+          </div>
+          <div class="sub-tab-pane active" id="subtab-config-bun">
+          <div class="panel-body" id="panel-body-bun">
+          <div class="config-section">
+            <h3 class="section-title">Version & Entry</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Bun Version</label><select id="bun-version" data-pkey="version"></select></div>
+              <div class="form-group"><label>Port</label><input type="number" id="bun-port" data-pkey="port" min="1" max="65535"></div>
+              <div class="form-group"><label>Project</label><select id="bun-project"></select></div>
+              <div class="form-group"><label>Entry Point</label><input type="text" id="bun-entryPoint" data-pkey="entryPoint"></div>
+              <div class="form-group"><label>Environment</label><select id="bun-env" data-pkey="env"><option value="development">Development</option><option value="production">Production</option><option value="test">Test</option></select></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Runtime</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Auto Start</label><label class="toggle-switch small"><input type="checkbox" id="bun-autoStart" data-pkey="autoStart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Auto Restart</label><label class="toggle-switch small"><input type="checkbox" id="bun-autoRestart" data-pkey="autoRestart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Start All Group</label><label class="toggle-switch small"><input type="checkbox" id="bun-startAllGroup" data-pkey="startAllGroup"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Watch Mode</label><label class="toggle-switch small"><input type="checkbox" id="bun-watchMode" data-pkey="watchMode"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section"><h3 class="section-title">Environment Variables</h3><div id="bun-envVars-container" class="env-vars-container"></div><button class="btn btn-add" id="btn-add-bun-env">+ Add Variable</button></div>
+        </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-projects-bun">
+          <div class="projects-manager" id="projects-bun">
+            <div class="projects-toolbar">
+              <h3 class="section-title">Bun Projects</h3>
+              <div class="projects-actions">
+                <input type="text" id="project-name-bun" placeholder="Project name..." class="project-name-input">
+                <button class="btn btn-add" id="btn-create-project-bun">+ Create Project</button>
+                <button class="btn btn-folder" id="btn-open-projects-bun" title="Open Projects Folder">📂 Open Folder</button>
+              </div>
+            </div>
+            <div class="projects-list" id="projects-list-bun"></div>
+          </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-logs-bun">
+          <div class="log-viewer" id="log-viewer-bun"></div>
+        </div>
+        </div>
+      </section>
+
+      <!-- REDIS -->
+      <section class="panel" id="panel-redis">
+        <div class="panel-header">
+          <div class="panel-header-left"><h1>Redis</h1><p class="panel-subtitle">Configure Redis cache</p></div>
+
+        </div>
+        <div class="profile-strip" id="profile-strip-redis"></div>
+        <div class="progress-bar-container hidden" id="progress-redis"><div class="progress-label"><span id="progress-label-redis">Downloading...</span></div><div class="progress-track"><div class="progress-fill" id="progress-fill-redis"></div></div></div>
+        <div class="install-status" id="install-status-redis"></div>
+        <div class="sub-tabs">
+          <div class="sub-tab-nav">
+            <button class="sub-tab-btn active" data-subtab="config-redis">⚙️ Configuration</button>
+            <button class="sub-tab-btn" data-subtab="logs-redis">📋 Logs</button>
+          </div>
+          <div class="sub-tab-pane active" id="subtab-config-redis">
+          <div class="panel-body" id="panel-body-redis">
+          <div class="config-section">
+            <h3 class="section-title">Version & Connection</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Redis Version</label><select id="redis-version" data-pkey="version"><option value="7.2.4">7.2.4</option><option value="7.0.15">7.0.15</option></select></div>
+              <div class="form-group"><label>Port</label><input type="number" id="redis-port" data-pkey="port" min="1" max="65535"></div>
+              <div class="form-group"><label>Host</label><input type="text" id="redis-host" data-pkey="host"></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Memory & Policy</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Max Memory</label><input type="text" id="redis-maxMemory" data-pkey="maxMemory"></div>
+              <div class="form-group"><label>Eviction Policy</label><select id="redis-maxMemoryPolicy" data-pkey="maxMemoryPolicy"><option value="noeviction">No Eviction</option><option value="allkeys-lru">All Keys LRU</option><option value="allkeys-lfu">All Keys LFU</option><option value="volatile-lru">Volatile LRU</option><option value="volatile-lfu">Volatile LFU</option><option value="allkeys-random">All Keys Random</option><option value="volatile-random">Volatile Random</option><option value="volatile-ttl">Volatile TTL</option></select></div>
+              <div class="form-group"><label>Databases</label><input type="number" id="redis-databases" data-pkey="databases" min="1"></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Persistence & Security</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Append Only File</label><label class="toggle-switch small"><input type="checkbox" id="redis-appendOnly" data-pkey="appendOnly"><span class="toggle-slider"></span></label></div>
+              <div class="form-group"><label>RDB Save Intervals</label><input type="text" id="redis-save" data-pkey="save" placeholder="3600 1 300 100 60 10000"></div>
+              <div class="form-group"><label>Password</label><input type="password" id="redis-requirePass" data-pkey="requirePass" placeholder="Leave empty for no auth"></div>
+              <div class="form-group"><label>Log Level</label><select id="redis-logLevel" data-pkey="logLevel"><option value="debug">Debug</option><option value="verbose">Verbose</option><option value="notice">Notice</option><option value="warning">Warning</option></select></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Service Behavior</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Auto Start</label><label class="toggle-switch small"><input type="checkbox" id="redis-autoStart" data-pkey="autoStart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Auto Restart on Crash</label><label class="toggle-switch small"><input type="checkbox" id="redis-autoRestart" data-pkey="autoRestart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Start All Group</label><label class="toggle-switch small"><input type="checkbox" id="redis-startAllGroup" data-pkey="startAllGroup"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section"><h3 class="section-title">Custom Config</h3><div class="form-group full-width"><textarea id="redis-customConfig" data-pkey="customConfig" rows="6" class="code-textarea" spellcheck="false"></textarea></div></div>
+        </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-logs-redis">
+          <div class="log-viewer" id="log-viewer-redis"></div>
+        </div>
+        </div>
+      </section>
+
+      <!-- MEMCACHED -->
+      <section class="panel" id="panel-memcached">
+        <div class="panel-header">
+          <div class="panel-header-left"><h1>Memcached</h1><p class="panel-subtitle">Configure Memcached cache</p></div>
+        </div>
+        <div class="profile-strip" id="profile-strip-memcached"></div>
+        <div class="progress-bar-container hidden" id="progress-memcached"><div class="progress-label"><span id="progress-label-memcached">Downloading...</span></div><div class="progress-track"><div class="progress-fill" id="progress-fill-memcached"></div></div></div>
+        <div class="install-status" id="install-status-memcached"></div>
+        <div class="sub-tabs">
+          <div class="sub-tab-nav">
+            <button class="sub-tab-btn active" data-subtab="config-memcached">⚙️ Configuration</button>
+            <button class="sub-tab-btn" data-subtab="logs-memcached">📋 Logs</button>
+          </div>
+          <div class="sub-tab-pane active" id="subtab-config-memcached">
+          <div class="panel-body" id="panel-body-memcached">
+          <div class="config-section">
+            <h3 class="section-title">Version & Connection</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Memcached Version</label><select id="memcached-version" data-pkey="version"></select></div>
+              <div class="form-group"><label>Port</label><input type="number" id="memcached-port" data-pkey="port" min="1" max="65535"></div>
+              <div class="form-group"><label>Host</label><input type="text" id="memcached-host" data-pkey="host"></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Performance</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Max Memory (MB)</label><input type="number" id="memcached-maxMemory" data-pkey="maxMemory" min="1"></div>
+              <div class="form-group"><label>Threads</label><input type="number" id="memcached-threads" data-pkey="threads" min="1" max="64"></div>
+              <div class="form-group"><label>Max Connections</label><input type="number" id="memcached-maxConnections" data-pkey="maxConnections" min="1"></div>
+              <div class="form-group form-group-toggle"><label>Verbose Logging</label><label class="toggle-switch small"><input type="checkbox" id="memcached-verboseLogging" data-pkey="verboseLogging"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Service Behavior</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Auto Start</label><label class="toggle-switch small"><input type="checkbox" id="memcached-autoStart" data-pkey="autoStart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Auto Restart on Crash</label><label class="toggle-switch small"><input type="checkbox" id="memcached-autoRestart" data-pkey="autoRestart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Start All Group</label><label class="toggle-switch small"><input type="checkbox" id="memcached-startAllGroup" data-pkey="startAllGroup"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section"><h3 class="section-title">Custom Config</h3><div class="form-group full-width"><textarea id="memcached-customConfig" data-pkey="customConfig" rows="6" class="code-textarea" spellcheck="false"></textarea></div></div>
+        </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-logs-memcached">
+          <div class="log-viewer" id="log-viewer-memcached"></div>
+        </div>
+        </div>
+      </section>
+
+      <!-- MINIO -->
+      <section class="panel" id="panel-minio">
+        <div class="panel-header">
+          <div class="panel-header-left"><h1>MinIO</h1><p class="panel-subtitle">S3-compatible object storage server</p></div>
+        </div>
+        <div class="profile-strip" id="profile-strip-minio"></div>
+        <div class="progress-bar-container hidden" id="progress-minio"><div class="progress-label"><span id="progress-label-minio">Downloading...</span></div><div class="progress-track"><div class="progress-fill" id="progress-fill-minio"></div></div></div>
+        <div class="install-status" id="install-status-minio"></div>
+        <div class="sub-tabs">
+          <div class="sub-tab-nav">
+            <button class="sub-tab-btn active" data-subtab="config-minio">⚙️ Configuration</button>
+            <button class="sub-tab-btn" data-subtab="logs-minio">📋 Logs</button>
+          </div>
+          <div class="sub-tab-pane active" id="subtab-config-minio">
+          <div class="panel-body" id="panel-body-minio">
+          <div class="config-section">
+            <h3 class="section-title">Version</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>MinIO Version</label><select id="minio-version" data-pkey="version"></select></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Network</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>API Port</label><input type="number" id="minio-port" data-pkey="port" min="1" max="65535"></div>
+              <div class="form-group"><label>Console Port</label><input type="number" id="minio-consolePort" data-pkey="consolePort" min="1" max="65535"></div>
+              <div class="form-group"><label>Host</label><input type="text" id="minio-host" data-pkey="host"></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Storage</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Data Directory</label><input type="text" id="minio-dataDir" data-pkey="dataDir"></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Credentials</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Root User</label><input type="text" id="minio-rootUser" data-pkey="rootUser"></div>
+              <div class="form-group"><label>Root Password</label><input type="password" id="minio-rootPassword" data-pkey="rootPassword"></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Service Behavior</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Web Console</label><label class="toggle-switch small"><input type="checkbox" id="minio-browserEnabled" data-pkey="browserEnabled"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Auto Start</label><label class="toggle-switch small"><input type="checkbox" id="minio-autoStart" data-pkey="autoStart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Auto Restart on Crash</label><label class="toggle-switch small"><input type="checkbox" id="minio-autoRestart" data-pkey="autoRestart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Start All Group</label><label class="toggle-switch small"><input type="checkbox" id="minio-startAllGroup" data-pkey="startAllGroup"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          </div>
+          </div>
+          <div class="sub-tab-pane" id="subtab-logs-minio">
+            <div class="log-viewer" id="log-viewer-minio"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PYTHON -->
+      <section class="panel" id="panel-python">
+        <div class="panel-header">
+          <div class="panel-header-left"><h1>Python</h1><p class="panel-subtitle">Configure Python runtime</p></div>
+        </div>
+        <div class="profile-strip" id="profile-strip-python"></div>
+        <div class="progress-bar-container hidden" id="progress-python"><div class="progress-label"><span id="progress-label-python">Downloading...</span></div><div class="progress-track"><div class="progress-fill" id="progress-fill-python"></div></div></div>
+        <div class="install-status" id="install-status-python"></div>
+        <div class="sub-tabs">
+          <div class="sub-tab-nav">
+            <button class="sub-tab-btn active" data-subtab="config-python">⚙️ Configuration</button>
+            <button class="sub-tab-btn" data-subtab="projects-python">📁 Projects</button>
+            <button class="sub-tab-btn" data-subtab="logs-python">📋 Logs</button>
+          </div>
+          <div class="sub-tab-pane active" id="subtab-config-python">
+          <div class="panel-body" id="panel-body-python">
+          <div class="config-section">
+            <h3 class="section-title">Version & Entry</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Python Version</label><select id="python-version" data-pkey="version"></select></div>
+              <div class="form-group"><label>Port</label><input type="number" id="python-port" data-pkey="port" min="1" max="65535"></div>
+              <div class="form-group"><label>Project</label><select id="python-project"></select></div>
+              <div class="form-group"><label>Entry Point</label><input type="text" id="python-entryPoint" data-pkey="entryPoint"></div>
+              <div class="form-group"><label>Environment</label><select id="python-env" data-pkey="env"><option value="development">Development</option><option value="production">Production</option><option value="test">Test</option></select></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Runtime</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Auto Start</label><label class="toggle-switch small"><input type="checkbox" id="python-autoStart" data-pkey="autoStart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Auto Restart</label><label class="toggle-switch small"><input type="checkbox" id="python-autoRestart" data-pkey="autoRestart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Start All Group</label><label class="toggle-switch small"><input type="checkbox" id="python-startAllGroup" data-pkey="startAllGroup"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section"><h3 class="section-title">Environment Variables</h3><div id="python-envVars-container" class="env-vars-container"></div><button class="btn btn-add" id="btn-add-python-env">+ Add Variable</button></div>
+        </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-projects-python">
+          <div class="projects-manager" id="projects-python">
+            <div class="projects-toolbar">
+              <h3 class="section-title">Python Projects</h3>
+              <div class="projects-actions">
+                <input type="text" id="project-name-python" placeholder="Project name..." class="project-name-input">
+                <button class="btn btn-add" id="btn-create-project-python">+ Create Project</button>
+                <button class="btn btn-folder" id="btn-open-projects-python" title="Open Projects Folder">📂 Open Folder</button>
+              </div>
+            </div>
+            <div class="projects-list" id="projects-list-python"></div>
+          </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-logs-python">
+          <div class="log-viewer" id="log-viewer-python"></div>
+        </div>
+        </div>
+      </section>
+
+      <!-- DENO -->
+      <section class="panel" id="panel-deno">
+        <div class="panel-header">
+          <div class="panel-header-left"><h1>Deno</h1><p class="panel-subtitle">Configure Deno runtime</p></div>
+        </div>
+        <div class="profile-strip" id="profile-strip-deno"></div>
+        <div class="progress-bar-container hidden" id="progress-deno"><div class="progress-label"><span id="progress-label-deno">Downloading...</span></div><div class="progress-track"><div class="progress-fill" id="progress-fill-deno"></div></div></div>
+        <div class="install-status" id="install-status-deno"></div>
+        <div class="sub-tabs">
+          <div class="sub-tab-nav">
+            <button class="sub-tab-btn active" data-subtab="config-deno">⚙️ Configuration</button>
+            <button class="sub-tab-btn" data-subtab="projects-deno">📁 Projects</button>
+            <button class="sub-tab-btn" data-subtab="logs-deno">📋 Logs</button>
+          </div>
+          <div class="sub-tab-pane active" id="subtab-config-deno">
+          <div class="panel-body" id="panel-body-deno">
+          <div class="config-section">
+            <h3 class="section-title">Version & Entry</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Deno Version</label><select id="deno-version" data-pkey="version"></select></div>
+              <div class="form-group"><label>Port</label><input type="number" id="deno-port" data-pkey="port" min="1" max="65535"></div>
+              <div class="form-group"><label>Project</label><select id="deno-project"></select></div>
+              <div class="form-group"><label>Entry Point</label><input type="text" id="deno-entryPoint" data-pkey="entryPoint"></div>
+              <div class="form-group"><label>Environment</label><select id="deno-env" data-pkey="env"><option value="development">Development</option><option value="production">Production</option><option value="test">Test</option></select></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Permissions</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Allow Net</label><label class="toggle-switch small"><input type="checkbox" id="deno-allowNet" data-pkey="allowNet"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Allow Read</label><label class="toggle-switch small"><input type="checkbox" id="deno-allowRead" data-pkey="allowRead"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Allow Write</label><label class="toggle-switch small"><input type="checkbox" id="deno-allowWrite" data-pkey="allowWrite"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Allow Env</label><label class="toggle-switch small"><input type="checkbox" id="deno-allowEnv" data-pkey="allowEnv"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Allow Run</label><label class="toggle-switch small"><input type="checkbox" id="deno-allowRun" data-pkey="allowRun"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Allow Sys</label><label class="toggle-switch small"><input type="checkbox" id="deno-allowSys" data-pkey="allowSys"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Allow FFI</label><label class="toggle-switch small"><input type="checkbox" id="deno-allowFfi" data-pkey="allowFfi"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Watch Mode</label><label class="toggle-switch small"><input type="checkbox" id="deno-watchMode" data-pkey="watchMode"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Auto Start</label><label class="toggle-switch small"><input type="checkbox" id="deno-autoStart" data-pkey="autoStart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Auto Restart</label><label class="toggle-switch small"><input type="checkbox" id="deno-autoRestart" data-pkey="autoRestart"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Start All Group</label><label class="toggle-switch small"><input type="checkbox" id="deno-startAllGroup" data-pkey="startAllGroup"><span class="toggle-slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-section"><h3 class="section-title">Environment Variables</h3><div id="deno-envVars-container" class="env-vars-container"></div><button class="btn btn-add" id="btn-add-deno-env">+ Add Variable</button></div>
+        </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-projects-deno">
+          <div class="projects-manager" id="projects-deno">
+            <div class="projects-toolbar">
+              <h3 class="section-title">Deno Projects</h3>
+              <div class="projects-actions">
+                <input type="text" id="project-name-deno" placeholder="Project name..." class="project-name-input">
+                <button class="btn btn-add" id="btn-create-project-deno">+ Create Project</button>
+                <button class="btn btn-folder" id="btn-open-projects-deno" title="Open Projects Folder">📂 Open Folder</button>
+              </div>
+            </div>
+            <div class="projects-list" id="projects-list-deno"></div>
+          </div>
+        </div>
+        <div class="sub-tab-pane" id="subtab-logs-deno">
+          <div class="log-viewer" id="log-viewer-deno"></div>
+        </div>
+        </div>
+      </section>
+
+      <!-- TERMINAL -->
+      <section class="panel" id="panel-terminal">
+        <div class="panel-header">
+          <div class="panel-header-left"><h1>Terminal</h1><p class="panel-subtitle">Built-in shell with all server binaries in PATH</p></div>
+          <div class="panel-header-right">
+            <button class="btn btn-add" id="btn-new-terminal">+ New Terminal</button>
+          </div>
+        </div>
+        <div class="terminal-tabs" id="terminal-tabs"></div>
+        <div class="terminal-container" id="terminal-container">
+          <div class="terminal-empty" id="terminal-empty">
+            <div class="terminal-empty-icon">💻</div>
+            <div class="terminal-empty-text">Click "+ New Terminal" to open a shell</div>
+            <div class="terminal-empty-hint">All active server binaries (php, node, mysql, etc.) are automatically available in PATH</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- APP STORE -->
+      <section class="panel" id="panel-appstore">
+        <div class="panel-header"><h1>📦 App Store</h1><p class="panel-subtitle">Install and manage web applications</p></div>
+        <div class="panel-body">
+          <div class="appstore-toolbar">
+            <input type="text" class="appstore-search" id="appstore-search" placeholder="🔍 Search apps..." autocomplete="off" spellcheck="false">
+            <button class="btn btn-small btn-add-git-app" id="btn-add-git-app">🔗 Add from Git</button>
+            <div class="appstore-filters" id="appstore-filters"></div>
+          </div>
+          <div class="appstore-grid" id="appstore-grid"></div>
+        </div>
+
+        <!-- Add from Git modal -->
+        <div class="modal-overlay hidden" id="git-app-modal">
+          <div class="modal git-app-modal">
+            <div class="modal-header"><h3>🔗 Add App from Git</h3><button class="modal-close" id="git-app-modal-close">✕</button></div>
+            <div class="modal-body">
+              <div class="form-group"><label>App Name *</label><input type="text" id="git-app-name" placeholder="e.g. My Laravel App" autocomplete="off"></div>
+              <div class="form-group"><label>Git Repository URL *</label><input type="text" id="git-app-url" placeholder="https://github.com/user/repo.git" autocomplete="off"></div>
+              <div class="form-group"><label>Branch</label><input type="text" id="git-app-branch" placeholder="main" value="main" autocomplete="off"></div>
+              <div class="form-group"><label>Entry Point</label><input type="text" id="git-app-entry" placeholder="index.php or public/index.php" value="index.php" autocomplete="off"></div>
+              <div class="form-group"><label>Category</label><select id="git-app-category"><option value="Custom">Custom</option><option value="CMS">CMS</option><option value="Frameworks">Frameworks</option><option value="Tools">Tools</option><option value="DevOps">DevOps</option></select></div>
+              <div class="form-group"><label>Database Name (auto-created)</label><input type="text" id="git-app-database" placeholder="Leave empty if not needed" autocomplete="off"></div>
+              <div class="form-group"><label>Description</label><input type="text" id="git-app-desc" placeholder="Short description" autocomplete="off"></div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-small" id="git-app-cancel">Cancel</button>
+              <button class="btn btn-small btn-primary" id="git-app-add">➕ Add App</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Instance name prompt modal -->
+        <div class="modal-overlay hidden" id="instance-name-modal">
+          <div class="modal">
+            <div class="modal-header"><h3>📦 Install App</h3><button class="modal-close" id="instance-name-modal-close">✕</button></div>
+            <div class="modal-body">
+              <div class="form-group"><label>Instance name (folder name in www/apps/):</label><input type="text" id="instance-name-input" placeholder="e.g. my-app" autocomplete="off"></div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-small" id="instance-name-cancel">Cancel</button>
+              <button class="btn btn-small btn-primary" id="instance-name-confirm">⬇️ Install</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- GENERAL -->
+      <section class="panel" id="panel-general">
+        <div class="panel-header"><h1>General Settings</h1><p class="panel-subtitle">Application preferences</p></div>
+        <div class="panel-body">
+          <div class="config-section">
+            <h3 class="section-title">Application</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle"><label>Auto Start on Boot</label><label class="toggle-switch small"><input type="checkbox" id="general-autoStartOnBoot" data-section="general" data-key="autoStartOnBoot"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Start Minimized</label><label class="toggle-switch small"><input type="checkbox" id="general-startMinimized" data-section="general" data-key="startMinimized"><span class="toggle-slider"></span></label></div>
+              <div class="form-group form-group-toggle"><label>Check for Updates</label><label class="toggle-switch small"><input type="checkbox" id="general-checkUpdates" data-section="general" data-key="checkUpdates"><span class="toggle-slider"></span></label></div>
+              <div class="form-group"><label>Theme</label><select id="general-theme" data-section="general" data-key="theme"><option value="dark">Dark</option><option value="light">Light</option></select></div>
+              <div class="form-group"><label>Language</label><select id="general-language" data-section="general" data-key="language"><option value="en">English</option><option value="pl">Polski</option></select></div>
+              <div class="form-group"><label>Log Level</label><select id="general-logLevel" data-section="general" data-key="logLevel"><option value="debug">Debug</option><option value="info">Info</option><option value="warning">Warning</option><option value="error">Error</option></select></div>
+              <div class="form-group"><label>Stop Timeout (ms)</label><input type="number" id="general-stopTimeout" data-section="general" data-key="stopTimeout" min="1000" max="60000" step="1000"></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">System PATH Management</h3>
+            <p class="section-desc">Add active server binaries to your Windows user PATH so you can use php, node, mysql, etc. from any terminal.</p>
+            <div class="path-management">
+              <button class="btn btn-path-add" id="btn-path-toggle">📁 Add to System PATH</button>
+              <div class="path-entries" id="path-entries"></div>
+            </div>
+          </div>
+          <div class="config-section">
+            <h3 class="section-title">Configuration Backup</h3>
+            <div class="form-grid">
+              <div class="form-group"><button class="btn btn-save" id="btn-config-export">📤 Export Config</button></div>
+              <div class="form-group"><button class="btn btn-add" id="btn-config-import">📥 Import Config</button></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Save Bar -->
+    </main>
+  </div>
+  <!-- Profile Creation Modal -->
+  <div class="modal-overlay hidden" id="profile-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title" id="profile-modal-title">New Profile</h3>
+        <button class="modal-close" id="profile-modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Profile Name</label>
+          <input type="text" id="profile-modal-name" placeholder="e.g. My Production Server">
+        </div>
+        <div class="form-group hidden" id="profile-modal-type-group">
+          <label>Type</label>
+          <select id="profile-modal-type"></select>
+        </div>
+        <div class="form-group">
+          <label>Version</label>
+          <select id="profile-modal-version"></select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-discard" id="profile-modal-cancel">Cancel</button>
+        <button class="btn btn-save" id="profile-modal-confirm">Create Profile</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Command Palette -->
+  <div class="command-palette-overlay hidden" id="command-palette">
+    <div class="command-palette">
+      <input type="text" class="command-palette-input" id="command-palette-input" placeholder="Search services, actions, settings..." autocomplete="off" spellcheck="false">
+      <div class="command-palette-results" id="command-palette-results"></div>
+    </div>
+  </div>
+
+  <!-- Keyboard Shortcuts Overlay -->
+  <div class="modal-overlay hidden" id="shortcuts-modal">
+    <div class="modal shortcuts-modal">
+      <div class="modal-header"><h3>Keyboard Shortcuts</h3><button class="modal-close" id="shortcuts-close">✕</button></div>
+      <div class="modal-body">
+        <div class="shortcuts-grid">
+          <div class="shortcut-group">
+            <h4>General</h4>
+            <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>K</kbd><span>Command Palette</span></div>
+            <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>/</kbd><span>Keyboard Shortcuts</span></div>
+            <div class="shortcut-row"><kbd>Esc</kbd><span>Close Modal / Palette</span></div>
+          </div>
+          <div class="shortcut-group">
+            <h4>Navigation</h4>
+            <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>1-9</kbd><span>Switch Panel</span></div>
+            <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>D</kbd><span>Dashboard</span></div>
+          </div>
+          <div class="shortcut-group">
+            <h4>Database Viewer</h4>
+            <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>Enter</kbd><span>Execute Query</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

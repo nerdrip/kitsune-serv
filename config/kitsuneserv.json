@@ -1,0 +1,776 @@
+{
+  "apache": {
+    "enabled": true,
+    "activeProfileId": "mo0eiolro60i6",
+    "profiles": [
+      {
+        "id": "mo0eiolro60i6",
+        "name": "Apache 2.4.66",
+        "version": "2.4.66",
+        "port": 80,
+        "sslPort": 443,
+        "sslEnabled": false,
+        "documentRoot": "./www",
+        "serverName": "localhost",
+        "directoryIndex": "index.html index.htm index.php",
+        "modRewrite": true,
+        "modSsl": false,
+        "modProxy": false,
+        "modProxyHttp": false,
+        "modProxyFcgi": true,
+        "modHeaders": true,
+        "modDeflate": true,
+        "modExpires": false,
+        "modSecurity": false,
+        "modPhp": false,
+        "maxRequestWorkers": 150,
+        "serverLimit": 16,
+        "keepaliveTimeout": 5,
+        "maxKeepAliveRequests": 100,
+        "timeout": 300,
+        "keepAlive": true,
+        "accessLog": true,
+        "errorLog": true,
+        "logLevel": "emerg",
+        "customConfig": "",
+        "autoStart": false,
+        "autoRestart": false,
+        "startAllGroup": false
+      }
+    ]
+  },
+  "nginx": {
+    "enabled": true,
+    "activeProfileId": "mo1fg7cg34ts1",
+    "profiles": [
+      {
+        "id": "mo1fg7cg34ts1",
+        "name": "Nginx 1.27.4",
+        "version": "1.27.4",
+        "port": 8080,
+        "sslPort": 443,
+        "sslEnabled": false,
+        "documentRoot": "./www",
+        "serverName": "localhost",
+        "autoStart": false,
+        "autoRestart": false,
+        "reverseProxy": false,
+        "corsEnabled": false,
+        "upstreamName": "backend",
+        "upstreamServer": "127.0.0.1",
+        "upstreamPort": 3000,
+        "loadBalancing": "round_robin",
+        "proxyPass": "",
+        "proxyConnectTimeout": 60,
+        "proxyReadTimeout": 60,
+        "proxySendTimeout": 60,
+        "proxyBuffering": true,
+        "proxyBufferSize": "4k",
+        "headerRealIp": true,
+        "headerForwardedFor": true,
+        "headerForwardedProto": true,
+        "headerHost": true,
+        "websocket": false,
+        "workerProcesses": "auto",
+        "workerConnections": 1024,
+        "keepaliveTimeout": 65,
+        "clientMaxBodySize": "100m",
+        "gzip": true,
+        "sendfile": true,
+        "rateLimitEnabled": false,
+        "rateLimitRate": "10r/s",
+        "rateLimitBurst": 20,
+        "proxyCacheEnabled": false,
+        "proxyCacheValid": "60m",
+        "proxyCachePath": "",
+        "accessLog": true,
+        "errorLog": true,
+        "customConfig": "",
+        "startAllGroup": true
+      }
+    ]
+  },
+  "postgresql": {
+    "enabled": true,
+    "activeProfileId": "mnzagfi9i41xt",
+    "profiles": [
+      {
+        "id": "mnzagfi9i41xt",
+        "name": "PostgreSQL 17.4",
+        "type": "postgresql",
+        "version": "17.4",
+        "port": 5432,
+        "host": "127.0.0.1",
+        "username": "kitsuneserv",
+        "password": "",
+        "dataDir": "./data/postgresql-17.4",
+        "maxConnections": 100,
+        "sharedBuffers": "128MB",
+        "workMem": "4MB",
+        "maintenanceWorkMem": "64MB",
+        "walLevel": "minimal",
+        "logging": true,
+        "logLevel": "debug",
+        "customConfig": "",
+        "autoStart": false,
+        "autoRestart": false,
+        "startAllGroup": false
+      }
+    ]
+  },
+  "mysql": {
+    "enabled": true,
+    "activeProfileId": "mnzagfi9h72r9",
+    "profiles": [
+      {
+        "id": "mnzagfi9h72r9",
+        "name": "MySQL 9.2.0",
+        "type": "mysql",
+        "version": "9.2.0",
+        "port": 3306,
+        "host": "127.0.0.1",
+        "username": "root",
+        "password": "",
+        "dataDir": "./data/mysql-8.4.4",
+        "maxConnections": 100,
+        "sharedBuffers": "128MB",
+        "workMem": "4MB",
+        "maintenanceWorkMem": "64MB",
+        "walLevel": "replica",
+        "logging": true,
+        "logLevel": "debug",
+        "customConfig": "",
+        "innodbBufferPoolSize": "",
+        "innodbLogFileSize": "",
+        "keyBufferSize": "",
+        "sortBufferSize": "",
+        "autoStart": false,
+        "autoRestart": false,
+        "startAllGroup": false
+      }
+    ]
+  },
+  "mariadb": {
+    "enabled": true,
+    "activeProfileId": "mnzagfi958222",
+    "profiles": [
+      {
+        "id": "mnzagfi958222",
+        "name": "MariaDB 11.7.2",
+        "type": "mariadb",
+        "version": "11.7.2",
+        "port": 3306,
+        "host": "127.0.0.1",
+        "username": "root",
+        "password": "",
+        "dataDir": "./data/mariadb-11.4.5",
+        "maxConnections": 100,
+        "sharedBuffers": "128MB",
+        "workMem": "4MB",
+        "maintenanceWorkMem": "64MB",
+        "walLevel": "replica",
+        "logging": true,
+        "logLevel": "debug",
+        "customConfig": "",
+        "innodbBufferPoolSize": "",
+        "innodbLogFileSize": "",
+        "keyBufferSize": "",
+        "sortBufferSize": "",
+        "autoStart": false,
+        "autoRestart": false,
+        "startAllGroup": true
+      }
+    ]
+  },
+  "mongodb": {
+    "enabled": true,
+    "activeProfileId": "mnzagfi9d98y5",
+    "profiles": [
+      {
+        "id": "mnzagfi9d98y5",
+        "name": "MongoDB 8.0.6",
+        "type": "mongodb",
+        "version": "8.0.6",
+        "port": 27017,
+        "host": "127.0.0.1",
+        "dataDir": "./data/mongodb-7.0.20",
+        "logging": true,
+        "logLevel": "debug",
+        "customConfig": "",
+        "autoStart": false,
+        "autoRestart": false,
+        "startAllGroup": false
+      }
+    ]
+  },
+  "php": {
+    "enabled": true,
+    "activeProfileId": "mnzagfi98x8o5",
+    "profiles": [
+      {
+        "id": "mnzagfi98x8o5",
+        "name": "PHP 8.4.20",
+        "version": "8.4.20",
+        "port": 9000,
+        "maxExecutionTime": 30,
+        "memoryLimit": "256M",
+        "uploadMaxFilesize": "64M",
+        "postMaxSize": "64M",
+        "displayErrors": true,
+        "errorReporting": "E_ALL",
+        "timezone": "UTC",
+        "opcache": true,
+        "opcacheMemory": 128,
+        "extensions": [
+          {
+            "name": "bcmath",
+            "enabled": true
+          },
+          {
+            "name": "ctype",
+            "enabled": true
+          },
+          {
+            "name": "curl",
+            "enabled": true
+          },
+          {
+            "name": "dom",
+            "enabled": true
+          },
+          {
+            "name": "fileinfo",
+            "enabled": true
+          },
+          {
+            "name": "filter",
+            "enabled": true
+          },
+          {
+            "name": "gd",
+            "enabled": true
+          },
+          {
+            "name": "hash",
+            "enabled": true
+          },
+          {
+            "name": "json",
+            "enabled": true
+          },
+          {
+            "name": "mbstring",
+            "enabled": true
+          },
+          {
+            "name": "openssl",
+            "enabled": true
+          },
+          {
+            "name": "pcre",
+            "enabled": true
+          },
+          {
+            "name": "pdo_mysql",
+            "enabled": true
+          },
+          {
+            "name": "pdo_pgsql",
+            "enabled": true
+          },
+          {
+            "name": "pdo_sqlite",
+            "enabled": true
+          },
+          {
+            "name": "phar",
+            "enabled": true
+          },
+          {
+            "name": "session",
+            "enabled": true
+          },
+          {
+            "name": "simplexml",
+            "enabled": true
+          },
+          {
+            "name": "tokenizer",
+            "enabled": true
+          },
+          {
+            "name": "xml",
+            "enabled": true
+          },
+          {
+            "name": "zip",
+            "enabled": true
+          },
+          {
+            "name": "zlib",
+            "enabled": true
+          },
+          {
+            "name": "intl",
+            "enabled": true
+          },
+          {
+            "name": "opcache",
+            "enabled": true
+          },
+          {
+            "name": "sodium",
+            "enabled": true
+          },
+          {
+            "name": "exif",
+            "enabled": false
+          },
+          {
+            "name": "redis",
+            "enabled": false
+          },
+          {
+            "name": "imagick",
+            "enabled": false
+          },
+          {
+            "name": "xdebug",
+            "enabled": false
+          },
+          {
+            "name": "calendar",
+            "enabled": false
+          },
+          {
+            "name": "spl",
+            "enabled": false
+          },
+          {
+            "name": "xmlreader",
+            "enabled": false
+          },
+          {
+            "name": "xmlwriter",
+            "enabled": false
+          },
+          {
+            "name": "pdo_oci",
+            "enabled": false
+          },
+          {
+            "name": "pdo_sqlsrv",
+            "enabled": false
+          },
+          {
+            "name": "mysqli",
+            "enabled": true
+          },
+          {
+            "name": "pgsql",
+            "enabled": true
+          },
+          {
+            "name": "sqlite3",
+            "enabled": true
+          },
+          {
+            "name": "sqlsrv",
+            "enabled": false
+          },
+          {
+            "name": "oci8",
+            "enabled": false
+          },
+          {
+            "name": "dba",
+            "enabled": false
+          },
+          {
+            "name": "memcached",
+            "enabled": false
+          },
+          {
+            "name": "memcache",
+            "enabled": false
+          },
+          {
+            "name": "apcu",
+            "enabled": false
+          },
+          {
+            "name": "igbinary",
+            "enabled": false
+          },
+          {
+            "name": "msgpack",
+            "enabled": false
+          },
+          {
+            "name": "gmagick",
+            "enabled": false
+          },
+          {
+            "name": "ftp",
+            "enabled": false
+          },
+          {
+            "name": "ldap",
+            "enabled": false
+          },
+          {
+            "name": "soap",
+            "enabled": false
+          },
+          {
+            "name": "sockets",
+            "enabled": false
+          },
+          {
+            "name": "ssh2",
+            "enabled": false
+          },
+          {
+            "name": "imap",
+            "enabled": false
+          },
+          {
+            "name": "snmp",
+            "enabled": false
+          },
+          {
+            "name": "gettext",
+            "enabled": false
+          },
+          {
+            "name": "iconv",
+            "enabled": false
+          },
+          {
+            "name": "readline",
+            "enabled": false
+          },
+          {
+            "name": "enchant",
+            "enabled": false
+          },
+          {
+            "name": "gmp",
+            "enabled": false
+          },
+          {
+            "name": "mcrypt",
+            "enabled": false
+          },
+          {
+            "name": "bz2",
+            "enabled": false
+          },
+          {
+            "name": "lzf",
+            "enabled": false
+          },
+          {
+            "name": "zstd",
+            "enabled": false
+          },
+          {
+            "name": "xhprof",
+            "enabled": false
+          },
+          {
+            "name": "ast",
+            "enabled": false
+          },
+          {
+            "name": "pcov",
+            "enabled": false
+          },
+          {
+            "name": "tidy",
+            "enabled": false
+          },
+          {
+            "name": "yaml",
+            "enabled": false
+          },
+          {
+            "name": "uuid",
+            "enabled": false
+          },
+          {
+            "name": "decimal",
+            "enabled": false
+          },
+          {
+            "name": "ds",
+            "enabled": false
+          },
+          {
+            "name": "ev",
+            "enabled": false
+          },
+          {
+            "name": "event",
+            "enabled": false
+          },
+          {
+            "name": "parallel",
+            "enabled": false
+          },
+          {
+            "name": "grpc",
+            "enabled": false
+          },
+          {
+            "name": "protobuf",
+            "enabled": false
+          },
+          {
+            "name": "swoole",
+            "enabled": false
+          },
+          {
+            "name": "mongodb",
+            "enabled": false
+          },
+          {
+            "name": "amqp",
+            "enabled": false
+          },
+          {
+            "name": "rdkafka",
+            "enabled": false
+          }
+        ],
+        "xdebug": {
+          "mode": "off",
+          "startWithRequest": "yes",
+          "clientPort": 9003,
+          "clientHost": "127.0.0.1"
+        },
+        "customIni": "",
+        "autoStart": false,
+        "autoRestart": false,
+        "startAllGroup": false
+      }
+    ]
+  },
+  "node": {
+    "enabled": true,
+    "activeProfileId": "mnzagfi9sxhnl",
+    "profiles": [
+      {
+        "id": "mnzagfi9sxhnl",
+        "name": "Node 23.11.0",
+        "version": "23.11.0",
+        "port": 3000,
+        "entryPoint": "server.js",
+        "env": "development",
+        "autoRestart": true,
+        "watchMode": true,
+        "inspectPort": 9229,
+        "inspectEnabled": false,
+        "envVars": [],
+        "autoStart": false,
+        "project": "",
+        "startAllGroup": false
+      },
+      {
+        "id": "mo1lgo0zxsfc2",
+        "name": "Node 20.19.0",
+        "version": "20.19.0",
+        "port": 3000,
+        "entryPoint": "server.js",
+        "project": "",
+        "env": "development",
+        "autoStart": false,
+        "autoRestart": true,
+        "watchMode": true,
+        "inspectPort": 9229,
+        "inspectEnabled": false,
+        "envVars": []
+      }
+    ]
+  },
+  "go": {
+    "enabled": true,
+    "activeProfileId": "mnzagfi92ovnw",
+    "profiles": [
+      {
+        "id": "mnzagfi92ovnw",
+        "name": "Go 1.24.2",
+        "version": "1.24.2",
+        "port": 8080,
+        "entryPoint": "main.go",
+        "buildFlags": "",
+        "env": "development",
+        "envVars": [],
+        "autoStart": false,
+        "autoRestart": false,
+        "project": "",
+        "startAllGroup": false
+      }
+    ]
+  },
+  "redis": {
+    "enabled": true,
+    "activeProfileId": "mnzagfi9c6ryd",
+    "profiles": [
+      {
+        "id": "mnzagfi9c6ryd",
+        "name": "Redis 8.6.2",
+        "version": "8.6.2",
+        "port": 6379,
+        "host": "127.0.0.1",
+        "maxMemory": "256mb",
+        "maxMemoryPolicy": "noeviction",
+        "databases": 16,
+        "appendOnly": false,
+        "requirePass": "",
+        "customConfig": "",
+        "autoStart": false,
+        "autoRestart": false,
+        "startAllGroup": false
+      }
+    ]
+  },
+  "general": {
+    "autoStartOnBoot": false,
+    "startMinimized": true,
+    "theme": "light",
+    "language": "en",
+    "checkUpdates": true,
+    "logLevel": "info"
+  },
+  "caddy": {
+    "enabled": true,
+    "activeProfileId": "mo1el0oquhibn",
+    "profiles": [
+      {
+        "id": "mo1el0oquhibn",
+        "name": "Caddy 2.9.1",
+        "version": "2.9.1",
+        "port": 8443,
+        "httpPort": 8080,
+        "documentRoot": "./www",
+        "serverName": "localhost",
+        "autoHttps": false,
+        "reverseProxy": "",
+        "reverseProxyTarget": "",
+        "fileServer": true,
+        "encode": true,
+        "accessLog": true,
+        "logLevel": "DEBUG",
+        "autoStart": false,
+        "autoRestart": false,
+        "customConfig": "",
+        "startAllGroup": false
+      }
+    ]
+  },
+  "bun": {
+    "enabled": true,
+    "activeProfileId": "mo1el0oql1vlm",
+    "profiles": [
+      {
+        "id": "mo1el0oql1vlm",
+        "name": "Bun 1.2.17",
+        "version": "1.2.17",
+        "port": 3001,
+        "entryPoint": "server.ts",
+        "project": "",
+        "env": "development",
+        "autoStart": false,
+        "autoRestart": true,
+        "watchMode": true,
+        "envVars": [],
+        "startAllGroup": false
+      }
+    ]
+  },
+  "memcached": {
+    "enabled": true,
+    "activeProfileId": "mo1el0oqnybk8",
+    "profiles": [
+      {
+        "id": "mo1el0oqnybk8",
+        "name": "Memcached 1.6.32",
+        "version": "1.6.32",
+        "port": 11211,
+        "host": "127.0.0.1",
+        "maxMemory": 64,
+        "threads": 4,
+        "maxConnections": 1024,
+        "autoStart": false,
+        "autoRestart": false,
+        "customConfig": "",
+        "startAllGroup": false
+      }
+    ]
+  },
+  "minio": {
+    "enabled": true,
+    "activeProfileId": "mo1el0oqk28ab",
+    "profiles": [
+      {
+        "id": "mo1el0oqk28ab",
+        "name": "MinIO latest",
+        "version": "latest",
+        "port": 9000,
+        "consolePort": 9001,
+        "host": "127.0.0.1",
+        "dataDir": "./data/minio-latest",
+        "rootUser": "minioadmin",
+        "rootPassword": "minioadmin",
+        "autoStart": false,
+        "autoRestart": false,
+        "startAllGroup": false
+      }
+    ]
+  },
+  "python": {
+    "enabled": true,
+    "activeProfileId": "mo1el0oqfh58y",
+    "profiles": [
+      {
+        "id": "mo1el0oqfh58y",
+        "name": "Python 3.13.5",
+        "version": "3.13.5",
+        "port": 8000,
+        "entryPoint": "app.py",
+        "project": "",
+        "env": "development",
+        "autoStart": false,
+        "autoRestart": false,
+        "envVars": [],
+        "startAllGroup": false
+      }
+    ]
+  },
+  "deno": {
+    "enabled": true,
+    "activeProfileId": "mo1el0oqfmjtk",
+    "profiles": [
+      {
+        "id": "mo1el0oqfmjtk",
+        "name": "Deno 2.4.1",
+        "version": "2.4.1",
+        "port": 8000,
+        "entryPoint": "main.ts",
+        "project": "",
+        "env": "development",
+        "allowNet": true,
+        "allowRead": true,
+        "allowWrite": false,
+        "allowEnv": true,
+        "allowRun": false,
+        "autoStart": false,
+        "autoRestart": false,
+        "watchMode": true,
+        "envVars": [],
+        "startAllGroup": false
+      }
+    ]
+  }
+}

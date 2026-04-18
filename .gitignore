@@ -1,0 +1,17 @@
+node_modules/
+dist/
+release/
+out/
+*.log
+.DS_Store
+Thumbs.db
+www/apps/
+
+# Ignore server binaries but keep directory structure
+servers/**/*
+!servers/**/
+!servers/**/.gitkeep
+
+# Ignore data contents but keep the folder
+data/*
+!data/.gitkeep

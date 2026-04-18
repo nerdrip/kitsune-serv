@@ -1,0 +1,46 @@
+{
+  "name": "kitsuneserv",
+  "version": "1.0.0-beta1",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "server": "node src/server.js",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux",
+    "build:all": "electron-builder --win --mac --linux"
+  },
+  "keywords": ["server", "management", "php", "node", "postgresql", "nginx", "apache"],
+  "author": "",
+  "license": "ISC",
+  "description": "KitsuneServ - Visual Server Management Console",
+  "devDependencies": {
+    "electron": "^41.2.0",
+    "electron-builder": "^26.8.1"
+  },
+  "build": {
+    "appId": "com.kitsuneserv.app",
+    "productName": "KitsuneServ",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*"
+    ],
+    "win": {
+      "target": ["dir"],
+      "icon": "assets/icon.ico"
+    },
+    "mac": {
+      "target": ["dmg", "zip"],
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.developer-tools"
+    },
+    "linux": {
+      "target": ["dir", "AppImage", "deb", "rpm"],
+      "icon": "assets/icon.png",
+      "category": "Development"
+    }
+  }
+}
