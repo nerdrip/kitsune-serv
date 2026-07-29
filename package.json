@@ -1,46 +1,131 @@
 {
   "name": "kitsuneserv",
-  "version": "1.0.0-beta2",
+  "version": "1.0.0-beta13",
   "main": "src/main.js",
+  "desktopName": "com.kitsuneserv.app.desktop",
+  "bin": {
+    "kitsune": "src/cli.js"
+  },
   "scripts": {
     "start": "electron .",
     "server": "node src/server.js",
-    "build:win": "electron-builder --win",
+    "test": "node --test test/*.test.js",
+    "test:download-smoke": "node scripts/smoke-service-install.js",
+    "check": "node scripts/check-project.js",
+    "build:win": "electron-builder --win nsis --config.directories.output=artifacts/windows",
+    "build:portable": "electron-builder --win portable --config.directories.output=artifacts/windows",
+    "dist:win": "electron-builder --win nsis portable --config.directories.output=artifacts/windows",
     "build:mac": "electron-builder --mac",
-    "build:linux": "electron-builder --linux",
+    "build:linux": "electron-builder --linux --config.directories.output=artifacts/linux",
+    "build:server": "node scripts/build-server-package.js",
+    "build:checksums": "node scripts/write-checksums.js",
+    "build:sbom": "node scripts/generate-sbom.js",
+    "build:manifest": "node scripts/generate-release-manifest.js",
+    "release:keygen": "node scripts/generate-update-keys.js",
+    "clean:artifact": "node scripts/clean-artifact-target.js",
     "build:all": "electron-builder --win --mac --linux"
   },
-  "keywords": ["server", "management", "php", "node", "postgresql", "nginx", "apache"],
-  "author": "",
+  "keywords": [
+    "server",
+    "management",
+    "php",
+    "node",
+    "postgresql",
+    "nginx",
+    "apache"
+  ],
+  "author": {
+    "name": "KitsuneServ contributors",
+    "email": "kitsuneserv@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/nerdrip/kitsune-serv",
   "license": "ISC",
   "description": "KitsuneServ - Visual Server Management Console",
   "devDependencies": {
-    "electron": "^41.2.0",
-    "electron-builder": "^26.8.1"
+    "electron": "^41.10.3",
+    "electron-builder": "^26.15.3"
+  },
+  "engines": {
+    "node": ">=22.19.0"
   },
   "build": {
     "appId": "com.kitsuneserv.app",
     "productName": "KitsuneServ",
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "assets"
     },
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "asar": true,
+    "compression": "maximum",
     "files": [
       "src/**/*",
-      "assets/**/*"
+      "assets/icon.png",
+      "assets/icon.ico"
+    ],
+    "extraResources": [
+      {
+        "from": "config/downloads.json",
+        "to": "defaults/config/downloads.json"
+      },
+      {
+        "from": "config/instances.json",
+        "to": "defaults/config/instances.json"
+      },
+      {
+        "from": "www/index.html",
+        "to": "defaults/www/index.html"
+      },
+      {
+        "from": "utils/adminer",
+        "to": "defaults/utils/adminer"
+      },
+      {
+        "from": "tools/cli",
+        "to": "cli"
+      }
     ],
     "win": {
-      "target": ["dir"],
-      "icon": "assets/icon.ico"
+      "target": [
+        "nsis"
+      ],
+      "icon": "icon.ico"
+    },
+    "nsis": {
+      "artifactName": "${productName}-${version}-${arch}-setup.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "KitsuneServ",
+      "deleteAppDataOnUninstall": false
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-${arch}-portable.${ext}"
     },
     "mac": {
-      "target": ["dmg", "zip"],
-      "icon": "assets/icon.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "icon.icns",
       "category": "public.app-category.developer-tools"
     },
     "linux": {
-      "target": ["dir", "AppImage", "deb", "rpm"],
-      "icon": "assets/icon.png",
-      "category": "Development"
+      "target": [
+        "dir",
+        "AppImage",
+        "deb",
+        "rpm"
+      ],
+      "icon": "icon.png",
+      "category": "Development",
+      "syncDesktopName": true
     }
+  },
+  "dependencies": {
+    "mongodb": "^7.5.0",
+    "mysql2": "^3.23.2",
+    "pg": "^8.22.0"
   }
 }

@@ -5,9 +5,11 @@ const api = window.kitsuneAPI;
 
 // Sections that have profiles (not general)
 const SERVICE_SECTIONS = ['apache', 'nginx', 'caddy', 'postgresql', 'mysql', 'mariadb', 'mongodb', 'php', 'node', 'go', 'bun', 'redis', 'memcached', 'minio', 'python', 'deno'];
+const WEB_SERVER_SECTIONS = ['apache', 'nginx', 'caddy'];
 
 // Version map loaded from backend (downloads.json)
 let VERSION_MAP = {};
+let versionCatalog = [];
 
 // Dashboard card icons
 const SECTION_ICONS = {
@@ -42,7 +44,10 @@ let statuses = {};
 let statusInterval = null;
 let resourceUsage = {};
 let installedMap = {};
+let installedVersionsMap = {};
 let diskUsageMap = {};
+let runtimePlatform = 'unknown';
+let runtimeMode = window.__KITSUNE_WEB_MODE__ ? 'server' : 'desktop';
 const DB_SECTIONS = ['postgresql', 'mysql', 'mariadb', 'mongodb'];
 const dbState = {}; // { section: { currentDb, currentTable, loaded } }
 const dbQueryHistory = {}; // { section: [query1, query2, ...] }
@@ -50,12 +55,27 @@ const serviceUptime = {}; // { section: startTimestamp }
 
 /* ===== Init ===== */
 document.addEventListener('DOMContentLoaded', async () => {
+  document.querySelectorAll('button[title]:not([aria-label])').forEach(button => {
+    button.setAttribute('aria-label', button.getAttribute('title'));
+  });
   // Load version map from backend (downloads.json)
   try { VERSION_MAP = await api.download.getVersions(); } catch { VERSION_MAP = {}; }
+  await refreshInstalledVersionsMap();
   config = await api.config.get();
+  try {
+    const info = await api.app.getInfo();
+    runtimePlatform = info.platform || 'unknown';
+    runtimeMode = info.mode || runtimeMode;
+    const versionLabel = document.querySelector('.titlebar-version');
+    if (versionLabel) versionLabel.textContent = `v${info.version}`;
+    const dataRootLabel = document.getElementById('app-data-root');
+    if (dataRootLabel) dataRootLabel.textContent = info.dataRoot;
+    applyPlatformLabels();
+  } catch {}
   bindWindowControls();
   bindNavigation();
   bindSidebarServiceControls();
+  bindWebServerOpenButtons();
   bindSaveBarButtons();
   bindProfileModal();
   bindEnvVarButtons();
@@ -64,6 +84,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindDashboardToolbar();
   initSubTabs();
   initDbViewers();
+  initDatabaseManager();
+  initWorkspaceCenter();
   initLogViewers();
   initProjectManagers();
   bindFolderButtons();
@@ -71,10 +93,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   initCommandPalette();
   initComposer();
   initAppStore();
+  initVersionManager();
+  initSecurityPanel();
+  initUpdatePanel();
+  initSupportReport();
   initCollapsibleGroups();
   bindShortcutsModal();
   populateUI();
   startStatusPolling();
+  api.path.onPythonManagerStatus?.(async ({ stage, automatic, alreadyInstalled, skipped, error }) => {
+    await refreshPathManagement();
+    if (!automatic) return;
+    if (stage === 'installing') showToast('Installing the official Python Manager automatically…', 'warning');
+    else if (stage === 'removing') showToast('Removing the KitsuneServ-managed Python Manager…', 'warning');
+    else if (stage === 'removed') showToast('Python Manager removed because no KitsuneServ Python runtimes remain', 'success');
+    else if (stage === 'complete' && !alreadyInstalled && !skipped) showToast('Official Python Manager installed and connected to KitsuneServ', 'success');
+    else if (stage === 'failed') showToast(`Automatic Python Manager installation failed: ${error}. The fallback launcher remains available.`, 'error');
+  });
   initPathManagement();
   autoStartServices();
 
@@ -164,7 +199,12 @@ function switchToPanel(panelId) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   const panel = document.getElementById('panel-' + panelId);
   if (panel) panel.classList.add('active');
+  document.querySelector('.content')?.classList.toggle('terminal-mode', panelId === 'terminal');
   if (panelId === 'appstore') refreshAppStore();
+  if (panelId === 'versions') refreshVersionManager();
+  if (panelId === 'database-manager') refreshDatabaseConnections();
+  if (panelId === 'workspaces') refreshWorkspaceCenter();
+  if (panelId === 'general') refreshSecurityPanel();
 }
 
 function bindNavigation() {
@@ -173,13 +213,7 @@ function bindNavigation() {
     item.addEventListener('click', (e) => {
       // Don't switch panel if click was on a nav-btn
       if (e.target.closest('.nav-controls')) return;
-      navItems.forEach(n => n.classList.remove('active'));
-      item.classList.add('active');
-      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-      const panel = document.getElementById('panel-' + item.dataset.panel);
-      if (panel) panel.classList.add('active');
-      // Refresh App Store when switching to it
-      if (item.dataset.panel === 'appstore') refreshAppStore();
+      switchToPanel(item.dataset.panel);
     });
   });
 }
@@ -202,12 +236,9 @@ function bindSidebarServiceControls() {
       startBtn.classList.remove('loading');
       if (!result.success) {
         if (result.needsDownload) {
-          // Auto-download then retry
           const profile = getActiveProfile(section);
-          if (profile) {
-            const dlKey = resolveDownloadKey(profile, section);
-            await api.download.install(dlKey, profile.version);
-          }
+          showToast(`${sectionLabel(section)} ${profile?.version || ''} is not installed. Install it in Version Manager.`, 'error');
+          openVersionManager(section);
         } else {
           showToast(result.error, 'error');
           openLogViewer(section);
@@ -245,6 +276,105 @@ function bindSidebarServiceControls() {
 
 function resolveDownloadKey(profile, section) {
   return section;
+}
+
+function applyPlatformLabels() {
+  const isWindows = runtimePlatform === 'win32';
+  const pathDescription = document.getElementById('path-platform-description');
+  const pathHint = document.getElementById('path-platform-hint');
+  if (pathDescription) {
+    pathDescription.textContent = isWindows
+      ? 'Choose which active service versions are available from every Windows terminal. A selected entry is replaced automatically whenever you switch its active version.'
+      : 'Choose which active service versions are exported by the KitsuneServ block in your shell profile. Entries follow active version changes automatically.';
+  }
+  if (pathHint) {
+    pathHint.textContent = isWindows
+      ? 'Changes are applied immediately to your Windows user PATH. New terminals see them at once; the built-in terminal always includes every installed active runtime.'
+      : 'Changes are applied to your user shell profile. Open a new shell or source the profile; the built-in terminal always includes every installed active runtime.';
+  }
+  if (!isWindows) {
+    document.getElementById('python-launcher-status')?.classList.add('hidden');
+    document.getElementById('python-alias-warning')?.classList.add('hidden');
+  }
+  if (runtimeMode === 'server') {
+    for (const id of ['general-autoStartOnBoot', 'general-startMinimized']) {
+      const control = document.getElementById(id);
+      control?.closest('.form-group')?.classList.add('hidden');
+    }
+  }
+}
+
+async function refreshInstalledVersionsMap(catalog = null) {
+  try {
+    if (Array.isArray(catalog)) {
+      installedVersionsMap = Object.fromEntries(SERVICE_SECTIONS.map(section => {
+        const service = catalog.find(item => item.id === section);
+        const versions = service?.installedVersions || service?.versions?.filter(item => item.installed).map(item => item.version) || [];
+        return [section, [...new Set(versions.map(String))]];
+      }));
+      return installedVersionsMap;
+    }
+    const entries = await Promise.all(SERVICE_SECTIONS.map(async section => {
+      try { return [section, await api.download.installedVersions(section)]; }
+      catch { return [section, []]; }
+    }));
+    installedVersionsMap = Object.fromEntries(entries.map(([section, versions]) => [section, [...new Set((versions || []).map(String))]]));
+  } catch {
+    installedVersionsMap = {};
+  }
+  return installedVersionsMap;
+}
+
+function installedVersionsFor(section) {
+  const installed = installedVersionsMap[section] || [];
+  const installedSet = new Set(installed);
+  const catalogOrder = (VERSION_MAP[section] || []).filter(version => installedSet.has(version));
+  return [...catalogOrder, ...installed.filter(version => !catalogOrder.includes(version))];
+}
+
+function openVersionManager(section = '') {
+  const search = document.getElementById('version-manager-search');
+  if (search && section) search.value = sectionLabel(section);
+  switchToPanel('versions');
+}
+
+function localBrowserHost(rawHost) {
+  let host = String(rawHost || 'localhost').trim();
+  const localNames = ['', '0.0.0.0', '::', '[::]', '*', '127.0.0.1', 'localhost'];
+  if (window.__KITSUNE_WEB_MODE__ && localNames.includes(host.toLowerCase())) host = window.location.hostname;
+  else if (!host || ['0.0.0.0', '::', '[::]', '*'].includes(host)) host = '127.0.0.1';
+  if (host.includes(':') && !host.startsWith('[')) host = `[${host}]`;
+  return host;
+}
+
+function webServiceUrl(section, profile = getActiveProfile(section)) {
+  if (!profile || !WEB_SERVER_SECTIONS.includes(section)) return null;
+  if (section === 'caddy' && profile.autoHttps) {
+    return `https://${localBrowserHost(profile.serverName || 'localhost')}/`;
+  }
+  const port = section === 'caddy' ? Number(profile.httpPort || profile.port || 80) : Number(profile.port || 80);
+  const host = localBrowserHost(profile.host);
+  return `http://${host}${port === 80 ? '' : `:${port}`}/`;
+}
+
+async function openWebService(section) {
+  if (!statuses[section]?.running) {
+    showToast(`Start ${sectionLabel(section)} before opening the site`, 'error');
+    return;
+  }
+  const url = webServiceUrl(section);
+  if (!url) return showToast('Could not determine the server URL', 'error');
+  const result = await api.shell.openExternal(url);
+  if (!result?.success) showToast(result?.error || 'Could not open the browser', 'error');
+}
+
+function bindWebServerOpenButtons() {
+  document.querySelectorAll('[data-open-service]').forEach(button => {
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      void openWebService(button.dataset.openService);
+    });
+  });
 }
 
 /* ===== Profile Tab Strips ===== */
@@ -289,6 +419,9 @@ function renderProfileStrip(section) {
           renderProfileStrip(section);
           populateSectionUI(section);
           showToast('Profile deleted', 'success');
+          notifyPathWarning(result);
+        } else {
+          showToast(result.error || 'Could not delete profile', 'error');
         }
       });
       tab.appendChild(closeBtn);
@@ -308,6 +441,7 @@ function renderProfileStrip(section) {
         renderProfileStrip(section);
         populateSectionUI(section);
         showToast('Profile duplicated', 'success');
+        notifyPathWarning(result);
       }
     });
     tab.appendChild(dupBtn);
@@ -321,11 +455,11 @@ function renderProfileStrip(section) {
         config = result.config;
         renderProfileStrip(section);
         populateSectionUI(section);
-        // Auto-update PATH if entries are currently added
-        if (pathAdded) {
-          const pathResult = await api.path.add();
-          if (pathResult.success) updatePathUI({ added: true, entries: pathResult.entries });
-        }
+        showToast(`Switched to ${p.name}${result.restarted?.length ? ' and restarted the stack' : ''}`, 'success');
+        notifyPathWarning(result);
+        refreshStatuses();
+      } else {
+        showToast(result.error || 'Could not switch profile', 'error');
       }
     });
 
@@ -414,14 +548,25 @@ function openNewProfileModal(section) {
 
 function populateModalVersions(key) {
   const versionSelect = document.getElementById('profile-modal-version');
-  const versions = VERSION_MAP[key] || [];
+  const versions = installedVersionsFor(key);
+  const confirmButton = document.getElementById('profile-modal-confirm');
   versionSelect.innerHTML = '';
+  if (!versions.length) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'No installed versions — use Version Manager';
+    opt.disabled = true;
+    opt.selected = true;
+    versionSelect.appendChild(opt);
+  }
   for (const v of versions) {
     const opt = document.createElement('option');
     opt.value = v;
     opt.textContent = v;
     versionSelect.appendChild(opt);
   }
+  versionSelect.disabled = versions.length === 0;
+  if (confirmButton) confirmButton.disabled = versions.length === 0;
 }
 
 function closeProfileModal() {
@@ -449,6 +594,7 @@ async function confirmNewProfile() {
     renderProfileStrip(section);
     populateSectionUI(section);
     showToast('Profile created', 'success');
+    notifyPathWarning(result);
     closeProfileModal();
   } else {
     showToast(result.error || 'Failed to create profile', 'error');
@@ -519,6 +665,7 @@ function bindStopAllAndReset() {
     if (result.success) {
       config = await api.config.get();
       populateUI();
+      await refreshPathManagement();
       dirty = false;
       updateSaveBar();
       showToast('Config reset to defaults', 'success');
@@ -621,20 +768,7 @@ function bindDashboardToolbar() {
     });
   }
 
-  // Download All Missing
-  document.getElementById('dash-download-all')?.addEventListener('click', async () => {
-    let count = 0;
-    for (const section of SERVICE_SECTIONS) {
-      if (installedMap[section]) continue;
-      const profile = getActiveProfile(section);
-      if (!profile) continue;
-      const dlKey = resolveDownloadKey(profile, section);
-      count++;
-      api.download.install(dlKey, profile.version);
-    }
-    if (count === 0) showToast('All services already installed', 'success');
-    else showToast(`Downloading ${count} missing service(s)...`, 'success');
-  });
+  document.getElementById('dash-download-all')?.addEventListener('click', () => openVersionManager());
 }
 
 /* ===== Save Bar ===== */
@@ -673,6 +807,7 @@ function populateUI() {
   }
   syncSidebarGroupChecks();
   populateGeneralUI();
+  syncDocumentRootControls();
   refreshDashboard();
   refreshStatuses();
 }
@@ -737,6 +872,11 @@ function populateSectionUI(section) {
 
     freshVersionEl.addEventListener('change', async () => {
       const newVersion = freshVersionEl.value;
+      if (!installedVersionsFor(section).includes(newVersion)) {
+        showToast('Install this version in Version Manager first', 'error');
+        populateSectionUI(section);
+        return;
+      }
       const svc = config[section];
       if (!svc) return;
 
@@ -752,7 +892,8 @@ function populateSectionUI(section) {
           renderProfileStrip(section);
           populateSectionUI(section);
           showToast(`Switched to ${existing.name}`, 'success');
-        }
+          notifyPathWarning(result);
+        } else showToast(result.error || 'Could not switch profile', 'error');
       } else {
         // Create a new profile for the new version
         const result = await api.config.newProfile(section, section, newVersion);
@@ -763,7 +904,8 @@ function populateSectionUI(section) {
           renderProfileStrip(section);
           populateSectionUI(section);
           showToast(`Profile created for ${sectionLabel(section)} ${newVersion}`, 'success');
-        }
+          notifyPathWarning(result);
+        } else showToast(result.error || 'Could not create the profile', 'error');
       }
       refreshStatuses();
     });
@@ -791,7 +933,7 @@ function populateSectionUI(section) {
 function populateVersionDropdown(section, type) {
   const versionSelect = document.getElementById(section + '-version');
   if (!versionSelect) return;
-  const versions = VERSION_MAP[type] || [];
+  const versions = installedVersionsFor(type);
   const profile = getActiveProfile(section);
   const activeVersion = profile?.version || '';
   versionSelect.innerHTML = '';
@@ -801,14 +943,16 @@ function populateVersionDropdown(section, type) {
     opt.textContent = v;
     versionSelect.appendChild(opt);
   }
-  // If current profile version isn't in the list, add it
+  // Keep a missing active version visible without offering other uninstalled releases.
   if (activeVersion && !versions.includes(activeVersion)) {
     const opt = document.createElement('option');
     opt.value = activeVersion;
-    opt.textContent = activeVersion + ' (custom)';
+    opt.textContent = activeVersion + ' (not installed — use Version Manager)';
+    opt.disabled = true;
     versionSelect.appendChild(opt);
   }
   if (activeVersion) versionSelect.value = activeVersion;
+  versionSelect.disabled = versions.length === 0;
 }
 
 function populatePhpExtensions(profile) {
@@ -1006,23 +1150,10 @@ async function updateInstallStatus(section, profile) {
   const dlKey = resolveDownloadKey(profile, section);
   const installed = await api.download.isInstalled(dlKey, profile.version);
   if (installed) {
-    el.innerHTML = `<span class="installed-badge">✓ ${escapeHtml(dlKey)} ${escapeHtml(profile.version)} installed</span><button class="btn-remove-version" data-dl-key="${escapeHtml(dlKey)}" data-dl-version="${escapeHtml(profile.version)}" title="Delete this version from disk">🗑 Remove</button>`;
-    el.querySelector('.btn-remove-version').addEventListener('click', async () => {
-      if (!confirm(`Delete ${dlKey} ${profile.version} from disk? The downloaded binaries will be removed.`)) return;
-      const result = await api.download.remove(dlKey, profile.version);
-      if (result.success) {
-        showToast(`${dlKey} ${profile.version} removed`, 'success');
-        updateInstallStatus(section, profile);
-        refreshStatuses();
-      } else {
-        showToast(result.error || 'Remove failed', 'error');
-      }
-    });
+    el.innerHTML = `<span class="installed-badge">✓ ${escapeHtml(dlKey)} ${escapeHtml(profile.version)} installed</span>`;
   } else {
-    el.innerHTML = `<span class="not-installed-badge" data-dl-key="${escapeHtml(dlKey)}" data-dl-version="${escapeHtml(profile.version)}">⬇ Download ${escapeHtml(dlKey)} ${escapeHtml(profile.version)}</span>`;
-    el.querySelector('.not-installed-badge').addEventListener('click', async () => {
-      await api.download.install(dlKey, profile.version);
-    });
+    el.innerHTML = `<span class="not-installed-badge">⚠ ${escapeHtml(dlKey)} ${escapeHtml(profile.version)} is not installed</span><button class="btn-manage-version" title="Open Version Manager">📦 Manage versions</button>`;
+    el.querySelector('.btn-manage-version').addEventListener('click', () => openVersionManager(section));
   }
 }
 
@@ -1055,6 +1186,134 @@ function populateGeneralUI() {
         const group = el.closest('.form-group');
         if (group) group.style.display = 'none';
       }
+    }
+  }
+}
+
+function initSecurityPanel() {
+  document.getElementById('security-refresh')?.addEventListener('click', refreshSecurityPanel);
+  document.getElementById('security-revoke-others')?.addEventListener('click', async () => {
+    if (!confirm('Revoke every other active KitsuneServ web session?')) return;
+    const result = await api.security.revokeOtherSessions();
+    showToast(result.success ? `Revoked ${result.removed} session(s)` : result.error, result.success ? 'success' : 'error');
+    await refreshSecurityPanel();
+  });
+}
+
+function initUpdatePanel() {
+  document.getElementById('update-check')?.addEventListener('click', checkForKitsuneUpdate);
+  document.getElementById('update-download')?.addEventListener('click', downloadKitsuneUpdate);
+  document.getElementById('update-install')?.addEventListener('click', installKitsuneUpdate);
+  refreshUpdateStatus();
+}
+
+function initSupportReport() {
+  document.getElementById('support-generate')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true; button.classList.add('loading');
+    try {
+      const result = await api.support.generate();
+      if (!result.success) throw new Error(result.error || 'Could not generate support report');
+      downloadWorkspaceManifest(result.report, `${result.id}.json`);
+      document.getElementById('support-report-status').textContent = `Saved ${result.path} · SHA-256 ${result.sha256}`;
+      showToast('Redacted support report generated', 'success');
+    } catch (error) { showToast(error.message, 'error'); }
+    finally { button.disabled = false; button.classList.remove('loading'); }
+  });
+}
+
+async function refreshUpdateStatus() {
+  if (!api.update) return;
+  const status = await api.update.status();
+  const container = document.getElementById('update-status');
+  if (!container) return;
+  container.innerHTML = `<div class="update-summary"><span>${status.configured ? '🔏' : '○'}</span><div><strong>KitsuneServ ${escapeHtml(status.currentVersion)}</strong><span>${status.configured ? `Signed channel: ${escapeHtml(status.manifestUrl)}` : 'No signed release channel configured'}${status.downloaded ? ` · verified ${escapeHtml(status.downloaded.version)} downloaded` : ''}</span></div></div>`;
+  document.getElementById('update-install')?.classList.toggle('hidden', !status.downloaded);
+}
+
+async function checkForKitsuneUpdate() {
+  const button = document.getElementById('update-check');
+  button.disabled = true; button.classList.add('loading');
+  try {
+    const result = await api.update.check();
+    if (!result.success) throw new Error(result.error);
+    const container = document.getElementById('update-status');
+    container.innerHTML = `<div class="update-summary"><span>${result.available ? '⬆' : '✓'}</span><div><strong>${result.available ? `KitsuneServ ${escapeHtml(result.manifest.version)} is available` : 'KitsuneServ is up to date'}</strong><span>${escapeHtml(result.manifest.notes || `Current version: ${result.currentVersion}`)}</span></div></div>`;
+    document.getElementById('update-download').classList.toggle('hidden', !result.available);
+    showToast(result.available ? 'A signed update is available' : 'You already have the latest signed release', 'success');
+  } catch (error) { showToast(error.message, 'error'); await refreshUpdateStatus(); }
+  finally { button.disabled = false; button.classList.remove('loading'); }
+}
+
+async function downloadKitsuneUpdate() {
+  const button = document.getElementById('update-download');
+  button.disabled = true; button.classList.add('loading');
+  try {
+    const result = await api.update.download();
+    if (!result.success) throw new Error(result.error);
+    showToast(`Verified KitsuneServ ${result.version} downloaded`, 'success');
+    button.classList.add('hidden'); await refreshUpdateStatus();
+  } catch (error) { showToast(error.message, 'error'); }
+  finally { button.disabled = false; button.classList.remove('loading'); }
+}
+
+async function installKitsuneUpdate() {
+  if (!confirm('Install the verified update now? KitsuneServ will stop every managed service before closing.')) return;
+  const result = await api.update.install();
+  if (!result.success) showToast(result.error, result.manual ? 'success' : 'error');
+}
+
+async function refreshSecurityPanel() {
+  if (!api.security) return;
+  const grid = document.getElementById('security-status-grid');
+  const list = document.getElementById('security-session-list');
+  try {
+    const [status, sessions] = await Promise.all([api.security.status(), api.security.sessions()]);
+    const items = [
+      ['HTTPS', status.https, status.https ? 'enabled' : status.mode === 'desktop' ? 'desktop IPC' : 'HTTP only'],
+      ['TOTP / 2FA', status.totpEnabled, status.totpEnabled ? 'required' : 'disabled'],
+      ['API token', status.apiTokenEnabled, status.apiTokenEnabled ? 'configured' : 'disabled'],
+      ['IP allowlist', status.allowlistEnabled, status.allowlistEnabled ? `${status.allowedRules.length} rule(s)` : 'all clients']
+    ];
+    grid.innerHTML = items.map(([label, enabled, detail]) => `<div class="security-status-item ${enabled ? 'enabled' : ''}"><strong>${escapeHtml(label)}</strong><span>${escapeHtml(detail)}</span></div>`).join('');
+    document.getElementById('security-revoke-others').disabled = status.mode !== 'server' || sessions.length < 2;
+    if (!sessions.length) {
+      list.innerHTML = `<div class="workspace-empty compact">${status.mode === 'desktop' ? 'Web sessions exist only in server mode.' : 'No active sessions.'}</div>`;
+      return;
+    }
+    list.innerHTML = sessions.map(session => `<div class="security-session-row"><span>${session.current ? '●' : '○'}</span><div class="security-session-info"><strong>${escapeHtml(session.username)}${session.current ? ' · current' : ''}</strong><span>${escapeHtml(session.address || 'unknown')} · last seen ${escapeHtml(new Date(session.lastSeenAt).toLocaleString())} · ${escapeHtml((session.userAgent || '').slice(0, 100))}</span></div>${session.current ? '' : `<button class="btn btn-small btn-danger security-revoke" data-id="${escapeHtml(session.id)}">Revoke</button>`}</div>`).join('');
+    list.querySelectorAll('.security-revoke').forEach(button => button.addEventListener('click', async () => {
+      const result = await api.security.revokeSession(button.dataset.id);
+      showToast(result.success ? 'Session revoked' : result.error, result.success ? 'success' : 'error');
+      await refreshSecurityPanel();
+    }));
+  } catch (error) {
+    grid.innerHTML = `<div class="db-error">${escapeHtml(error.message)}</div>`;
+    list.innerHTML = '';
+  }
+}
+
+function syncDocumentRootControls() {
+  const general = config.general || {};
+  const forced = Boolean(general.forceGlobalDocumentRoot);
+  const globalToggle = document.getElementById('general-forceGlobalDocumentRoot');
+  const globalInput = document.getElementById('general-globalDocumentRoot');
+  const help = document.getElementById('global-docroot-help');
+  if (globalToggle) globalToggle.checked = forced;
+  if (globalInput) globalInput.value = general.globalDocumentRoot || './www';
+  if (help) help.textContent = forced
+    ? 'Enforced for Apache, Nginx and Caddy. Their individual directory selectors are locked.'
+    : 'Saved as the shared directory but not enforced. Each web server uses its profile directory.';
+  for (const section of ['apache', 'nginx', 'caddy']) {
+    const input = document.getElementById(`${section}-documentRoot`);
+    const button = document.getElementById(`btn-open-${section}-docroot`);
+    if (input) {
+      input.disabled = forced;
+      input.title = forced ? 'The global document root is enforced in General settings' : '';
+    }
+    if (button) {
+      button.disabled = forced;
+      button.title = forced ? 'Disable the global document root in General settings to change this profile' : 'Choose Document Root';
     }
   }
 }
@@ -1236,7 +1495,8 @@ function _buildDashboardCard(section) {
       if (!result.success) {
         if (result.needsDownload) {
           const p = getActiveProfile(section);
-          if (p) await api.download.install(resolveDownloadKey(p, section), p.version);
+          showToast(`${sectionLabel(section)} ${p?.version || ''} is not installed. Install it in Version Manager.`, 'error');
+          openVersionManager(section);
         } else showToast(result.error, 'error');
       }
       refreshStatuses();
@@ -1260,16 +1520,19 @@ function _buildDashboardCard(section) {
     const copyBtn = card.querySelector('.card-btn-copy');
     if (openBtn) openBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const p = getActiveProfile(section);
-      const port = p?.port || 80;
-      const proto = section === 'minio' ? `http://localhost:${p?.consolePort || 9001}` : `http://localhost:${port}`;
-      api.shell.openExternal(proto);
+      if (WEB_SERVER_SECTIONS.includes(section)) void openWebService(section);
+      else {
+        const p = getActiveProfile(section);
+        const url = section === 'minio' ? `http://localhost:${p?.consolePort || 9001}` : `http://localhost:${p?.port || 80}`;
+        void api.shell.openExternal(url);
+      }
     });
     if (copyBtn) copyBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       const p = getActiveProfile(section);
-      const port = p?.port || 80;
-      const url = section === 'minio' ? `http://localhost:${p?.consolePort || 9001}` : `http://localhost:${port}`;
+      const url = WEB_SERVER_SECTIONS.includes(section)
+        ? webServiceUrl(section, p)
+        : (section === 'minio' ? `http://localhost:${p?.consolePort || 9001}` : `http://localhost:${p?.port || 80}`);
       navigator.clipboard.writeText(url);
       showToast(`URL copied: ${url}`, 'success');
     });
@@ -1516,12 +1779,12 @@ async function refreshStatuses() {
 
     // Track uptime
     if (running && !serviceUptime[section]) {
-      serviceUptime[section] = Date.now();
+      serviceUptime[section] = Date.now() - Number(statuses[section]?.uptime || 0);
     } else if (!running) {
       delete serviceUptime[section];
     }
     // Display uptime in sidebar
-    let uptimeEl = controls.querySelector('.nav-uptime');
+    let uptimeEl = navItem?.querySelector('.nav-uptime');
     if (running && serviceUptime[section]) {
       if (!uptimeEl) {
         uptimeEl = document.createElement('span');
@@ -1537,6 +1800,7 @@ async function refreshStatuses() {
     const startBtn = controls.querySelector('.nav-btn-start');
     const stopBtn = controls.querySelector('.nav-btn-stop');
     const restartBtn = controls.querySelector('.nav-btn-restart');
+    const openBtn = controls.querySelector('.nav-btn-open');
     const dot = controls.querySelector('.nav-status-dot');
 
     if (!startBtn) {
@@ -1562,6 +1826,11 @@ async function refreshStatuses() {
       startBtn.classList.remove('nav-btn-disabled');
       startBtn.disabled = false;
     }
+
+    if (openBtn) openBtn.classList.toggle('hidden', !running);
+    document.querySelectorAll(`.btn-open-web[data-open-service="${section}"]`).forEach(button => {
+      button.disabled = !running;
+    });
 
     // Update sidebar version with red/green color
     const versionEl = document.getElementById('nav-version-' + section);
@@ -1609,6 +1878,8 @@ async function refreshStatuses() {
 /* ===== Download Progress ===== */
 function handleDownloadProgress(data) {
   const { service, version, stage, percent } = data;
+  const managedOperation = versionOperations.has(service);
+  updateVersionOperationProgress(data);
   // Find which section this download belongs to
   const section = findSectionForDownload(service);
   if (!section) return;
@@ -1619,6 +1890,12 @@ function handleDownloadProgress(data) {
 
   if (!container) return;
 
+  if (stage === 'failed') {
+    container.classList.add('hidden');
+    if (!managedOperation) showToast(`${service} ${version}: ${data.error || 'installation failed'}`, 'error');
+    return;
+  }
+
   if (stage === 'done') {
     container.classList.add('hidden');
     if (fill) { fill.style.width = '100%'; fill.classList.add('complete'); }
@@ -1626,7 +1903,7 @@ function handleDownloadProgress(data) {
     const profile = getActiveProfile(section);
     if (profile) updateInstallStatus(section, profile);
     refreshStatuses();
-    showToast(`${service} ${version} installed`, 'success');
+    if (!managedOperation) showToast(`${service} ${version} installed`, 'success');
     return;
   }
 
@@ -1640,6 +1917,8 @@ function handleDownloadProgress(data) {
       label.textContent = `Retrying ${service} ${version} (attempt ${data.attempt + 1}/${data.maxRetries})...`;
     } else if (stage === 'extracting') {
       label.textContent = `Extracting ${service} ${version}...`;
+    } else if (stage === 'python-manager') {
+      label.textContent = 'Installing and configuring the official Python Manager...';
     } else {
       label.textContent = `Downloading ${service} ${version}... ${percent}%`;
     }
@@ -1736,7 +2015,9 @@ function initDbViewers() {
     if (!container) continue;
 
     const label = sectionLabel(section);
-    const placeholder = section === 'mongodb' ? 'Enter MongoDB expression...' : 'Enter SQL query...';
+    const placeholder = section === 'mongodb'
+      ? '{"collection":"users","operation":"find","filter":{},"limit":100}'
+      : 'Enter SQL query...';
 
     container.innerHTML = `
       <div class="config-section">
@@ -1786,6 +2067,363 @@ function initDbViewers() {
       if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); dbRunQuery(section); }
     });
   }
+}
+
+const databaseManagerState = { connections: [], selectedId: null, connection: null, passwords: new Map() };
+
+function initDatabaseManager() {
+  if (!document.getElementById('panel-database-manager')) return;
+  const type = document.getElementById('dbm-type');
+  type?.addEventListener('change', () => {
+    const defaults = { postgresql: 5432, mysql: 3306, mariadb: 3306, mongodb: 27017 };
+    document.getElementById('dbm-port').value = defaults[type.value];
+    updateDatabaseQueryPlaceholder(type.value);
+  });
+  document.getElementById('dbm-refresh-connections')?.addEventListener('click', refreshDatabaseConnections);
+  document.getElementById('dbm-new-connection')?.addEventListener('click', () => selectDatabaseConnection(null));
+  document.getElementById('dbm-save')?.addEventListener('click', saveDatabaseConnection);
+  document.getElementById('dbm-remove')?.addEventListener('click', removeDatabaseConnection);
+  document.getElementById('dbm-test')?.addEventListener('click', testDatabaseConnection);
+  document.getElementById('dbm-connect')?.addEventListener('click', connectDatabaseManager);
+  document.getElementById('dbm-refresh-databases')?.addEventListener('click', connectDatabaseManager);
+  document.getElementById('dbm-database')?.addEventListener('change', refreshDatabaseManagerTables);
+  document.getElementById('dbm-create-database')?.addEventListener('click', createDatabaseManagerDatabase);
+  document.getElementById('dbm-drop-database')?.addEventListener('click', dropDatabaseManagerDatabase);
+  document.getElementById('dbm-run-query')?.addEventListener('click', runDatabaseManagerQuery);
+  document.getElementById('dbm-create-backup')?.addEventListener('click', createDatabaseManagerBackup);
+  document.getElementById('dbm-refresh-backups')?.addEventListener('click', refreshDatabaseManagerBackups);
+  document.getElementById('dbm-save-backup-schedule')?.addEventListener('click', saveDatabaseBackupSchedule);
+  document.getElementById('dbm-query')?.addEventListener('keydown', event => {
+    if (event.ctrlKey && event.key === 'Enter') {
+      event.preventDefault();
+      runDatabaseManagerQuery();
+    }
+  });
+  refreshDatabaseConnections();
+}
+
+function databaseConnectionFromForm() {
+  const selected = databaseManagerState.connections.find(item => item.id === databaseManagerState.selectedId);
+  return {
+    id: selected?.detected ? undefined : (databaseManagerState.selectedId || undefined),
+    name: document.getElementById('dbm-name').value.trim(),
+    type: document.getElementById('dbm-type').value,
+    host: document.getElementById('dbm-host').value.trim(),
+    port: Number(document.getElementById('dbm-port').value),
+    username: document.getElementById('dbm-username').value.trim(),
+    password: document.getElementById('dbm-password').value,
+    ssl: document.getElementById('dbm-ssl').checked,
+    rejectUnauthorized: document.getElementById('dbm-reject-unauthorized').checked
+  };
+}
+
+function setDatabaseManagerBusy(button, busy, label) {
+  if (!button) return;
+  if (busy) {
+    button.dataset.originalText = button.textContent;
+    button.disabled = true;
+    button.classList.add('is-busy');
+    if (label) button.textContent = label;
+  } else {
+    button.disabled = false;
+    button.classList.remove('is-busy');
+    if (button.dataset.originalText) button.textContent = button.dataset.originalText;
+    delete button.dataset.originalText;
+  }
+}
+
+async function refreshDatabaseConnections() {
+  const list = document.getElementById('dbm-connection-list');
+  const button = document.getElementById('dbm-refresh-connections');
+  if (!list) return;
+  setDatabaseManagerBusy(button, true, 'Detecting…');
+  list.innerHTML = '<div class="dbm-empty"><span class="inline-spinner"></span>Scanning local database ports…</div>';
+  try {
+    databaseManagerState.connections = await api.db.connections();
+    renderDatabaseConnections();
+    const selected = databaseManagerState.connections.find(connection => connection.id === databaseManagerState.selectedId);
+    if (selected) selectDatabaseConnection(selected.id);
+    else if (!databaseManagerState.selectedId && databaseManagerState.connections.length) selectDatabaseConnection(databaseManagerState.connections[0].id);
+  } catch (err) {
+    list.innerHTML = `<div class="db-error">${escapeHtml(err.message)}</div>`;
+  } finally {
+    setDatabaseManagerBusy(button, false);
+  }
+}
+
+function renderDatabaseConnections() {
+  const list = document.getElementById('dbm-connection-list');
+  if (!list) return;
+  if (!databaseManagerState.connections.length) {
+    list.innerHTML = '<div class="dbm-empty">No connections configured.</div>';
+    return;
+  }
+  list.innerHTML = databaseManagerState.connections.map(connection => `
+    <button class="dbm-connection${connection.id === databaseManagerState.selectedId ? ' active' : ''}" data-id="${escapeHtml(connection.id)}">
+      <span class="dbm-engine">${connection.type === 'postgresql' ? '🐘' : connection.type === 'mongodb' ? '🍃' : '🗄️'}</span>
+      <span class="dbm-connection-info"><strong>${escapeHtml(connection.name)}</strong><small>${escapeHtml(connection.host)}:${connection.port} · ${escapeHtml(connection.type)}</small></span>
+      <span class="dbm-online ${connection.online ? 'online' : ''}" title="${connection.online ? 'Port is reachable' : 'Port is not reachable'}"></span>
+    </button>`).join('');
+  list.querySelectorAll('.dbm-connection').forEach(button => button.addEventListener('click', () => selectDatabaseConnection(button.dataset.id)));
+}
+
+function selectDatabaseConnection(id) {
+  if (databaseManagerState.selectedId) {
+    databaseManagerState.passwords.set(databaseManagerState.selectedId, document.getElementById('dbm-password')?.value || '');
+  }
+  databaseManagerState.selectedId = id;
+  const connection = databaseManagerState.connections.find(item => item.id === id) || {
+    name: 'New connection', type: 'postgresql', host: '127.0.0.1', port: 5432, username: ''
+  };
+  document.getElementById('dbm-name').value = connection.name || '';
+  document.getElementById('dbm-type').value = connection.type;
+  document.getElementById('dbm-host').value = connection.host;
+  document.getElementById('dbm-port').value = connection.port;
+  document.getElementById('dbm-username').value = connection.username || '';
+  document.getElementById('dbm-password').value = id ? (databaseManagerState.passwords.get(id) || '') : '';
+  document.getElementById('dbm-ssl').checked = Boolean(connection.ssl);
+  document.getElementById('dbm-reject-unauthorized').checked = connection.rejectUnauthorized !== false;
+  const managed = Boolean(connection.managed);
+  const detected = Boolean(connection.detected);
+  for (const field of ['dbm-name', 'dbm-type', 'dbm-host', 'dbm-port', 'dbm-username', 'dbm-ssl', 'dbm-reject-unauthorized']) document.getElementById(field).disabled = managed;
+  document.getElementById('dbm-save').classList.toggle('hidden', managed);
+  document.getElementById('dbm-remove').classList.toggle('hidden', !id || managed || detected);
+  document.getElementById('dbm-workspace').classList.add('hidden');
+  document.getElementById('dbm-status').textContent = connection.online ? 'Port reachable' : 'Not connected';
+  document.getElementById('dbm-status').className = `dbm-status${connection.online ? ' online' : ''}`;
+  updateDatabaseQueryPlaceholder(connection.type);
+  renderDatabaseConnections();
+}
+
+function updateDatabaseQueryPlaceholder(type) {
+  const query = document.getElementById('dbm-query');
+  if (!query) return;
+  query.placeholder = type === 'mongodb'
+    ? '{"collection":"users","operation":"find","filter":{},"limit":100}'
+    : 'SELECT * FROM your_table LIMIT 100;';
+}
+
+async function saveDatabaseConnection() {
+  const button = document.getElementById('dbm-save');
+  setDatabaseManagerBusy(button, true, 'Saving…');
+  try {
+    const result = await api.db.saveConnection(databaseConnectionFromForm());
+    databaseManagerState.selectedId = result.id;
+    showToast('Database connection saved', 'success');
+    await refreshDatabaseConnections();
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    setDatabaseManagerBusy(button, false);
+  }
+}
+
+async function removeDatabaseConnection() {
+  const connection = databaseManagerState.connections.find(item => item.id === databaseManagerState.selectedId);
+  if (!connection || !confirm(`Remove connection "${connection.name}"?`)) return;
+  try {
+    await api.db.removeConnection(connection.id);
+    databaseManagerState.passwords.delete(connection.id);
+    databaseManagerState.selectedId = null;
+    selectDatabaseConnection(null);
+    await refreshDatabaseConnections();
+    showToast('Connection removed', 'success');
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function testDatabaseConnection() {
+  const button = document.getElementById('dbm-test');
+  const status = document.getElementById('dbm-status');
+  setDatabaseManagerBusy(button, true, 'Testing…');
+  status.textContent = 'Connecting…';
+  status.className = 'dbm-status';
+  try {
+    const result = await api.db.testConnection(databaseConnectionFromForm());
+    status.textContent = `Connected · ${result.databases} databases`;
+    status.className = 'dbm-status online';
+    showToast('Database connection works', 'success');
+  } catch (err) {
+    status.textContent = 'Connection failed';
+    status.className = 'dbm-status failed';
+    showToast(err.message, 'error');
+  } finally { setDatabaseManagerBusy(button, false); }
+}
+
+async function connectDatabaseManager() {
+  const button = document.getElementById('dbm-connect');
+  const status = document.getElementById('dbm-status');
+  setDatabaseManagerBusy(button, true, 'Connecting…');
+  try {
+    const connection = databaseConnectionFromForm();
+    const databases = await api.db.listDatabasesFor(connection);
+    databaseManagerState.connection = connection;
+    const select = document.getElementById('dbm-database');
+    select.innerHTML = databases.map(database => `<option value="${escapeHtml(database)}">${escapeHtml(database)}</option>`).join('');
+    document.getElementById('dbm-workspace').classList.remove('hidden');
+    status.textContent = `Connected · ${databases.length} databases`;
+    status.className = 'dbm-status online';
+    await refreshDatabaseManagerTables();
+    await refreshDatabaseManagerBackups();
+  } catch (err) {
+    status.textContent = 'Connection failed';
+    status.className = 'dbm-status failed';
+    showToast(err.message, 'error');
+  } finally { setDatabaseManagerBusy(button, false); }
+}
+
+async function refreshDatabaseManagerTables() {
+  const database = document.getElementById('dbm-database')?.value;
+  const list = document.getElementById('dbm-table-list');
+  if (!databaseManagerState.connection || !database || !list) {
+    if (list) list.innerHTML = '<span class="dbm-empty">No database selected.</span>';
+    return;
+  }
+  list.innerHTML = '<span class="inline-spinner"></span>Loading…';
+  try {
+    const tables = await api.db.listTablesFor(databaseManagerState.connection, database);
+    list.innerHTML = tables.length ? tables.map(table => `<button class="dbm-table" data-table="${escapeHtml(table)}">${escapeHtml(table)}</button>`).join('') : '<span class="dbm-empty">No tables or collections.</span>';
+    list.querySelectorAll('.dbm-table').forEach(button => button.addEventListener('click', () => {
+      const table = button.dataset.table;
+      const query = document.getElementById('dbm-query');
+      if (databaseManagerState.connection.type === 'mongodb') query.value = JSON.stringify({ collection: table, operation: 'find', filter: {}, limit: 100 }, null, 2);
+      else if (databaseManagerState.connection.type === 'postgresql') query.value = `SELECT * FROM "${table.replace(/"/g, '""')}" LIMIT 100;`;
+      else query.value = `SELECT * FROM \`${table.replace(/`/g, '``')}\` LIMIT 100;`;
+    }));
+  } catch (err) { list.innerHTML = `<span class="db-error">${escapeHtml(err.message)}</span>`; }
+}
+
+async function createDatabaseManagerDatabase() {
+  const name = document.getElementById('dbm-new-database').value.trim();
+  if (!name || !databaseManagerState.connection) return;
+  try {
+    await api.db.createDatabaseFor(databaseManagerState.connection, name);
+    document.getElementById('dbm-new-database').value = '';
+    await connectDatabaseManager();
+    document.getElementById('dbm-database').value = name;
+    await refreshDatabaseManagerTables();
+    showToast(`Database ${name} created`, 'success');
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function dropDatabaseManagerDatabase() {
+  const database = document.getElementById('dbm-database')?.value;
+  if (!database || !databaseManagerState.connection || !confirm(`Permanently drop database "${database}"?`)) return;
+  try {
+    await api.db.dropDatabaseFor(databaseManagerState.connection, database);
+    await connectDatabaseManager();
+    showToast(`Database ${database} dropped`, 'success');
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+async function runDatabaseManagerQuery() {
+  const query = document.getElementById('dbm-query').value.trim();
+  const database = document.getElementById('dbm-database')?.value;
+  const resultWrap = document.getElementById('dbm-result');
+  const button = document.getElementById('dbm-run-query');
+  if (!query || !database || !databaseManagerState.connection) return;
+  setDatabaseManagerBusy(button, true, 'Running…');
+  resultWrap.innerHTML = '<div class="dbm-empty"><span class="inline-spinner"></span>Executing query…</div>';
+  try {
+    const result = await api.db.executeQueryFor(databaseManagerState.connection, database, query);
+    renderDatabaseManagerResult(result);
+    await refreshDatabaseManagerTables();
+  } catch (err) {
+    resultWrap.innerHTML = `<div class="db-error">${escapeHtml(err.message)}</div>`;
+  } finally { setDatabaseManagerBusy(button, false); }
+}
+
+function renderDatabaseManagerResult(data) {
+  const wrap = document.getElementById('dbm-result');
+  if (!data?.columns?.length) {
+    wrap.innerHTML = `<div class="db-success">✓ ${escapeHtml(data?.message || 'Query executed successfully')}</div>`;
+    return;
+  }
+  wrap.innerHTML = `<table class="db-data-table"><thead><tr>${data.columns.map(column => `<th>${escapeHtml(column)}</th>`).join('')}</tr></thead><tbody>${data.rows.map(row => `<tr>${row.map(cell => `<td${cell == null || cell === '' || cell === 'NULL' ? ' class="db-null"' : ''}>${escapeHtml(cell == null ? 'NULL' : cell)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+}
+
+async function refreshDatabaseManagerBackups() {
+  const list = document.getElementById('dbm-backup-list');
+  const database = document.getElementById('dbm-database')?.value;
+  if (!list || !databaseManagerState.connection || !database) return;
+  list.innerHTML = '<div class="dbm-empty"><span class="inline-spinner"></span>Loading backups…</div>';
+  try {
+    const backups = await api.backup.list({ type: databaseManagerState.connection.type, database });
+    if (!backups.length) {
+      list.innerHTML = '<div class="dbm-empty">No backups for this database.</div>';
+      return;
+    }
+    list.innerHTML = backups.map(backup => `<div class="dbm-backup-row"><div class="dbm-backup-info"><strong>${escapeHtml(backup.label || backup.database)}</strong><span>${escapeHtml(new Date(backup.createdAt).toLocaleString())} · ${formatBackupSize(backup.size)} · ${backup.exists ? escapeHtml(backup.checksum.slice(0, 12)) : 'file missing'}</span></div>${backup.verifiedAt ? '<span class="dbm-backup-verified">✓ verified</span>' : ''}<div class="dbm-backup-row-actions"><button class="btn btn-small dbm-backup-verify" data-id="${escapeHtml(backup.id)}">Verify</button><button class="btn btn-small dbm-backup-restore" data-id="${escapeHtml(backup.id)}">Restore</button><button class="btn btn-small btn-danger dbm-backup-delete" data-id="${escapeHtml(backup.id)}">🗑</button></div></div>`).join('');
+    list.querySelectorAll('.dbm-backup-verify').forEach(button => button.addEventListener('click', () => verifyDatabaseManagerBackup(button.dataset.id)));
+    list.querySelectorAll('.dbm-backup-restore').forEach(button => button.addEventListener('click', () => restoreDatabaseManagerBackup(button.dataset.id)));
+    list.querySelectorAll('.dbm-backup-delete').forEach(button => button.addEventListener('click', () => removeDatabaseManagerBackup(button.dataset.id)));
+  } catch (error) { list.innerHTML = `<div class="db-error">${escapeHtml(error.message)}</div>`; }
+}
+
+async function createDatabaseManagerBackup() {
+  const database = document.getElementById('dbm-database')?.value;
+  if (!databaseManagerState.connection || !database) return showToast('Connect and select a database first', 'error');
+  const button = document.getElementById('dbm-create-backup');
+  setDatabaseManagerBusy(button, true, 'Backing up…');
+  try {
+    const keep = Number(document.getElementById('dbm-backup-keep').value) || 10;
+    const result = await api.backup.create(databaseManagerState.connection, database, { keep });
+    showToast(result.success ? `Backup created (${formatBackupSize(result.backup.size)})` : result.error, result.success ? 'success' : 'error');
+    await refreshDatabaseManagerBackups();
+  } catch (error) { showToast(error.message, 'error'); }
+  finally { setDatabaseManagerBusy(button, false); }
+}
+
+async function verifyDatabaseManagerBackup(id) {
+  const result = await api.backup.verify(id);
+  showToast(result.success ? 'Backup checksum is valid' : result.error, result.success ? 'success' : 'error');
+  await refreshDatabaseManagerBackups();
+}
+
+async function restoreDatabaseManagerBackup(id) {
+  const database = document.getElementById('dbm-database')?.value;
+  if (!database || !databaseManagerState.connection) return;
+  if (!confirm(`Restore this backup into "${database}"? Existing objects may be replaced or removed.`)) return;
+  const confirmation = prompt(`Type the database name to confirm restore: ${database}`);
+  if (confirmation !== database) return showToast('Restore cancelled: database name did not match', 'error');
+  try {
+    const result = await api.backup.restore(id, databaseManagerState.connection, database);
+    showToast(result.success ? `Database ${database} restored` : result.error, result.success ? 'success' : 'error');
+    await refreshDatabaseManagerTables();
+  } catch (error) { showToast(error.message, 'error'); }
+}
+
+async function removeDatabaseManagerBackup(id) {
+  if (!confirm('Permanently delete this backup file?')) return;
+  const result = await api.backup.remove(id);
+  showToast(result.success ? 'Backup removed' : result.error, result.success ? 'success' : 'error');
+  await refreshDatabaseManagerBackups();
+}
+
+async function saveDatabaseBackupSchedule() {
+  const database = document.getElementById('dbm-database')?.value;
+  const connection = databaseManagerState.connection;
+  if (!connection || !database) return showToast('Connect and select a database first', 'error');
+  if (!connection.id || connection.detected) return showToast('Save this connection before scheduling backups', 'error');
+  try {
+    const schedule = await api.backup.saveSchedule({
+      name: `${connection.name}: ${database}`,
+      type: connection.type,
+      connectionId: connection.id,
+      database,
+      intervalHours: Number(document.getElementById('dbm-backup-interval').value),
+      keep: Number(document.getElementById('dbm-backup-keep').value),
+      enabled: true
+    });
+    showToast(`Backup scheduled every ${schedule.intervalHours} hour(s)`, 'success');
+  } catch (error) { showToast(error.message, 'error'); }
+}
+
+function formatBackupSize(bytes) {
+  const value = Number(bytes) || 0;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MiB`;
+  return `${(value / 1024 / 1024 / 1024).toFixed(2)} GiB`;
 }
 
 async function dbRefresh(section) {
@@ -2132,7 +2770,8 @@ function initLogViewers() {
       btn.classList.toggle('active', logViewerState[section].autoRefresh);
     });
 
-    container.querySelector('[data-action="clear"]').addEventListener('click', () => {
+    container.querySelector('[data-action="clear"]').addEventListener('click', async () => {
+      await api.service.clearLogs(section);
       const output = document.getElementById('log-output-' + section);
       output.innerHTML = '<div class="log-empty">Logs cleared.</div>';
     });
@@ -2286,34 +2925,640 @@ async function refreshProjectList(section) {
 
 /* ===== Folder Buttons ===== */
 function bindFolderButtons() {
-  // Apache document root
-  const apacheDocRootBtn = document.getElementById('btn-open-apache-docroot');
-  if (apacheDocRootBtn) {
-    apacheDocRootBtn.addEventListener('click', () => {
-      const docRoot = document.getElementById('apache-documentRoot').value || './www';
-      api.shell.openPath(docRoot);
+  for (const section of ['apache', 'nginx', 'caddy']) {
+    const button = document.getElementById(`btn-open-${section}-docroot`);
+    if (!button) continue;
+    button.addEventListener('click', async () => {
+      const input = document.getElementById(`${section}-documentRoot`);
+      if (!input) return;
+      const original = button.textContent;
+      button.disabled = true;
+      button.classList.add('is-busy');
+      button.textContent = 'Choosing…';
+      try {
+        let directory;
+        const picked = await api.shell.selectDirectory(input.value || undefined);
+        if (picked.canceled) return;
+        if (!picked.success) throw new Error(picked.error || 'Could not choose directory');
+        directory = picked.path;
+        if (!directory) return;
+        button.textContent = statuses[section]?.running ? 'Restarting…' : 'Saving…';
+        const result = await api.config.setDocumentRoot(section, directory);
+        if (!result.success) throw new Error(result.error || 'Could not save document root');
+        config = result.config;
+        populateSectionUI(section);
+        syncDocumentRootControls();
+        dirty = false;
+        showToast(`Document root saved${result.restarted?.length ? ` and ${sectionLabel(section)} restarted` : ''}`, 'success');
+        await refreshStatuses();
+      } catch (err) {
+        showToast(err.message, 'error');
+      } finally {
+        button.disabled = false;
+        button.classList.remove('is-busy');
+        button.textContent = original;
+      }
     });
   }
-  // Nginx document root
-  const nginxDocRootBtn = document.getElementById('btn-open-nginx-docroot');
-  if (nginxDocRootBtn) {
-    nginxDocRootBtn.addEventListener('click', () => {
-      const docRoot = document.getElementById('nginx-documentRoot').value || './www';
-      api.shell.openPath(docRoot);
-    });
-  }
-  // Caddy document root
-  const caddyDocRootBtn = document.getElementById('btn-open-caddy-docroot');
-  if (caddyDocRootBtn) {
-    caddyDocRootBtn.addEventListener('click', () => {
-      const docRoot = document.getElementById('caddy-documentRoot').value || './www';
-      api.shell.openPath(docRoot);
-    });
+
+  const globalToggle = document.getElementById('general-forceGlobalDocumentRoot');
+  const globalButton = document.getElementById('btn-global-docroot');
+  const applyGlobalRoot = async (enabled, chooseDirectory) => {
+    const input = document.getElementById('general-globalDocumentRoot');
+    const original = globalButton?.textContent;
+    if (globalButton) {
+      globalButton.disabled = true;
+      globalButton.classList.add('is-busy');
+      globalButton.textContent = chooseDirectory ? 'Choosing…' : 'Applying…';
+    }
+    if (globalToggle) globalToggle.disabled = true;
+    try {
+      let directory = input?.value || config.general?.globalDocumentRoot || './www';
+      if (chooseDirectory) {
+        const picked = await api.shell.selectDirectory(directory || undefined);
+        if (picked.canceled) return;
+        if (!picked.success) throw new Error(picked.error || 'Could not choose directory');
+        directory = picked.path;
+      }
+      if (!directory) return;
+      if (globalButton) {
+        const webRunning = ['apache', 'nginx', 'caddy'].some(section => statuses[section]?.running);
+        globalButton.textContent = webRunning ? 'Restarting…' : 'Saving…';
+      }
+      const result = await api.config.setGlobalDocumentRoot(enabled, directory);
+      if (!result.success) throw new Error(result.error || 'Could not update the global document root');
+      config = result.config;
+      for (const section of ['apache', 'nginx', 'caddy']) populateSectionUI(section);
+      syncDocumentRootControls();
+      dirty = false;
+      const restarted = result.restarted?.length ? ` Restarted: ${result.restarted.map(sectionLabel).join(', ')}.` : '';
+      showToast(`Global document root ${enabled ? 'enabled' : 'disabled'}.${restarted}`, 'success');
+      await refreshStatuses();
+    } catch (err) {
+      showToast(err.message, 'error');
+      syncDocumentRootControls();
+    } finally {
+      if (globalButton) {
+        globalButton.disabled = false;
+        globalButton.classList.remove('is-busy');
+        globalButton.textContent = original;
+      }
+      if (globalToggle) globalToggle.disabled = false;
+      syncDocumentRootControls();
+    }
+  };
+  globalToggle?.addEventListener('change', () => applyGlobalRoot(globalToggle.checked, false));
+  globalButton?.addEventListener('click', () => applyGlobalRoot(Boolean(globalToggle?.checked), true));
+}
+
+/* ===== Project Workspaces / Activity / Diagnostics ===== */
+const workspaceState = { templates: [], projects: [], activities: [], doctor: null, ports: [], toolchains: [], ides: [], tasks: [], snapshots: [], plugins: [], platform: null, tunnels: [], tunnelProviders: [], initialized: false };
+
+function initWorkspaceCenter() {
+  if (!api.workspace || workspaceState.initialized) return;
+  workspaceState.initialized = true;
+  document.getElementById('workspace-new')?.addEventListener('click', () => openWorkspaceEditor());
+  document.getElementById('workspace-editor-close')?.addEventListener('click', closeWorkspaceEditor);
+  document.getElementById('workspace-editor-cancel')?.addEventListener('click', closeWorkspaceEditor);
+  document.getElementById('workspace-editor-save')?.addEventListener('click', saveWorkspaceEditor);
+  document.getElementById('workspace-template')?.addEventListener('change', applyWorkspaceTemplate);
+  document.getElementById('workspace-pick-root')?.addEventListener('click', pickWorkspaceRoot);
+  document.getElementById('workspace-refresh')?.addEventListener('click', refreshWorkspaceCenter);
+  document.getElementById('workspace-search')?.addEventListener('input', renderWorkspaceCards);
+  document.getElementById('workspace-state-filter')?.addEventListener('change', renderWorkspaceCards);
+  document.getElementById('workspace-doctor')?.addEventListener('click', runWorkspaceDoctor);
+  document.getElementById('doctor-run')?.addEventListener('click', runWorkspaceDoctor);
+  document.getElementById('activity-clear')?.addEventListener('click', async () => { await api.activity.clear(); await refreshActivities(); });
+  document.getElementById('port-find')?.addEventListener('click', findWorkspacePort);
+  document.getElementById('workspace-import')?.addEventListener('click', importWorkspaceManifest);
+  document.getElementById('workspace-domain-sync')?.addEventListener('click', syncWorkspaceDomains);
+  document.getElementById('workspace-env-export')?.addEventListener('click', exportWorkspaceEnvironment);
+  document.getElementById('workspace-env-import')?.addEventListener('click', importWorkspaceEnvironment);
+  document.getElementById('workspace-snapshot')?.addEventListener('click', createWorkspaceSnapshot);
+  document.getElementById('snapshot-refresh')?.addEventListener('click', refreshWorkspaceSnapshots);
+  document.getElementById('plugin-install')?.addEventListener('click', installWorkspacePlugin);
+  document.getElementById('platform-refresh')?.addEventListener('click', refreshPlatformInventory);
+  document.getElementById('tunnel-refresh')?.addEventListener('click', refreshWorkspaceTunnels);
+  document.getElementById('toolchain-refresh')?.addEventListener('click', refreshWorkspaceDevTools);
+  document.getElementById('command-clear')?.addEventListener('click', async () => { await api.command.clear(); await refreshWorkspaceTasks(); });
+  api.command?.onOutput?.(payload => {
+    const task = workspaceState.tasks.find(item => item.id === payload.id);
+    if (task) task.output = `${task.output || ''}${payload.data || ''}`.slice(-200000);
+    renderWorkspaceTasks();
+  });
+  api.command?.onExit?.(() => refreshWorkspaceTasks());
+  api.activity?.onChanged?.(() => {
+    if (document.getElementById('panel-workspaces')?.classList.contains('active')) {
+      refreshActivities();
+      refreshWorkspaceProjects();
+    }
+  });
+  api.tunnel?.onChanged?.(() => refreshWorkspaceTunnels());
+}
+
+async function refreshWorkspaceCenter() {
+  try {
+    if (!workspaceState.templates.length) {
+      workspaceState.templates = await api.workspace.templates();
+      const select = document.getElementById('workspace-template');
+      if (select) select.innerHTML = workspaceState.templates.map(template => `<option value="${escapeHtml(template.id)}">${escapeHtml(template.name)}</option>`).join('');
+      renderWorkspaceServiceChoices([]);
+    }
+    await Promise.all([refreshWorkspaceProjects(), refreshActivities(), refreshWorkspacePorts(), refreshWorkspaceDevTools(), refreshWorkspaceTasks(), refreshWorkspaceSnapshots(), refreshWorkspacePlugins(), refreshPlatformInventory(), refreshWorkspaceTunnels()]);
+  } catch (error) {
+    showToast(`Could not load projects: ${error.message}`, 'error');
   }
 }
 
+async function refreshWorkspaceProjects() {
+  workspaceState.projects = await api.workspace.list();
+  document.getElementById('workspace-count').textContent = workspaceState.projects.length;
+  document.getElementById('workspace-running-count').textContent = workspaceState.projects.filter(project => project.state?.status === 'running').length;
+  renderWorkspaceCards();
+}
+
+function renderWorkspaceCards() {
+  const container = document.getElementById('workspace-grid');
+  if (!container) return;
+  const query = (document.getElementById('workspace-search')?.value || '').trim().toLowerCase();
+  const stateFilter = document.getElementById('workspace-state-filter')?.value || 'all';
+  const projects = workspaceState.projects.filter(project => {
+    const state = project.state?.status || 'stopped';
+    if (stateFilter !== 'all' && state !== stateFilter) return false;
+    return !query || [project.name, project.domain, project.root, ...(project.services || [])].join(' ').toLowerCase().includes(query);
+  });
+  if (!projects.length) {
+    container.innerHTML = `<div class="workspace-empty">${workspaceState.projects.length ? 'No projects match the selected filters.' : 'No projects yet. Create the first environment from a stack template.'}</div>`;
+    return;
+  }
+  container.innerHTML = projects.map(project => {
+    const state = project.state?.status || 'stopped';
+    const busy = ['starting', 'stopping'].includes(state);
+    return `<article class="workspace-card ${escapeHtml(state)}" data-workspace-id="${escapeHtml(project.id)}">
+      <div class="workspace-card-head"><div class="workspace-card-title"><span>${escapeHtml(project.icon)}</span><div><h3>${escapeHtml(project.name)}</h3><p>${escapeHtml(project.templateId)}</p></div></div><span class="workspace-state ${escapeHtml(state)}">${escapeHtml(state)}</span></div>
+      <div class="workspace-card-domain">${project.https ? '🔒' : '🌐'} ${escapeHtml(project.domain)}</div>
+      <div class="workspace-card-meta">${(project.services || []).map(service => `<span class="workspace-chip">${escapeHtml(sectionLabel(service))}</span>`).join('') || '<span class="workspace-chip">No managed services</span>'}</div>
+      <div class="workspace-card-path" title="${escapeHtml(project.root)}">${escapeHtml(project.root)}</div>
+      ${state === 'failed' && project.state?.error ? `<div class="form-help" style="color:var(--danger);margin-bottom:8px">${escapeHtml(project.state.error)}</div>` : ''}
+      ${Object.keys(project.commands || {}).length ? `<div class="workspace-command-bar"><span>Commands</span>${workspaceState.platform?.wsl?.supported ? `<select class="workspace-command-target"><option value="host">Windows host</option>${workspaceState.platform.wsl.distributions.map(name => `<option value="${escapeHtml(name)}">WSL · ${escapeHtml(name)}</option>`).join('')}</select>` : ''}${Object.keys(project.commands).map(name => `<button class="btn btn-small workspace-command" data-command="${escapeHtml(name)}">▶ ${escapeHtml(name)}</button>`).join('')}</div>` : ''}
+      ${workspaceState.ides.some(ide => ide.installed) ? `<div class="workspace-ide-row"><select class="workspace-ide-select">${workspaceState.ides.filter(ide => ide.installed).map(ide => `<option value="${escapeHtml(ide.id)}">${escapeHtml(ide.name)}</option>`).join('')}</select><button class="btn btn-small workspace-open-ide">Open IDE</button></div>` : ''}
+      <div class="workspace-card-actions">
+        ${state === 'running' ? '<button class="btn workspace-stop"'+(busy?' disabled':'')+'>⏹ Stop</button>' : '<button class="btn btn-primary workspace-start"'+(busy?' disabled':'')+'>▶ Start</button>'}
+        <button class="btn workspace-open-url" ${state !== 'running' ? 'disabled' : ''}>🌐 Open</button>
+        <button class="btn workspace-share" ${state !== 'running' || !workspaceState.tunnelProviders.some(item => item.installed) ? 'disabled' : ''}>↗ Share</button>
+        <button class="btn workspace-open-dir">📂 Folder</button>
+        <button class="btn workspace-edit">✎ Edit</button>
+        ${project.https ? '<button class="btn workspace-certificate">🔒 HTTPS</button>' : ''}
+        <button class="btn workspace-export">⇩ Export</button>
+        <button class="btn btn-danger workspace-delete">🗑</button>
+      </div>
+    </article>`;
+  }).join('');
+  for (const card of container.querySelectorAll('[data-workspace-id]')) bindWorkspaceCard(card);
+}
+
+function bindWorkspaceCard(card) {
+  const id = card.dataset.workspaceId;
+  const project = workspaceState.projects.find(item => item.id === id);
+  const run = async (button, action) => {
+    button.disabled = true;
+    button.classList.add('loading');
+    try {
+      const result = await action();
+      if (result?.success === false) showToast(result.error || 'Operation failed', 'error');
+      else showToast(`${project.name}: operation completed`, 'success');
+    } catch (error) { showToast(error.message, 'error'); }
+    finally { button.classList.remove('loading'); await refreshWorkspaceCenter(); }
+  };
+  card.querySelector('.workspace-start')?.addEventListener('click', event => run(event.currentTarget, async () => {
+    const result = await api.workspace.start(id);
+    if (result.success && project.autoOpen && result.url) await api.shell.openExternal(result.url);
+    return result;
+  }));
+  card.querySelector('.workspace-stop')?.addEventListener('click', event => run(event.currentTarget, () => api.workspace.stop(id)));
+  card.querySelector('.workspace-open-url')?.addEventListener('click', async () => {
+    const result = await api.workspace.url(id);
+    if (result.url) await api.shell.openExternal(result.url);
+  });
+  card.querySelector('.workspace-share')?.addEventListener('click', event => shareWorkspaceProject(project, event.currentTarget));
+  card.querySelector('.workspace-open-dir')?.addEventListener('click', async () => {
+    const result = await api.workspace.open(id);
+    if (result.webMode && result.path && navigator.clipboard) {
+      try { await navigator.clipboard.writeText(result.path); showToast('Server path copied to clipboard', 'success'); } catch {}
+    } else if (!result.success) showToast(result.error, 'error');
+  });
+  card.querySelector('.workspace-edit')?.addEventListener('click', () => openWorkspaceEditor(project));
+  card.querySelectorAll('.workspace-command').forEach(button => button.addEventListener('click', () => {
+    const target = card.querySelector('.workspace-command-target')?.value || 'host';
+    return startWorkspaceCommand(project.id, button.dataset.command, button, target === 'host' ? 'host' : 'wsl', target === 'host' ? '' : target);
+  }));
+  card.querySelector('.workspace-open-ide')?.addEventListener('click', async () => {
+    const ideId = card.querySelector('.workspace-ide-select')?.value;
+    const result = await api.ide.open(project.id, ideId);
+    showToast(result.success ? `Opened ${project.name} in the selected IDE` : result.error, result.success ? 'success' : 'error');
+  });
+  card.querySelector('.workspace-certificate')?.addEventListener('click', event => provisionWorkspaceCertificate(project, event.currentTarget));
+  card.querySelector('.workspace-export')?.addEventListener('click', async () => downloadWorkspaceManifest(await api.workspace.export(id), `${project.slug}.kitsune.json`));
+  card.querySelector('.workspace-delete')?.addEventListener('click', async () => {
+    if (!confirm(`Remove project "${project.name}" from KitsuneServ? Project files will be preserved.`)) return;
+    const result = await api.workspace.remove(id, { deleteFiles: false });
+    if (!result.success) showToast(result.error, 'error');
+    else { showToast('Project removed; files were preserved', 'success'); await refreshWorkspaceCenter(); }
+  });
+}
+
+function renderWorkspaceServiceChoices(selected) {
+  const container = document.getElementById('workspace-service-choices');
+  if (!container) return;
+  container.innerHTML = SERVICE_SECTIONS.map(service => `<label class="workspace-service-choice"><input type="checkbox" value="${service}" ${selected.includes(service) ? 'checked' : ''}><span>${SECTION_ICONS[service] || '⚙️'} ${escapeHtml(sectionLabel(service))}</span></label>`).join('');
+}
+
+function openWorkspaceEditor(project = null) {
+  const editor = document.getElementById('workspace-editor');
+  editor.classList.remove('hidden');
+  document.getElementById('workspace-editor-title').textContent = project ? `Edit ${project.name}` : 'Create project';
+  document.getElementById('workspace-editor-save').textContent = project ? 'Save changes' : 'Create project';
+  document.getElementById('workspace-id').value = project?.id || '';
+  document.getElementById('workspace-name').value = project?.name || '';
+  document.getElementById('workspace-root').value = project?.root || '';
+  document.getElementById('workspace-domain').value = project?.domain || '';
+  document.getElementById('workspace-public-dir').value = project?.publicDir || '.';
+  document.getElementById('workspace-https').checked = Boolean(project?.https);
+  document.getElementById('workspace-auto-open').checked = project?.autoOpen !== false;
+  document.getElementById('workspace-template').value = project?.templateId || workspaceState.templates[0]?.id || 'blank';
+  if (project) {
+    renderWorkspaceServiceChoices(project.services || []);
+    document.getElementById('workspace-template-description').textContent = workspaceState.templates.find(item => item.id === project.templateId)?.description || '';
+  } else applyWorkspaceTemplate();
+  document.getElementById('workspace-name').focus();
+  editor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function closeWorkspaceEditor() {
+  document.getElementById('workspace-editor')?.classList.add('hidden');
+}
+
+function applyWorkspaceTemplate() {
+  const template = workspaceState.templates.find(item => item.id === document.getElementById('workspace-template')?.value);
+  if (!template) return;
+  renderWorkspaceServiceChoices(template.services || []);
+  document.getElementById('workspace-public-dir').value = template.publicDir || '.';
+  document.getElementById('workspace-template-description').textContent = template.description || '';
+}
+
+async function pickWorkspaceRoot() {
+  const current = document.getElementById('workspace-root').value;
+  const result = await api.shell.selectDirectory(current);
+  if (result?.success && result.path) document.getElementById('workspace-root').value = result.path;
+}
+
+async function saveWorkspaceEditor() {
+  const button = document.getElementById('workspace-editor-save');
+  const id = document.getElementById('workspace-id').value;
+  const options = {
+    name: document.getElementById('workspace-name').value.trim(),
+    templateId: document.getElementById('workspace-template').value,
+    domain: document.getElementById('workspace-domain').value.trim() || undefined,
+    root: document.getElementById('workspace-root').value.trim() || undefined,
+    publicDir: document.getElementById('workspace-public-dir').value.trim() || '.',
+    https: document.getElementById('workspace-https').checked,
+    autoOpen: document.getElementById('workspace-auto-open').checked,
+    services: [...document.querySelectorAll('#workspace-service-choices input:checked')].map(input => input.value)
+  };
+  if (!options.name) return showToast('Project name is required', 'error');
+  button.disabled = true;
+  try {
+    if (id) await api.workspace.update(id, options);
+    else await api.workspace.create(options);
+    closeWorkspaceEditor();
+    showToast(id ? 'Project updated' : 'Project created', 'success');
+    await refreshWorkspaceCenter();
+  } catch (error) { showToast(error.message, 'error'); }
+  finally { button.disabled = false; }
+}
+
+async function refreshActivities() {
+  if (!api.activity) return;
+  workspaceState.activities = await api.activity.list({ limit: 50 });
+  const running = workspaceState.activities.filter(activity => activity.status === 'running');
+  document.getElementById('workspace-busy-count').textContent = running.length;
+  const container = document.getElementById('activity-list');
+  if (!workspaceState.activities.length) {
+    container.innerHTML = '<div class="workspace-empty compact">No operations yet.</div>';
+    return;
+  }
+  const icons = { completed: '✓', failed: '✕', cancelled: '⊘', running: '⟳', interrupted: '⚠' };
+  container.innerHTML = workspaceState.activities.map(activity => `<div class="activity-row"><span class="activity-icon ${escapeHtml(activity.status)}">${icons[activity.status] || '•'}</span><div class="activity-main"><strong>${escapeHtml(activity.title)}</strong><span>${escapeHtml(activity.message || activity.stage)} · ${escapeHtml(new Date(activity.updatedAt).toLocaleString())}</span>${activity.status === 'running' ? `<div class="activity-progress"><i style="width:${Number(activity.progress) || 0}%"></i></div>` : ''}</div>${activity.status === 'running' && activity.cancellable !== false ? `<button class="btn btn-small activity-cancel" data-id="${escapeHtml(activity.id)}">Cancel</button>` : `<span class="workspace-state ${escapeHtml(activity.status)}">${escapeHtml(activity.status)}</span>`}</div>`).join('');
+  for (const button of container.querySelectorAll('.activity-cancel')) button.addEventListener('click', async () => { await api.activity.cancel(button.dataset.id); await refreshActivities(); });
+}
+
+async function runWorkspaceDoctor() {
+  const buttons = [document.getElementById('workspace-doctor'), document.getElementById('doctor-run')].filter(Boolean);
+  buttons.forEach(button => { button.disabled = true; button.classList.add('loading'); });
+  try {
+    workspaceState.doctor = await api.diagnostics.doctor();
+    document.getElementById('workspace-issue-count').textContent = workspaceState.doctor.issues.length;
+    renderWorkspaceDoctor();
+    await refreshWorkspacePorts();
+    showToast(workspaceState.doctor.healthy ? 'Environment is healthy' : `Doctor found ${workspaceState.doctor.issues.length} issue(s)`, workspaceState.doctor.healthy ? 'success' : 'error');
+  } catch (error) { showToast(error.message, 'error'); }
+  finally { buttons.forEach(button => { button.disabled = false; button.classList.remove('loading'); }); }
+}
+
+function renderWorkspaceDoctor() {
+  const container = document.getElementById('doctor-results');
+  const report = workspaceState.doctor;
+  if (!report) return;
+  if (!report.issues.length) {
+    container.innerHTML = '<div class="workspace-empty compact" style="color:var(--success)">✓ No problems detected.</div>';
+    return;
+  }
+  container.innerHTML = report.issues.map((issue, index) => `<div class="doctor-row"><i class="doctor-severity ${escapeHtml(issue.severity)}"></i><div><strong>${escapeHtml(issue.message)}</strong><span>${escapeHtml(issue.service || issue.path || issue.code)}</span></div>${issue.repair ? `<button class="btn btn-small doctor-repair" data-index="${index}">Repair</button>` : ''}</div>`).join('');
+  for (const button of container.querySelectorAll('.doctor-repair')) button.addEventListener('click', async () => {
+    const issue = report.issues[Number(button.dataset.index)];
+    const result = await api.diagnostics.repair(issue);
+    showToast(result.success ? result.message || 'Issue repaired' : result.error, result.success ? 'success' : 'error');
+    await runWorkspaceDoctor();
+  });
+}
+
+async function refreshWorkspacePorts() {
+  if (!api.diagnostics) return;
+  workspaceState.ports = await api.diagnostics.ports();
+  const body = document.getElementById('port-table-body');
+  if (!workspaceState.ports.length) {
+    body.innerHTML = '<tr><td colspan="5">No configured ports.</td></tr>';
+    return;
+  }
+  body.innerHTML = workspaceState.ports.map(row => `<tr><td>${escapeHtml(sectionLabel(row.service))}</td><td>${escapeHtml(row.field)}</td><td><code>${row.port}</code></td><td>${row.running ? '<span class="port-ok">running</span>' : 'stopped'}</td><td>${row.conflict ? '<span class="port-conflict">configuration conflict</span>' : row.running ? '<span class="port-ok">owned by service</span>' : row.available ? '<span class="port-ok">available</span>' : '<span class="port-busy">occupied externally</span>'}</td></tr>`).join('');
+}
+
+async function findWorkspacePort() {
+  const start = Number(document.getElementById('port-find-start').value) || 3000;
+  const result = await api.diagnostics.findFreePort(start, Math.min(65535, start + 1000));
+  showToast(result.success ? `Free port: ${result.port}` : result.error, result.success ? 'success' : 'error');
+  if (result.success) document.getElementById('port-find-start').value = result.port;
+}
+
+async function syncWorkspaceDomains() {
+  const button = document.getElementById('workspace-domain-sync');
+  button.disabled = true; button.classList.add('loading');
+  try {
+    const status = await api.domain.status();
+    if (status.synchronized) return showToast('Local domains are already synchronized', 'success');
+    const result = await api.domain.apply();
+    showToast(result.success ? `Synchronized ${result.domains?.length || 0} local domain(s)` : result.error, result.success ? 'success' : 'error');
+  } catch (error) { showToast(error.message, 'error'); }
+  finally { button.disabled = false; button.classList.remove('loading'); }
+}
+
+async function provisionWorkspaceCertificate(project, button) {
+  button.disabled = true; button.classList.add('loading');
+  try {
+    let status = await api.domain.certificateStatus(project.domain);
+    if (status.exists) return showToast(`HTTPS certificate is ready${status.expiresAt ? ` until ${new Date(status.expiresAt).toLocaleDateString()}` : ''}`, 'success');
+    if (!status.mkcertInstalled) {
+      showToast('mkcert is required. Install it with winget install FiloSottile.mkcert, then retry.', 'error');
+      return;
+    }
+    const trusted = await api.domain.installCertificateAuthority();
+    if (!trusted.success) throw new Error(trusted.error);
+    const issued = await api.domain.issueCertificate(project.domain);
+    if (!issued.success) throw new Error(issued.error);
+    showToast(`Trusted HTTPS certificate created for ${project.domain}`, 'success');
+  } catch (error) { showToast(error.message, 'error'); }
+  finally { button.disabled = false; button.classList.remove('loading'); }
+}
+
+async function refreshWorkspaceDevTools() {
+  if (!api.toolchain) return;
+  const button = document.getElementById('toolchain-refresh');
+  if (button) { button.disabled = true; button.classList.add('loading'); }
+  try {
+    [workspaceState.toolchains, workspaceState.ides] = await Promise.all([api.toolchain.list(), api.ide.list()]);
+    const container = document.getElementById('toolchain-list');
+    container.innerHTML = [...workspaceState.toolchains, ...workspaceState.ides.map(ide => ({ ...ide, category: 'IDE', version: ide.name }))].map(tool => `<div class="toolchain-chip ${tool.installed ? 'installed' : ''}" title="${escapeHtml(tool.version || 'Not found')}"><i class="toolchain-dot"></i><strong>${escapeHtml(tool.id)}</strong><span>${tool.installed ? escapeHtml((tool.version || 'available').slice(0, 60)) : 'missing'}</span></div>`).join('');
+    renderWorkspaceCards();
+  } catch (error) { showToast(`Toolchain scan failed: ${error.message}`, 'error'); }
+  finally { if (button) { button.disabled = false; button.classList.remove('loading'); } }
+}
+
+async function startWorkspaceCommand(projectId, name, button, execution = 'host', distribution = '') {
+  button.disabled = true; button.classList.add('loading');
+  try {
+    const result = await api.command.start(projectId, name, execution, distribution);
+    showToast(result.success ? `Started command: ${name}${execution === 'wsl' ? ` in WSL ${distribution}` : ''}` : result.error, result.success ? 'success' : 'error');
+    await refreshWorkspaceTasks();
+  } catch (error) { showToast(error.message, 'error'); }
+  finally { button.disabled = false; button.classList.remove('loading'); }
+}
+
+async function refreshWorkspaceTasks() {
+  if (!api.command) return;
+  workspaceState.tasks = await api.command.list();
+  renderWorkspaceTasks();
+}
+
+function renderWorkspaceTasks() {
+  const container = document.getElementById('command-task-list');
+  if (!container) return;
+  if (!workspaceState.tasks.length) {
+    container.innerHTML = '<div class="workspace-empty compact">No project commands started.</div>';
+    return;
+  }
+  container.innerHTML = workspaceState.tasks.map(task => `<div class="command-task"><div class="command-task-head"><span class="workspace-state ${escapeHtml(task.status)}">${escapeHtml(task.status)}</span><strong>${escapeHtml(task.projectName)} · ${escapeHtml(task.commandName)}</strong>${['running','stopping'].includes(task.status) ? `<button class="btn btn-small btn-danger command-stop" data-id="${escapeHtml(task.id)}">Stop</button>` : `<span>${task.exitCode == null ? '' : `exit ${task.exitCode}`}</span>`}</div>${task.output ? `<pre class="command-output">${escapeHtml(task.output.slice(-12000))}</pre>` : ''}</div>`).join('');
+  container.querySelectorAll('.command-stop').forEach(button => button.addEventListener('click', async () => { await api.command.stop(button.dataset.id); await refreshWorkspaceTasks(); }));
+}
+
+function downloadWorkspaceManifest(manifest, filename) {
+  const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+function importWorkspaceManifest() {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = '.json,.kitsune.json,application/json';
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    if (file.size > 1024 * 1024) return showToast('Project manifest is too large', 'error');
+    try {
+      const manifest = JSON.parse(await file.text());
+      await api.workspace.import(manifest, { createDirectory: true });
+      showToast('Project imported', 'success');
+      await refreshWorkspaceCenter();
+    } catch (error) { showToast(error.message, 'error'); }
+  }, { once: true });
+  input.click();
+}
+
+async function exportWorkspaceEnvironment() {
+  try {
+    const payload = await api.environment.export('manual export');
+    downloadWorkspaceManifest(payload, `kitsuneserv-environment-${new Date().toISOString().slice(0, 10)}.json`);
+    showToast(`Exported ${payload.projects.length} project(s) without secrets`, 'success');
+  } catch (error) { showToast(error.message, 'error'); }
+}
+
+function importWorkspaceEnvironment() {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = '.json,application/json';
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    if (file.size > 20 * 1024 * 1024) return showToast('Environment file is too large', 'error');
+    try {
+      const payload = JSON.parse(await file.text());
+      const inspection = await api.environment.inspect(payload);
+      const missing = inspection.missingVersions.length;
+      if (!confirm(`Import ${inspection.projects} project(s), update ${inspection.updatedProjects.length} existing project(s) and apply PATH settings?${missing ? ` ${missing} referenced version(s) must be installed separately.` : ''}`)) return;
+      let result = await api.environment.apply(payload, { stopServices: false });
+      if (result.needsStop && confirm(`${result.error}\n\nStop all services and continue?`)) result = await api.environment.apply(payload, { stopServices: true });
+      showToast(result.success ? 'Environment imported successfully' : result.error, result.success ? 'success' : 'error');
+      if (result.success) { config = await api.config.get(); populateUI(); await refreshWorkspaceCenter(); }
+    } catch (error) { showToast(error.message, 'error'); }
+  }, { once: true });
+  input.click();
+}
+
+async function createWorkspaceSnapshot() {
+  const label = prompt('Snapshot label (optional):', `Before changes ${new Date().toLocaleString()}`);
+  if (label === null) return;
+  try {
+    const result = await api.environment.createSnapshot(label);
+    showToast(result.success ? `Snapshot created (${result.snapshot.projects} projects)` : result.error, result.success ? 'success' : 'error');
+    await refreshWorkspaceSnapshots();
+  } catch (error) { showToast(error.message, 'error'); }
+}
+
+async function refreshWorkspaceSnapshots() {
+  if (!api.environment) return;
+  workspaceState.snapshots = await api.environment.listSnapshots();
+  const container = document.getElementById('snapshot-list');
+  if (!container) return;
+  if (!workspaceState.snapshots.length) {
+    container.innerHTML = '<div class="workspace-empty compact">No snapshots yet.</div>';
+    return;
+  }
+  container.innerHTML = workspaceState.snapshots.map(snapshot => `<div class="snapshot-row"><span>${snapshot.valid ? '◉' : '⚠'}</span><div class="snapshot-info"><strong>${escapeHtml(snapshot.label || snapshot.id)}</strong><span>${snapshot.createdAt ? escapeHtml(new Date(snapshot.createdAt).toLocaleString()) : 'Unreadable'} · ${snapshot.projects || 0} projects · ${formatBackupSize(snapshot.size)}</span></div><button class="btn btn-small snapshot-restore" data-id="${escapeHtml(snapshot.id)}" ${snapshot.valid ? '' : 'disabled'}>Restore</button><button class="btn btn-small btn-danger snapshot-delete" data-id="${escapeHtml(snapshot.id)}">🗑</button></div>`).join('');
+  container.querySelectorAll('.snapshot-restore').forEach(button => button.addEventListener('click', () => restoreWorkspaceSnapshot(button.dataset.id)));
+  container.querySelectorAll('.snapshot-delete').forEach(button => button.addEventListener('click', () => removeWorkspaceSnapshot(button.dataset.id)));
+}
+
+async function restoreWorkspaceSnapshot(id) {
+  if (!confirm('Restore this environment snapshot? Current project metadata and service configuration may be changed.')) return;
+  let result = await api.environment.restoreSnapshot(id, { stopServices: false });
+  if (result.needsStop && confirm(`${result.error}\n\nStop all services and continue?`)) result = await api.environment.restoreSnapshot(id, { stopServices: true });
+  showToast(result.success ? 'Environment snapshot restored' : result.error, result.success ? 'success' : 'error');
+  if (result.success) { config = await api.config.get(); populateUI(); await refreshWorkspaceCenter(); }
+}
+
+async function removeWorkspaceSnapshot(id) {
+  if (!confirm('Permanently remove this snapshot?')) return;
+  const result = await api.environment.removeSnapshot(id);
+  showToast(result.success ? 'Snapshot removed' : result.error, result.success ? 'success' : 'error');
+  await refreshWorkspaceSnapshots();
+}
+
+async function refreshWorkspacePlugins() {
+  if (!api.plugin) return;
+  workspaceState.plugins = await api.plugin.list();
+  const container = document.getElementById('plugin-list');
+  if (!container) return;
+  if (!workspaceState.plugins.length) {
+    container.innerHTML = '<div class="workspace-empty compact">No plugins installed.</div>';
+    return;
+  }
+  container.innerHTML = workspaceState.plugins.map(plugin => `<div class="plugin-row"><span>${plugin.integrity ? '🧩' : '⚠'}</span><div class="plugin-info"><strong>${escapeHtml(plugin.name || plugin.id)} · ${escapeHtml(plugin.version || '')}</strong><span>${plugin.integrity ? `${plugin.contributes?.projectTemplates?.length || 0} templates · ${plugin.contributes?.tools?.length || 0} tools` : escapeHtml(plugin.error || 'Integrity check failed')}</span></div><button class="btn btn-small plugin-toggle" data-id="${escapeHtml(plugin.id)}" ${plugin.integrity ? '' : 'disabled'}>${plugin.enabled ? 'Disable' : 'Enable'}</button><button class="btn btn-small btn-danger plugin-remove" data-id="${escapeHtml(plugin.id)}">🗑</button></div>`).join('');
+  container.querySelectorAll('.plugin-toggle').forEach(button => button.addEventListener('click', async () => {
+    const plugin = workspaceState.plugins.find(item => item.id === button.dataset.id);
+    const result = await api.plugin.setEnabled(plugin.id, !plugin.enabled);
+    showToast(result.success ? 'Plugin state changed; templates refreshed' : result.error, result.success ? 'success' : 'error');
+    workspaceState.templates = await api.workspace.templates(); await refreshWorkspacePlugins();
+  }));
+  container.querySelectorAll('.plugin-remove').forEach(button => button.addEventListener('click', async () => {
+    if (!confirm(`Remove plugin ${button.dataset.id}?`)) return;
+    const result = await api.plugin.remove(button.dataset.id);
+    showToast(result.success ? 'Plugin removed' : result.error, result.success ? 'success' : 'error');
+    workspaceState.templates = await api.workspace.templates(); await refreshWorkspacePlugins();
+  }));
+}
+
+async function installWorkspacePlugin() {
+  const selected = await api.shell.selectDirectory('');
+  if (!selected?.success) return;
+  const result = await api.plugin.install(selected.path);
+  showToast(result.success ? `Installed plugin ${result.plugin.name}` : result.error, result.success ? 'success' : 'error');
+  if (result.success) workspaceState.templates = await api.workspace.templates();
+  await refreshWorkspacePlugins();
+}
+
+async function shareWorkspaceProject(project, button) {
+  const active = workspaceState.tunnels.find(item => item.projectId === project.id && ['starting', 'running'].includes(item.status));
+  if (active?.publicUrl) return api.shell.openExternal(active.publicUrl);
+  if (active) return showToast('A tunnel for this project is still starting', 'success');
+  const provider = workspaceState.tunnelProviders.find(item => item.installed);
+  if (!provider) return showToast('Install cloudflared or ngrok and make it available in PATH', 'error');
+  button.disabled = true;
+  button.classList.add('loading');
+  try {
+    const result = await api.tunnel.start(project.id, provider.id);
+    showToast(result.success ? `Starting ${provider.name} tunnel…` : result.error, result.success ? 'success' : 'error');
+    await refreshWorkspaceTunnels();
+  } catch (error) { showToast(error.message, 'error'); }
+  finally { button.classList.remove('loading'); button.disabled = false; }
+}
+
+async function refreshWorkspaceTunnels() {
+  if (!api.tunnel) return;
+  [workspaceState.tunnelProviders, workspaceState.tunnels] = await Promise.all([api.tunnel.providers(), api.tunnel.list()]);
+  const providers = document.getElementById('tunnel-providers');
+  const container = document.getElementById('tunnel-list');
+  if (providers) providers.innerHTML = workspaceState.tunnelProviders.map(item => `<span class="platform-chip ${item.installed ? 'available' : ''}">${escapeHtml(item.name)} ${item.installed ? '✓' : '—'}</span>`).join('');
+  if (!container) return;
+  if (!workspaceState.tunnels.length) {
+    container.innerHTML = '<div class="workspace-empty compact">No active tunnels. Start a project and choose Share.</div>';
+    renderWorkspaceCards();
+    return;
+  }
+  container.innerHTML = workspaceState.tunnels.map(tunnel => `<div class="tunnel-row"><span class="workspace-state ${escapeHtml(tunnel.status)}">${escapeHtml(tunnel.status)}</span><div class="tunnel-info"><strong>${escapeHtml(tunnel.projectName)} · ${escapeHtml(tunnel.provider)}</strong><span title="${escapeHtml(tunnel.publicUrl || tunnel.localUrl)}">${escapeHtml(tunnel.publicUrl || tunnel.localUrl)}</span></div><div class="tunnel-actions">${tunnel.publicUrl ? `<button class="btn btn-small tunnel-open" data-url="${escapeHtml(tunnel.publicUrl)}">Open</button>` : ''}${['starting','running'].includes(tunnel.status) ? `<button class="btn btn-small btn-danger tunnel-stop" data-id="${escapeHtml(tunnel.id)}">Stop</button>` : ''}</div></div>`).join('');
+  container.querySelectorAll('.tunnel-open').forEach(button => button.addEventListener('click', () => api.shell.openExternal(button.dataset.url)));
+  container.querySelectorAll('.tunnel-stop').forEach(button => button.addEventListener('click', async () => { await api.tunnel.stop(button.dataset.id); await refreshWorkspaceTunnels(); }));
+  renderWorkspaceCards();
+}
+
+async function refreshPlatformInventory() {
+  if (!api.platform) return;
+  workspaceState.platform = await api.platform.inventory();
+  const data = workspaceState.platform;
+  const container = document.getElementById('platform-inventory');
+  if (!container) return;
+  container.innerHTML = `<div class="platform-group"><strong>Package managers</strong><div class="platform-chips">${data.packageManagers.map(item => `<span class="platform-chip ${item.installed ? 'available' : ''}">${escapeHtml(item.id)} ${item.installed ? '✓' : '—'}</span>`).join('') || '<span class="platform-chip">none detected</span>'}</div></div>
+    <div class="platform-group"><strong>WSL</strong><div class="platform-chips">${data.wsl.supported ? data.wsl.distributions.map(item => `<span class="platform-chip available">${escapeHtml(item)}</span>`).join('') || '<span class="platform-chip available">available</span>' : '<span class="platform-chip">not available on this platform</span>'}</div></div>
+    <div class="platform-group"><strong>systemd user service</strong><div class="platform-chips"><span class="platform-chip ${data.systemd.supported ? 'available' : ''}">${data.systemd.supported ? data.systemd.installed ? data.systemd.active ? 'installed · running' : 'installed · stopped' : 'available' : 'not available'}</span></div>${data.systemd.supported ? `<div class="platform-actions">${data.systemd.installed ? '<button class="btn btn-small btn-danger" id="platform-systemd-remove">Remove service</button>' : '<button class="btn btn-small btn-primary" id="platform-systemd-install">Install & start</button>'}</div>` : ''}</div>`;
+  container.querySelector('#platform-systemd-install')?.addEventListener('click', async () => {
+    const result = await api.platform.installSystemd({ port: 10000, host: '127.0.0.1' });
+    if (result.success && result.credentialsCreated) {
+      await navigator.clipboard?.writeText?.(result.generatedPassword).catch(() => {});
+      container.insertAdjacentHTML('afterbegin', `<div class="db-warning"><strong>Save this generated server password now:</strong><br><code>${escapeHtml(result.generatedPassword)}</code><br>It was copied to the clipboard and will not be displayed again.</div>`);
+    }
+    showToast(result.success ? 'KitsuneServ systemd user service installed' : result.error, result.success ? 'success' : 'error');
+    if (!result.credentialsCreated) await refreshPlatformInventory();
+  });
+  container.querySelector('#platform-systemd-remove')?.addEventListener('click', async () => {
+    const result = await api.platform.removeSystemd(); showToast(result.success ? 'systemd service removed' : result.error, result.success ? 'success' : 'error'); await refreshPlatformInventory();
+  });
+  renderWorkspaceCards();
+}
+
 /* ===== Built-in Terminal ===== */
-const terminalState = { tabs: [], activeId: null, cmdHistory: {}, historyIndex: {} };
+const terminalState = { tabs: [], activeId: null, cmdHistory: {}, historyIndex: {}, followOutput: {} };
 
 /* ANSI escape code parser for terminal colors */
 const ANSI_COLORS = {
@@ -2377,6 +3622,17 @@ function parseAnsi(text) {
 
 function initTerminal() {
   document.getElementById('btn-new-terminal')?.addEventListener('click', createTerminal);
+  document.getElementById('btn-terminal-clear')?.addEventListener('click', () => {
+    const output = document.getElementById('terminal-output-' + terminalState.activeId);
+    if (output) output.textContent = '';
+  });
+  document.getElementById('btn-terminal-bottom')?.addEventListener('click', () => {
+    const output = document.getElementById('terminal-output-' + terminalState.activeId);
+    if (!output) return;
+    terminalState.followOutput[terminalState.activeId] = true;
+    output.scrollTop = output.scrollHeight;
+    updateTerminalLatestButton();
+  });
 
   // Listen for terminal data from backend
   api.terminal.onData(({ id, data }) => {
@@ -2388,6 +3644,8 @@ function initTerminal() {
       return m.endsWith('m') ? m : ''; // Keep only SGR (color) sequences
     });
 
+    const shouldFollow = terminalState.followOutput[id] !== false
+      || output.scrollHeight - output.scrollTop - output.clientHeight < 36;
     output.appendChild(parseAnsi(cleaned));
 
     // Limit terminal buffer to prevent memory leak
@@ -2395,7 +3653,9 @@ function initTerminal() {
     while (output.childNodes.length > MAX_TERMINAL_NODES) {
       output.removeChild(output.firstChild);
     }
-    output.scrollTop = output.scrollHeight;
+    if (shouldFollow) output.scrollTop = output.scrollHeight;
+    terminalState.followOutput[id] = shouldFollow;
+    if (terminalState.activeId === id) updateTerminalLatestButton();
   });
 
   api.terminal.onExit(({ id, code }) => {
@@ -2420,6 +3680,7 @@ async function createTerminal() {
   terminalState.tabs.push({ id, name: `Terminal ${id}`, dead: false });
   terminalState.cmdHistory[id] = [];
   terminalState.historyIndex[id] = -1;
+  terminalState.followOutput[id] = true;
   terminalState.activeId = id;
 
   // Create DOM for this terminal
@@ -2433,7 +3694,7 @@ async function createTerminal() {
   pane.innerHTML = `
     <div class="terminal-output" id="terminal-output-${id}"></div>
     <div class="terminal-input-bar">
-      <span class="terminal-prompt-label">&gt;</span>
+      <span class="terminal-prompt-label">❯</span>
       <input class="terminal-input" id="terminal-input-${id}" placeholder="Type a command..." autofocus>
     </div>
   `;
@@ -2486,11 +3747,17 @@ async function createTerminal() {
   });
 
   // Focus input when clicking the terminal area
-  pane.querySelector('.terminal-output').addEventListener('click', () => {
+  const output = pane.querySelector('.terminal-output');
+  output.addEventListener('click', () => {
     input.focus();
   });
+  output.addEventListener('scroll', () => {
+    terminalState.followOutput[id] = output.scrollHeight - output.scrollTop - output.clientHeight < 36;
+    if (terminalState.activeId === id) updateTerminalLatestButton();
+  }, { passive: true });
 
   renderTerminalTabs();
+  updateTerminalLatestButton();
   input.focus();
 }
 
@@ -2526,6 +3793,13 @@ function switchTerminal(id) {
     if (input) input.focus();
   }
   renderTerminalTabs();
+  updateTerminalLatestButton();
+}
+
+function updateTerminalLatestButton() {
+  const button = document.getElementById('btn-terminal-bottom');
+  if (!button) return;
+  button.classList.toggle('hidden', !terminalState.activeId || terminalState.followOutput[terminalState.activeId] !== false);
 }
 
 function closeTerminal(id) {
@@ -2535,6 +3809,7 @@ function closeTerminal(id) {
   terminalState.tabs = terminalState.tabs.filter(t => t.id !== id);
   delete terminalState.cmdHistory[id];
   delete terminalState.historyIndex[id];
+  delete terminalState.followOutput[id];
 
   if (terminalState.activeId === id) {
     terminalState.activeId = terminalState.tabs.length ? terminalState.tabs[terminalState.tabs.length - 1].id : null;
@@ -2547,6 +3822,7 @@ function closeTerminal(id) {
     if (empty) empty.classList.remove('hidden');
   }
   renderTerminalTabs();
+  updateTerminalLatestButton();
 }
 
 /* ===== Composer ===== */
@@ -2628,35 +3904,51 @@ async function initComposer() {
 }
 
 /* ===== PATH Management ===== */
-let pathAdded = false;
+let pathStatus = null;
+let pathUpdateInProgress = false;
 
 async function initPathManagement() {
-  const btn = document.getElementById('btn-path-toggle');
-  if (!btn) return;
+  const list = document.getElementById('path-service-list');
+  if (!list) return;
 
-  const st = await api.path.getStatus();
-  pathAdded = st.added;
-  updatePathUI(st);
+  await refreshPathManagement();
 
-  btn.addEventListener('click', async () => {
-    if (pathAdded) {
-      const result = await api.path.remove();
-      if (result.success) {
-        pathAdded = false;
-        showToast('Server paths removed from system PATH', 'success');
-        updatePathUI({ added: false, entries: [] });
-      } else {
-        showToast(result.error || 'Failed to update PATH', 'error');
-      }
-    } else {
-      const result = await api.path.add();
-      if (result.success) {
-        pathAdded = true;
-        showToast('Server paths added to system PATH', 'success');
-        updatePathUI({ added: true, entries: result.entries });
-      } else {
-        showToast(result.error || 'Failed to update PATH', 'error');
-      }
+  list.addEventListener('change', async (event) => {
+    if (!event.target.matches('input[data-path-service]') || pathUpdateInProgress) return;
+    const selected = [...list.querySelectorAll('input[data-path-service]:checked')].map(input => input.dataset.pathService);
+    await applyPathSelection(selected, 'System PATH selection updated');
+  });
+
+  document.getElementById('btn-path-add-all')?.addEventListener('click', () => {
+    applyPathSelection(SERVICE_SECTIONS, 'All services selected for system PATH');
+  });
+  document.getElementById('btn-path-remove-all')?.addEventListener('click', () => {
+    applyPathSelection([], 'All KitsuneServ entries removed from system PATH');
+  });
+  document.getElementById('btn-python-alias-settings')?.addEventListener('click', async () => {
+    const result = await api.shell.openSystemSettings('appExecutionAliases');
+    if (!result?.success) showToast(result?.error || 'Could not open Windows Settings', 'error');
+    else showToast(result.message || 'Windows Apps settings opened', 'warning');
+  });
+  document.getElementById('btn-python-alias-recheck')?.addEventListener('click', refreshPathManagement);
+  document.getElementById('btn-install-python-manager')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    const original = button.textContent;
+    button.disabled = true;
+    button.classList.add('is-busy');
+    button.textContent = 'Installing official manager…';
+    showToast('Installing Python Install Manager from python.org…', 'warning');
+    try {
+      const result = await api.path.installPythonManager();
+      if (!result?.success) throw new Error(result?.error || 'Python Install Manager installation failed');
+      showToast(result.alreadyInstalled ? 'Official Python Manager is already installed' : 'Official Python Manager installed and linked to KitsuneServ runtimes', 'success');
+      await refreshPathManagement();
+    } catch (err) {
+      showToast(err.message || 'Python Install Manager installation failed', 'error');
+    } finally {
+      button.disabled = false;
+      button.classList.remove('is-busy');
+      button.textContent = original;
     }
   });
 
@@ -2670,6 +3962,7 @@ async function initPathManagement() {
     if (result.success) {
       config = result.config;
       populateUI();
+      await refreshPathManagement();
       showToast('Config imported successfully', 'success');
     } else if (result.error) {
       showToast(result.error, 'error');
@@ -2677,26 +3970,115 @@ async function initPathManagement() {
   });
 }
 
-function updatePathUI(st) {
-  const btn = document.getElementById('btn-path-toggle');
-  const entries = document.getElementById('path-entries');
-  if (!btn) return;
+async function applyPathSelection(selected, successMessage) {
+  if (pathUpdateInProgress) return;
+  pathUpdateInProgress = true;
+  setPathControlsDisabled(true);
+  const summary = document.getElementById('path-summary');
+  if (summary) summary.innerHTML = `<span class="inline-spinner"></span> Updating ${runtimePlatform === 'win32' ? 'Windows user PATH' : 'shell PATH'}…`;
+  document.querySelector('.path-management')?.classList.add('is-busy');
+  try {
+    const result = await api.path.apply(selected);
+    if (!result.success) throw new Error(result.error || 'Failed to update PATH');
+    config.general = { ...(config.general || {}), pathServices: [...selected], pathSelectionInitialized: true };
+    await refreshPathManagement();
+    const pending = result.pending?.length ? ` (${result.pending.length} waiting for installation)` : '';
+    showToast(`${successMessage}${pending}`, 'success');
+    if (result.warning) showToast(result.warning, 'error');
+  } catch (err) {
+    showToast(err.message || 'Failed to update PATH', 'error');
+    await refreshPathManagement();
+  } finally {
+    pathUpdateInProgress = false;
+    setPathControlsDisabled(false);
+    document.querySelector('.path-management')?.classList.remove('is-busy');
+  }
+}
 
-  if (st.added) {
-    btn.textContent = '🗑 Remove from System PATH';
-    btn.className = 'btn btn-path-remove';
-  } else {
-    btn.textContent = '📁 Add to System PATH';
-    btn.className = 'btn btn-path-add';
+async function refreshPathManagement() {
+  if (!document.getElementById('path-service-list')) return;
+  try {
+    pathStatus = await api.path.getStatus();
+    updatePathUI(pathStatus);
+  } catch (err) {
+    const summary = document.getElementById('path-summary');
+    if (summary) summary.textContent = `PATH unavailable: ${err.message}`;
+  }
+}
+
+function setPathControlsDisabled(disabled) {
+  document.querySelectorAll('#path-management button, .path-management button, #path-service-list input').forEach(control => {
+    control.disabled = disabled;
+  });
+}
+
+function updatePathUI(st) {
+  const list = document.getElementById('path-service-list');
+  const entries = document.getElementById('path-entries');
+  const summary = document.getElementById('path-summary');
+  const pythonLauncher = document.getElementById('python-launcher-status');
+  const pythonLauncherDetail = document.getElementById('python-launcher-detail');
+  const pythonAliasWarning = document.getElementById('python-alias-warning');
+  const pythonManagerButton = document.getElementById('btn-install-python-manager');
+  if (!list) return;
+
+  const services = Array.isArray(st.services) ? st.services : [];
+  list.innerHTML = services.map(service => {
+    const state = service.pathAvailable ? 'ready' : 'pending';
+    const stateLabel = service.pathAvailable ? 'ready' : (service.installed ? 'no binary path' : 'not installed');
+    return `<label class="path-service-item">
+      <input type="checkbox" data-path-service="${escapeHtml(service.id)}" ${service.selected ? 'checked' : ''}>
+      <span class="path-service-info">
+        <span class="path-service-name">${escapeHtml(sectionLabel(service.id))}</span>
+        <span class="path-service-version">Active: ${escapeHtml(service.version || 'not configured')}</span>
+      </span>
+      <span class="path-service-state ${state}">${stateLabel}</span>
+    </label>`;
+  }).join('');
+  if (st.integrationDisabled) {
+    document.querySelectorAll('.path-management button, #path-service-list input').forEach(control => { control.disabled = true; });
+  }
+
+  if (summary) {
+    const selectedCount = st.selected?.length || 0;
+    const syncState = st.synced === false ? ' · needs sync' : '';
+    summary.textContent = st.integrationDisabled
+      ? 'System integration disabled (container mode); built-in terminal PATH remains active'
+      : `${selectedCount} of ${services.length} selected${syncState}`;
   }
 
   if (entries) {
     if (st.entries?.length) {
-      entries.innerHTML = st.entries.map(e => `<div class="path-entry">${escapeHtml(e)}</div>`).join('');
+      entries.innerHTML = `<div class="path-entry"><strong>Active PATH entries:</strong></div>${st.entries.map(e => `<div class="path-entry">${escapeHtml(e)}</div>`).join('')}`;
     } else {
-      entries.innerHTML = '<div class="path-entry">No server binaries installed yet</div>';
+      entries.innerHTML = '<div class="path-entry">No installed binaries selected for the system PATH.</div>';
     }
   }
+
+  const isWindows = runtimePlatform === 'win32';
+  const pythonSelected = isWindows && Boolean(st.python?.selected);
+  pythonLauncher?.classList.toggle('hidden', !pythonSelected || !st.python?.launcherAvailable);
+  if (pythonLauncherDetail) {
+    pythonLauncherDetail.textContent = st.python?.launcherAvailable
+      ? st.python.managerInstalled
+        ? `Official Python Install Manager → KitsuneServ Python ${st.python.version} (${st.python.defaultTag})`
+        : `Fallback py → Python ${st.python.version} (${st.python.launcherPath})`
+      : '';
+  }
+  if (pythonManagerButton) {
+    pythonManagerButton.classList.toggle('hidden', !isWindows || !pythonSelected || st.python?.managerInstalled);
+    pythonManagerButton.disabled = Boolean(st.integrationDisabled || st.python?.managerInstallInProgress);
+    pythonManagerButton.classList.toggle('is-busy', Boolean(st.python?.managerInstallInProgress));
+    pythonManagerButton.textContent = st.python?.managerInstallInProgress
+      ? 'Installing automatically…'
+      : 'Install official Python Manager';
+  }
+  pythonAliasWarning?.classList.toggle('hidden', !isWindows || !st.python?.storeAliasConflict);
+}
+
+function notifyPathWarning(result) {
+  refreshPathManagement();
+  if (result?.pathWarning) showToast(`Version changed, but the system PATH could not be updated: ${result.pathWarning}`, 'error');
 }
 
 /* ===== Command Palette (Ctrl+K) ===== */
@@ -2715,6 +4097,9 @@ function initCommandPalette() {
     ...SERVICE_SECTIONS.map(s => ({
       icon: SECTION_ICONS[s] || '⚙️', label: `Go to ${sectionLabel(s)}`, action: () => navigateToPanel(s)
     })),
+    { icon: '🗃️', label: 'Database Manager', action: () => navigateToPanel('database-manager') },
+    { icon: '🧰', label: 'Version Manager', action: () => navigateToPanel('versions') },
+    { icon: '📦', label: 'App Store', action: () => navigateToPanel('appstore') },
     { icon: '💻', label: 'Terminal', action: () => navigateToPanel('terminal') },
     { icon: '⚙️', label: 'General Settings', action: () => navigateToPanel('general') },
     // Actions
@@ -2775,11 +4160,7 @@ function initCommandPalette() {
   }
 
   function navigateToPanel(panel) {
-    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    const navItem = document.querySelector(`.nav-item[data-panel="${panel}"]`);
-    if (navItem) navItem.classList.add('active');
-    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-    document.getElementById('panel-' + panel)?.classList.add('active');
+    switchToPanel(panel);
   }
 
   input.addEventListener('input', () => render(input.value));
@@ -2816,6 +4197,296 @@ async function autoStartServices() {
   if (result.started?.length) {
     showToast(`Auto-started: ${result.started.map(s => sectionLabel(s)).join(', ')}`, 'success');
     refreshStatuses();
+  }
+}
+
+/* ===== Version Manager ===== */
+const versionOperations = new Map();
+
+function initVersionManager() {
+  const search = document.getElementById('version-manager-search');
+  const category = document.getElementById('version-manager-category');
+  const state = document.getElementById('version-manager-state');
+  const refresh = document.getElementById('version-manager-refresh');
+  search?.addEventListener('input', debounce(renderVersionManager, 120));
+  category?.addEventListener('change', renderVersionManager);
+  state?.addEventListener('change', renderVersionManager);
+  document.getElementById('version-manager-cleanup')?.addEventListener('click', removeUnusedVersions);
+  document.getElementById('version-manager-cache-export')?.addEventListener('click', exportOfflineCache);
+  document.getElementById('version-manager-cache-import')?.addEventListener('click', importOfflineCache);
+  document.getElementById('version-manager-cache-clear')?.addEventListener('click', clearOfflineCache);
+  refresh?.addEventListener('click', async () => {
+    refresh.disabled = true;
+    refresh.textContent = '↻ Synchronizing…';
+    try {
+      const result = await api.download.refreshCatalog();
+      versionCatalog = result.catalog || [];
+      VERSION_MAP = await api.download.getVersions();
+      renderVersionManager();
+      const count = (result.refreshed || []).reduce((sum, item) => sum + item.versions, 0);
+      if (result.errors?.length) {
+        showToast(`Synchronized ${count} versions; ${result.errors.length} source(s) unavailable`, 'warning');
+      } else {
+        showToast(`Synchronized ${count} official versions`, 'success');
+      }
+    } catch (err) {
+      showToast(`Catalog sync failed: ${err.message}`, 'error');
+    } finally {
+      refresh.disabled = false;
+      refresh.textContent = '↻ Sync official catalogs';
+    }
+  });
+}
+
+async function exportOfflineCache() {
+  const status = await api.download.cacheStatus();
+  if (!status.entries.length) return showToast('Offline cache is empty. Install a version first.', 'error');
+  const selected = await api.shell.selectDirectory('');
+  if (!selected?.success) return;
+  const result = await api.download.exportCache(selected.path);
+  showToast(result.success ? `Exported ${result.entries.length} verified archive(s)` : result.error, result.success ? 'success' : 'error');
+}
+
+async function importOfflineCache() {
+  const selected = await api.shell.selectDirectory('');
+  if (!selected?.success) return;
+  const result = await api.download.importCache(selected.path);
+  showToast(result.success ? `Imported ${result.entries.length} cached archive(s)` : result.error, result.success ? 'success' : 'error');
+}
+
+async function clearOfflineCache() {
+  const status = await api.download.cacheStatus();
+  if (!status.entries.length) return showToast('Offline cache is already empty', 'success');
+  if (!confirm(`Remove ${status.entries.length} cached installer archive(s) (${formatBackupSize(status.totalSize)})? Installed services are not affected.`)) return;
+  const result = await api.download.clearCache();
+  showToast(`Removed ${result.removed} cached archive(s)`, 'success');
+}
+
+async function refreshVersionManager() {
+  try {
+    versionCatalog = await api.download.catalog();
+    await refreshInstalledVersionsMap(versionCatalog);
+    for (const section of SERVICE_SECTIONS) populateVersionDropdown(section, section);
+    const categorySelect = document.getElementById('version-manager-category');
+    if (categorySelect && categorySelect.options.length <= 1) {
+      for (const name of [...new Set(versionCatalog.map(item => item.category))]) {
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = name;
+        categorySelect.appendChild(option);
+      }
+    }
+    renderVersionManager();
+  } catch (err) {
+    const grid = document.getElementById('version-manager-grid');
+    if (grid) grid.innerHTML = `<div class="appstore-empty">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderVersionManager() {
+  const grid = document.getElementById('version-manager-grid');
+  const summary = document.getElementById('version-manager-summary');
+  if (!grid) return;
+  const query = (document.getElementById('version-manager-search')?.value || '').trim().toLowerCase();
+  const category = document.getElementById('version-manager-category')?.value || 'all';
+  const state = document.getElementById('version-manager-state')?.value || 'all';
+  const filtered = versionCatalog.filter(service => {
+    if (category !== 'all' && service.category !== category) return false;
+    const installed = service.installedVersions || service.versions.filter(item => item.installed).map(item => item.version);
+    if (state === 'installed' && !installed.length) return false;
+    if (state === 'missing' && installed.length) return false;
+    const haystack = `${service.name} ${service.id} ${service.versions.map(item => item.version).join(' ')} ${installed.join(' ')}`.toLowerCase();
+    return !query || haystack.includes(query);
+  });
+
+  const totalVersions = versionCatalog.reduce((sum, service) => sum + service.versions.length, 0);
+  const installedVersions = versionCatalog.reduce((sum, service) => sum + (service.installedVersions?.length || service.versions.filter(item => item.installed).length), 0);
+  if (summary) summary.textContent = `${versionCatalog.length} services • ${totalVersions} available versions • ${installedVersions} installed`;
+
+  if (!filtered.length) {
+    grid.innerHTML = '<div class="appstore-empty">No services or versions match this filter.</div>';
+    return;
+  }
+
+  grid.innerHTML = filtered.map(service => {
+    const active = getActiveProfile(service.id)?.version;
+    const recommended = service.versions.find(item => item.recommended)?.version;
+    const selected = service.versions.some(item => item.version === active) ? active : recommended || service.versions[0]?.version || '';
+    const installed = service.installedVersions || service.versions.filter(item => item.installed).map(item => item.version);
+    const referenced = new Set((config[service.id]?.profiles || []).map(profile => profile.version));
+    const operation = versionOperations.get(service.id);
+    const options = service.versions.map(item => {
+      const badges = [item.recommended ? 'recommended' : '', item.lts ? `LTS ${item.lts === true ? '' : item.lts}`.trim() : '', item.prerelease ? 'preview' : '', item.installed ? 'installed' : ''].filter(Boolean);
+      return `<option value="${escapeHtml(item.version)}" ${item.version === selected ? 'selected' : ''}>${escapeHtml(item.version)}${badges.length ? ` — ${escapeHtml(badges.join(', '))}` : ''}</option>`;
+    }).join('');
+    const installedRows = installed.length ? installed.map(version => `
+      <div class="installed-version-row${version === active ? ' active' : ''}">
+        <span class="installed-version-number">${escapeHtml(version)}</span>
+        ${version === active ? '<span class="installed-version-badge">active</span>' : ''}
+        ${referenced.has(version) && version !== active ? '<span class="installed-version-badge referenced">profile</span>' : ''}
+        <span class="installed-version-spacer"></span>
+        <button class="btn btn-small installed-version-use" data-version="${escapeHtml(version)}" ${version === active ? 'disabled' : ''}>Use</button>
+        <button class="btn btn-small installed-version-remove" data-version="${escapeHtml(version)}" ${referenced.has(version) ? 'disabled title="Used by a profile"' : 'title="Remove from disk"'}>🗑</button>
+      </div>`).join('') : '<div class="installed-version-empty">No versions installed yet.</div>';
+    const operationLabel = operation ? formatVersionOperation(operation) : '';
+    return `
+      <article class="version-manager-card" data-service="${escapeHtml(service.id)}">
+        <div class="version-manager-card-head">
+          <span class="version-manager-icon">${service.icon}</span>
+          <div><h3>${escapeHtml(service.name)}</h3><span>${escapeHtml(service.category)}</span></div>
+        </div>
+        <p>${escapeHtml(service.description)}</p>
+        <div class="installed-version-list">
+          <div class="installed-version-heading">Installed versions <span>${installed.length}</span></div>
+          ${installedRows}
+        </div>
+        <div class="version-manager-install-label">Install or switch release</div>
+        <select class="version-manager-select" aria-label="Choose ${escapeHtml(service.name)} version">${options}</select>
+        <div class="version-manager-current">Active profile: <strong>${escapeHtml(active || 'none')}</strong></div>
+        <div class="version-operation${operation ? '' : ' hidden'}">
+          <div class="version-operation-label">${escapeHtml(operationLabel)}</div>
+          <div class="version-operation-track"><div class="version-operation-fill" style="width:${Number(operation?.percent || 0)}%"></div></div>
+        </div>
+        <div class="version-manager-actions">
+          <button class="btn btn-small version-install">⬇ Install</button>
+          <button class="btn btn-small btn-primary version-activate">✓ Use version</button>
+        </div>
+      </article>`;
+  }).join('');
+
+  grid.querySelectorAll('.version-manager-card').forEach(card => {
+    const service = card.dataset.service;
+    const select = card.querySelector('.version-manager-select');
+    const refreshButtons = () => {
+      const item = versionCatalog.find(entry => entry.id === service)?.versions.find(entry => entry.version === select.value);
+      const active = getActiveProfile(service)?.version;
+      const busy = versionOperations.has(service);
+      card.querySelector('.version-install').disabled = Boolean(item?.installed) || busy;
+      card.querySelector('.version-install').textContent = busy ? 'Working…' : (item?.installed ? '✓ Installed' : '⬇ Install');
+      card.querySelector('.version-activate').disabled = !item?.installed || active === select.value || busy;
+    };
+    select.addEventListener('change', refreshButtons);
+    refreshButtons();
+
+    card.querySelector('.version-install').addEventListener('click', async event => {
+      const version = select.value;
+      versionOperations.set(service, { version, stage: 'starting', percent: 0 });
+      updateVersionOperationProgress({ service, version, stage: 'starting', percent: 0 });
+      refreshButtons();
+      try {
+        const result = await api.download.install(service, version);
+        if (!result.success) throw new Error(result.error || 'Installation failed');
+        showToast(`${sectionLabel(service)} ${version} installed`, 'success');
+        if (result.pythonManagerWarning) showToast(`Python was installed, but its official manager could not be configured: ${result.pythonManagerWarning}`, 'error');
+        notifyPathWarning(result);
+        VERSION_MAP = await api.download.getVersions();
+        versionOperations.delete(service);
+        await refreshVersionManager();
+        populateSectionUI(service);
+      } catch (err) {
+        showToast(err.message, 'error');
+        versionOperations.set(service, { version, stage: 'failed', percent: 0, error: err.message });
+        updateVersionOperationProgress({ service, version, stage: 'failed', percent: 0, error: err.message });
+        setTimeout(() => {
+          versionOperations.delete(service);
+          if (document.getElementById('panel-versions')?.classList.contains('active')) renderVersionManager();
+        }, 3500);
+      }
+    });
+
+    card.querySelector('.version-activate').addEventListener('click', () => activateManagedVersion(service, select.value));
+    card.querySelectorAll('.installed-version-use').forEach(button => {
+      button.addEventListener('click', () => activateManagedVersion(service, button.dataset.version));
+    });
+    card.querySelectorAll('.installed-version-remove').forEach(button => {
+      button.addEventListener('click', () => removeManagedVersion(service, button.dataset.version));
+    });
+  });
+}
+
+function formatVersionOperation(operation) {
+  const labels = {
+    starting: 'Preparing download…', downloading: `Downloading… ${operation.percent || 0}%`,
+    retrying: 'Retrying download…', verifying: 'Verifying checksum…', extracting: 'Installing files…',
+    'python-manager': 'Configuring official Python Manager…',
+    done: 'Installation complete', failed: operation.error || 'Installation failed'
+  };
+  return `${operation.version}: ${labels[operation.stage] || operation.stage}`;
+}
+
+function updateVersionOperationProgress(data) {
+  if (!data?.service || !versionOperations.has(data.service)) return;
+  const operation = { ...versionOperations.get(data.service), ...data };
+  versionOperations.set(data.service, operation);
+  const card = document.querySelector(`.version-manager-card[data-service="${data.service}"]`);
+  if (!card) return;
+  const box = card.querySelector('.version-operation');
+  const label = card.querySelector('.version-operation-label');
+  const fill = card.querySelector('.version-operation-fill');
+  box?.classList.remove('hidden');
+  if (label) label.textContent = formatVersionOperation(operation);
+  if (fill) {
+    fill.style.width = `${Math.max(0, Math.min(100, Number(operation.percent || 0)))}%`;
+    fill.classList.toggle('failed', operation.stage === 'failed');
+  }
+}
+
+async function activateManagedVersion(service, version) {
+  const profile = getActiveProfile(service);
+  if (!profile) return showToast('No active profile for this service', 'error');
+  const runningStack = statuses[service]?.running || (service === 'php' && ['apache', 'nginx', 'caddy'].some(web => statuses[web]?.running));
+  if (runningStack && !confirm(`Switch ${sectionLabel(service)} to ${version}? KitsuneServ will restart the affected stack and roll back if it fails.`)) return;
+  const result = await api.service.switchVersion(service, version);
+  if (!result.success) return showToast(result.error || 'Could not switch version', 'error');
+  config = result.config;
+  dirty = false;
+  populateSectionUI(service);
+  refreshDashboard();
+  showToast(`${sectionLabel(service)} now uses ${version}${result.restarted?.length ? ' — stack restarted' : ''}`, 'success');
+  notifyPathWarning(result);
+  await refreshStatuses();
+  await refreshVersionManager();
+}
+
+async function removeManagedVersion(service, version, skipConfirm = false) {
+  if (!skipConfirm && !confirm(`Remove ${sectionLabel(service)} ${version} from disk?`)) return false;
+  const result = await api.download.remove(service, version);
+  if (!result.success) {
+    showToast(result.error || 'Could not remove version', 'error');
+    return false;
+  }
+  if (result.pythonManagerWarning) showToast(`Python Manager cleanup warning: ${result.pythonManagerWarning}`, 'error');
+  if (result.pathWarning) showToast(`PATH cleanup warning: ${result.pathWarning}`, 'error');
+  if (!skipConfirm) showToast(`${sectionLabel(service)} ${version} removed`, 'success');
+  await refreshVersionManager();
+  return true;
+}
+
+async function removeUnusedVersions() {
+  const button = document.getElementById('version-manager-cleanup');
+  const removable = [];
+  for (const service of versionCatalog) {
+    const referenced = new Set((config[service.id]?.profiles || []).map(profile => profile.version));
+    for (const version of service.installedVersions || []) {
+      if (!referenced.has(version)) removable.push({ service: service.id, version });
+    }
+  }
+  if (!removable.length) return showToast('There are no unused installed versions', 'success');
+  if (!confirm(`Remove ${removable.length} unused version${removable.length === 1 ? '' : 's'} from disk?`)) return;
+  button.disabled = true;
+  const original = button.textContent;
+  let removed = 0;
+  try {
+    for (const [index, item] of removable.entries()) {
+      button.textContent = `Removing ${index + 1}/${removable.length}…`;
+      const result = await api.download.remove(item.service, item.version);
+      if (result.success) removed++;
+    }
+    await refreshVersionManager();
+    showToast(`Removed ${removed} unused version${removed === 1 ? '' : 's'}`, removed === removable.length ? 'success' : 'warning');
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
   }
 }
 

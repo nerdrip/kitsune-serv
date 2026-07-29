@@ -1,0 +1,17 @@
+services:
+  kitsuneserv:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    image: kitsuneserv:local
+    restart: unless-stopped
+    ports:
+      - "${KITSUNE_PORT:-10000}:10000"
+    environment:
+      KITSUNE_USER: "${KITSUNE_USER:-admin}"
+      KITSUNE_PASS: "${KITSUNE_PASS:?Set KITSUNE_PASS before starting KitsuneServ}"
+    volumes:
+      - kitsuneserv-data:/data
+
+volumes:
+  kitsuneserv-data:

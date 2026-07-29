@@ -1,6 +1,14 @@
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const { SERVICE_IDS, resolveInside, assertProjectName, assertSafeSegment } = require('./path-utils');
+
+const WEB_SERVICES = Object.freeze(['apache', 'nginx', 'caddy']);
+const PHP_BUILTIN_EXTENSIONS = new Set([
+  'bcmath', 'calendar', 'ctype', 'dom', 'filter', 'hash', 'json', 'pcre',
+  'phar', 'session', 'simplexml', 'spl', 'tokenizer', 'xml', 'xmlreader',
+  'xmlwriter', 'zlib'
+]);
 
 class ServiceManager {
   constructor(downloadManager, configManager) {
@@ -10,6 +18,78 @@ class ServiceManager {
     this.logs = new Map();
   }
 
+  _pushLog(logArr, message) {
+    if (!logArr || message === undefined || message === null) return;
+    logArr.push(String(message));
+    if (logArr.length > 500) logArr.splice(0, logArr.length - 500);
+  }
+
+  _createLogTracker(logFiles = []) {
+    const files = [...new Set(logFiles.filter(Boolean).map(file => path.resolve(file)))].map(file => {
+      let offset = 0;
+      try { offset = fs.statSync(file).size; } catch {}
+      return { file, offset, remainder: '' };
+    });
+    return { files, timer: null, stopped: false };
+  }
+
+  _pollLogTracker(logArr, tracker, flush = false) {
+    if (!tracker || tracker.stopped) return;
+    for (const state of tracker.files) {
+      try {
+        const stat = fs.statSync(state.file);
+        if (!stat.isFile()) continue;
+        if (stat.size < state.offset) {
+          state.offset = 0;
+          state.remainder = '';
+          this._pushLog(logArr, `[KitsuneServ] Log rotated: ${path.basename(state.file)}\n`);
+        }
+        if (stat.size > state.offset) {
+          const maxRead = 1024 * 1024;
+          let start = state.offset;
+          if (stat.size - start > maxRead) {
+            start = stat.size - maxRead;
+            state.remainder = '';
+            this._pushLog(logArr, `[KitsuneServ] Skipped older output from ${path.basename(state.file)}.\n`);
+          }
+          const length = stat.size - start;
+          const buffer = Buffer.alloc(length);
+          const fd = fs.openSync(state.file, 'r');
+          try { fs.readSync(fd, buffer, 0, length, start); } finally { fs.closeSync(fd); }
+          state.offset = stat.size;
+          const parts = (state.remainder + buffer.toString('utf8')).split(/\r?\n/);
+          state.remainder = parts.pop() || '';
+          const name = path.basename(state.file);
+          const prefix = /error/i.test(name) ? `[ERR][${name}] ` : `[${name}] `;
+          for (const line of parts) this._pushLog(logArr, `${prefix}${line}\n`);
+        }
+        if (flush && state.remainder) {
+          const name = path.basename(state.file);
+          const prefix = /error/i.test(name) ? `[ERR][${name}] ` : `[${name}] `;
+          this._pushLog(logArr, `${prefix}${state.remainder}\n`);
+          state.remainder = '';
+        }
+      } catch (err) {
+        if (err.code !== 'ENOENT') this._pushLog(logArr, `[KitsuneServ] Could not read ${path.basename(state.file)}: ${err.message}\n`);
+      }
+    }
+  }
+
+  _startLogTracker(logArr, tracker) {
+    if (!tracker?.files.length) return;
+    const poll = () => this._pollLogTracker(logArr, tracker);
+    tracker.timer = setInterval(poll, 750);
+    tracker.timer.unref?.();
+    poll();
+  }
+
+  _stopLogTracker(logArr, tracker) {
+    if (!tracker || tracker.stopped) return;
+    if (tracker.timer) clearInterval(tracker.timer);
+    this._pollLogTracker(logArr, tracker, true);
+    tracker.stopped = true;
+  }
+
   // Resolve which download key to use from a profile
   _resolveDownloadKey(profile, section) {
     return section;
@@ -17,6 +97,115 @@ class ServiceManager {
 
   _isWindows() {
     return process.platform === 'win32';
+  }
+
+  _projectDir(section, projectName) {
+    return resolveInside(path.resolve('projects'), section, assertProjectName(projectName));
+  }
+
+  _projectEntry(section, projectName, entryPoint) {
+    const projectDir = this._projectDir(section, projectName);
+    return { projectDir, entryPoint: resolveInside(projectDir, entryPoint) };
+  }
+
+  _mergeEnvVars(target, envVars) {
+    for (const item of Array.isArray(envVars) ? envVars : []) {
+      if (item && /^[A-Za-z_][A-Za-z0-9_]*$/.test(item.key || '')) target[item.key] = String(item.value || '');
+    }
+  }
+
+  _resolveDocumentRoot(profile, config = this.configManager.getConfig()) {
+    const configured = config.general?.forceGlobalDocumentRoot
+      ? config.general.globalDocumentRoot
+      : profile?.documentRoot;
+    return path.resolve(configured || './www');
+  }
+
+  _validateDocumentRoot(directory) {
+    if (typeof directory !== 'string' || !directory.trim()) throw new Error('Choose a document root directory');
+    const resolved = path.resolve(directory.trim());
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+      throw new Error('The selected document root does not exist');
+    }
+    return resolved;
+  }
+
+  async _applyWebRootChange(mutateConfig, affectedSections = WEB_SERVICES) {
+    const previousConfig = this.configManager.getConfig();
+    const nextConfig = JSON.parse(JSON.stringify(previousConfig));
+    const mutation = mutateConfig(nextConfig);
+    if (mutation?.success === false) return mutation;
+    const runningWebServers = affectedSections.filter(section => this.processes.has(section));
+    const stopped = [];
+    const started = [];
+
+    try {
+      for (const section of runningWebServers) {
+        const result = await this.stopService(section, { keepPhp: true });
+        if (!result.success) throw new Error(`Could not stop ${section}: ${result.error}`);
+        stopped.push(section);
+      }
+      const saved = this.configManager.saveConfig(nextConfig);
+      if (!saved.success) throw new Error(saved.error || 'Could not save the document root');
+      for (const section of runningWebServers) {
+        const result = await this.startService(section);
+        if (!result.success) throw new Error(`Could not restart ${section}: ${result.error}`);
+        started.push(section);
+      }
+      return { success: true, config: this.configManager.getConfig(), restarted: started, ...mutation };
+    } catch (err) {
+      for (const section of [...started].reverse()) {
+        if (this.processes.has(section)) await this.stopService(section, { keepPhp: true });
+      }
+      this.configManager.saveConfig(previousConfig);
+      const rollbackErrors = [];
+      for (const section of runningWebServers) {
+        if (this.processes.has(section)) continue;
+        const result = await this.startService(section);
+        if (!result.success) rollbackErrors.push(`${section}: ${result.error}`);
+      }
+      return {
+        success: false,
+        error: `${err.message}. Previous configuration restored.${rollbackErrors.length ? ` Rollback errors: ${rollbackErrors.join('; ')}` : ''}`,
+        rolledBack: true,
+        config: this.configManager.getConfig()
+      };
+    }
+  }
+
+  async setDocumentRoot(section, directory) {
+    if (!WEB_SERVICES.includes(section)) return { success: false, error: 'Document root is supported only for web servers' };
+    try {
+      const resolved = this._validateDocumentRoot(directory);
+      const result = await this._applyWebRootChange(config => {
+        if (config.general?.forceGlobalDocumentRoot) {
+          return { success: false, error: 'The global document root is enforced. Change it in General settings.' };
+        }
+        const profile = this.configManager.getActiveProfile(config, section);
+        if (!profile) return { success: false, error: `No active profile for ${section}` };
+        profile.documentRoot = resolved;
+        return { success: true, documentRoot: resolved };
+      }, [section]);
+      return result;
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  async setGlobalDocumentRoot(enabled, directory) {
+    try {
+      const current = this.configManager.getConfig();
+      const resolved = this._validateDocumentRoot(directory || current.general?.globalDocumentRoot || './www');
+      const affectsRunningServers = Boolean(current.general?.forceGlobalDocumentRoot) || Boolean(enabled);
+      return this._applyWebRootChange(config => {
+        config.general = config.general || {};
+        config.general.forceGlobalDocumentRoot = Boolean(enabled);
+        config.general.globalDocumentRoot = resolved;
+        return { success: true, enabled: Boolean(enabled), documentRoot: resolved };
+      }, affectsRunningServers ? WEB_SERVICES : []);
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
   }
 
   _findExecutable(installPath, dlKey) {
@@ -47,6 +236,55 @@ class ServiceManager {
     return null;
   }
 
+  _resolveServiceHome(installPath, dlKey) {
+    const wrappers = {
+      apache: ['Apache24'],
+      postgresql: ['pgsql']
+    };
+    for (const wrapper of wrappers[dlKey] || []) {
+      const candidate = path.join(installPath, wrapper);
+      if (fs.existsSync(candidate) && this._findExecutable(candidate, dlKey)) return candidate;
+    }
+    return installPath;
+  }
+
+  _webServerNeedsPhp(section, config = this.configManager.getConfig()) {
+    if (!WEB_SERVICES.includes(section) || config.php?.enabled === false) return false;
+    const profile = this.configManager.getActiveProfile(config, section);
+    if (!profile || config[section]?.enabled === false) return false;
+    if (section === 'apache') return profile.modProxyFcgi === true;
+    return profile.phpEnabled !== false && (section !== 'caddy' || profile.fileServer !== false);
+  }
+
+  _phpExtensionDirectives(profile, installPath) {
+    const directives = [];
+    const enabled = new Set((Array.isArray(profile.extensions) ? profile.extensions : [])
+      .filter(extension => extension?.enabled && typeof extension.name === 'string')
+      .map(extension => extension.name.toLowerCase()));
+    const extDir = path.join(installPath, 'ext');
+    const files = fs.existsSync(extDir)
+      ? fs.readdirSync(extDir).reduce((map, file) => map.set(file.toLowerCase(), file), new Map())
+      : new Map();
+
+    for (const name of enabled) {
+      if (!/^[a-z0-9_]+$/.test(name) || PHP_BUILTIN_EXTENSIONS.has(name)) continue;
+      if (name === 'opcache') {
+        const opcache = files.get(this._isWindows() ? 'php_opcache.dll' : 'opcache.so');
+        if (opcache) directives.push(`zend_extension=${opcache}`);
+        continue;
+      }
+      if (name === 'xdebug') {
+        const xdebug = [...files.entries()].find(([file]) => /^php_xdebug(?:-[a-z0-9._-]+)?\.dll$/.test(file) || /^xdebug(?:-[a-z0-9._-]+)?\.so$/.test(file));
+        if (xdebug) directives.push(`zend_extension=${xdebug[1]}`);
+        continue;
+      }
+      const candidate = this._isWindows() ? `php_${name}.dll` : `${name}.so`;
+      const actual = files.get(candidate.toLowerCase());
+      if (actual) directives.push(`extension=${actual}`);
+    }
+    return directives;
+  }
+
   _buildArgs(section, profile, installPath) {
     const dlKey = this._resolveDownloadKey(profile, section);
 
@@ -56,7 +294,9 @@ class ServiceManager {
         if (!fs.existsSync(confDir)) fs.mkdirSync(confDir, { recursive: true });
         const logsDir = path.join(installPath, 'logs');
         if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
-        const docRoot = path.resolve(profile.documentRoot || './www');
+        const docRoot = this._resolveDocumentRoot(profile);
+        const sslCertificate = path.resolve(profile.sslCertificate || path.join(confDir, 'server.crt')).replace(/\\/g, '/');
+        const sslCertificateKey = path.resolve(profile.sslCertificateKey || path.join(confDir, 'server.key')).replace(/\\/g, '/');
         if (!fs.existsSync(docRoot)) fs.mkdirSync(docRoot, { recursive: true });
         const indexPath = path.join(docRoot, 'index.html');
         if (!fs.existsSync(indexPath)) {
@@ -66,15 +306,22 @@ class ServiceManager {
         // PHP integration via mod_proxy_fcgi
         let phpHandler = '';
         let adminerAlias = '';
-        const phpSection = this.configManager.getConfig().php;
-        if (phpSection && profile.modProxyFcgi) {
-          const phpProfile = this.configManager.getActiveProfile(this.configManager.getConfig(), 'php');
+        const currentConfig = this.configManager.getConfig();
+        const phpSection = currentConfig.php;
+        if (phpSection?.enabled !== false && profile.modProxyFcgi) {
+          const phpProfile = this.configManager.getActiveProfile(currentConfig, 'php');
           if (phpProfile) {
             const phpPort = phpProfile.port || 9000;
+            const scriptFilenameFix = this._isWindows()
+              ? `ProxyFCGISetEnvIf "reqenv('SCRIPT_FILENAME') =~ m#^proxy:fcgi://[^/]+/(.*)$#" SCRIPT_FILENAME "$1"
+ProxyFCGISetEnvIf "reqenv('SCRIPT_FILENAME') =~ m#^/([A-Za-z]:/.*)$#" SCRIPT_FILENAME "$1"`
+              : `ProxyFCGISetEnvIf "reqenv('SCRIPT_FILENAME') =~ m#^proxy:fcgi://[^/]+(/.*)$#" SCRIPT_FILENAME "$1"`;
             phpHandler = `
-    <FilesMatch "\\.php$">
-        SetHandler "proxy:fcgi://127.0.0.1:${phpPort}"
-    </FilesMatch>`;
+<FilesMatch "\\.php$">
+    SetHandler "proxy:fcgi://127.0.0.1:${phpPort}/"
+</FilesMatch>
+ProxyFCGIBackendType GENERIC
+${scriptFilenameFix}`;
             // Adminer alias
             const adminerDir = path.resolve('./utils/adminer').replace(/\\/g, '/');
             adminerAlias = `
@@ -83,9 +330,6 @@ Alias /adminer "${adminerDir}"
     Options Indexes FollowSymLinks
     AllowOverride All
     Require all granted
-    <FilesMatch "\\.php$">
-        SetHandler "proxy:fcgi://127.0.0.1:${phpPort}"
-    </FilesMatch>
 </Directory>`;
           }
         }
@@ -104,16 +348,27 @@ Alias /adminer "${adminerDir}"
         if (profile.modPhp) modules.push('LoadModule php_module modules/libphp.so');
         if (adminerAlias) modules.push('LoadModule alias_module modules/mod_alias.so');
 
+        // Apache Lounge compiles the Windows MPM statically. Other builds may
+        // ship it as a module, so load an MPM only when the file exists.
+        const mpmCandidates = this._isWindows()
+          ? [['mpm_winnt_module', 'mod_mpm_winnt.so']]
+          : [['mpm_event_module', 'mod_mpm_event.so'], ['mpm_worker_module', 'mod_mpm_worker.so']];
+        const platformModule = mpmCandidates.find(([, file]) => fs.existsSync(path.join(installPath, 'modules', file)));
+        const platformModules = platformModule ? `LoadModule ${platformModule[0]} modules/${platformModule[1]}` : '';
+
         const apacheConf = `
 ServerRoot "${installPath.replace(/\\/g, '/')}"
 Listen ${profile.host ? profile.host + ':' : ''}${profile.port || 80}
 ServerName ${profile.serverName || 'localhost'}:${profile.port || 80}
 
+${platformModules}
 LoadModule authz_core_module modules/mod_authz_core.so
 LoadModule dir_module modules/mod_dir.so
 LoadModule log_config_module modules/mod_log_config.so
 LoadModule mime_module modules/mod_mime.so
 ${modules.join('\n')}
+
+LogFormat "%h %l %u %t \\"%r\\" %>s %b \\"%{Referer}i\\" \\"%{User-Agent}i\\"" combined
 
 DocumentRoot "${docRoot.replace(/\\/g, '/')}"
 DirectoryIndex ${profile.directoryIndex || 'index.html index.htm index.php'}
@@ -122,8 +377,10 @@ DirectoryIndex ${profile.directoryIndex || 'index.html index.htm index.php'}
     Options Indexes FollowSymLinks
     AllowOverride All
     Require all granted
-${phpHandler}
 </Directory>
+
+${phpHandler}
+${adminerAlias}
 
 ${profile.accessLog ? `CustomLog "logs/access.log" combined` : ''}
 ${profile.errorLog ? `ErrorLog "logs/error.log"` : ''}
@@ -147,30 +404,34 @@ ${profile.sslEnabled && profile.modSsl ? `
 Listen ${profile.host ? profile.host + ':' : ''}${profile.sslPort || 443}
 <VirtualHost ${profile.host || '*'}:${profile.sslPort || 443}>
     SSLEngine on
-    SSLCertificateFile conf/server.crt
-    SSLCertificateKeyFile conf/server.key
+    SSLCertificateFile "${sslCertificate}"
+    SSLCertificateKeyFile "${sslCertificateKey}"
     DocumentRoot "${docRoot.replace(/\\/g, '/')}"
     <Directory "${docRoot.replace(/\\/g, '/')}">
         Options Indexes FollowSymLinks
         AllowOverride All
         Require all granted
-${phpHandler}
     </Directory>
-${adminerAlias}
 </VirtualHost>
 ` : ''}
 
 ${profile.customConfig || ''}
 `;
         fs.writeFileSync(path.join(confDir, 'httpd.conf'), apacheConf, 'utf-8');
-        return { args: ['-d', installPath, '-f', path.join(confDir, 'httpd.conf')], env: {} };
+        return {
+          args: ['-d', installPath, '-f', path.join(confDir, 'httpd.conf')],
+          env: {},
+          logFiles: [path.join(installPath, 'logs', 'error.log'), profile.accessLog ? path.join(installPath, 'logs', 'access.log') : null]
+        };
       }
       case 'nginx': {
         const confDir = path.join(installPath, 'conf');
         if (!fs.existsSync(confDir)) fs.mkdirSync(confDir, { recursive: true });
         const logsDir = path.join(installPath, 'logs');
         if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
-        const docRoot = path.resolve(profile.documentRoot || './www');
+        const docRoot = this._resolveDocumentRoot(profile);
+        const sslCertificate = path.resolve(profile.sslCertificate || path.join(confDir, 'server.crt')).replace(/\\/g, '/');
+        const sslCertificateKey = path.resolve(profile.sslCertificateKey || path.join(confDir, 'server.key')).replace(/\\/g, '/');
         if (!fs.existsSync(docRoot)) fs.mkdirSync(docRoot, { recursive: true });
         const indexPath = path.join(docRoot, 'index.html');
         if (!fs.existsSync(indexPath)) {
@@ -180,9 +441,10 @@ ${profile.customConfig || ''}
         // PHP integration via FastCGI
         let phpLocation = '';
         let phpAppsLocations = '';
-        const phpSection = this.configManager.getConfig().php;
-        if (phpSection) {
-          const phpProfile = this.configManager.getActiveProfile(this.configManager.getConfig(), 'php');
+        const currentConfig = this.configManager.getConfig();
+        const phpSection = currentConfig.php;
+        if (phpSection?.enabled !== false && profile.phpEnabled !== false) {
+          const phpProfile = this.configManager.getActiveProfile(currentConfig, 'php');
           if (phpProfile) {
             const phpPort = phpProfile.port || 9000;
             phpLocation = `
@@ -329,8 +591,8 @@ ${profile.sslEnabled ? `
         server_name  ${profile.serverName || 'localhost'};
         root "${docRoot.replace(/\\/g, '/')}";
         index index.html index.htm index.php;
-        ssl_certificate     conf/server.crt;
-        ssl_certificate_key conf/server.key;
+        ssl_certificate     "${sslCertificate}";
+        ssl_certificate_key "${sslCertificateKey}";
         ssl_protocols TLSv1.2 TLSv1.3;
         ssl_ciphers HIGH:!aNULL:!MD5;
 ${profile.accessLog ? '        access_log logs/ssl_access.log;' : '        access_log off;'}
@@ -344,23 +606,21 @@ ${profile.corsEnabled ? '\n        # CORS headers\n        add_header Access-Con
 ` : ''}
 }`;
         fs.writeFileSync(path.join(confDir, 'nginx.conf'), nginxConf, 'utf-8');
-        return { args: ['-p', installPath, '-c', 'conf/nginx.conf'], env: {} };
+        return {
+          args: ['-p', installPath, '-c', 'conf/nginx.conf'],
+          env: {},
+          logFiles: [
+            path.join(installPath, 'logs', 'error.log'),
+            profile.accessLog ? path.join(installPath, 'logs', 'access.log') : null,
+            profile.sslEnabled && profile.errorLog ? path.join(installPath, 'logs', 'ssl_error.log') : null,
+            profile.sslEnabled && profile.accessLog ? path.join(installPath, 'logs', 'ssl_access.log') : null
+          ]
+        };
       }
       case 'php': {
-        // Build extension directives from profile
-        const extLines = [];
-        if (profile.extensions) {
-          for (const ext of profile.extensions) {
-            if (ext.enabled) {
-              if (ext.name === 'opcache') continue; // handled separately
-              if (ext.name === 'xdebug') {
-                extLines.push(`zend_extension=xdebug`);
-              } else {
-                extLines.push(`extension=${ext.name}`);
-              }
-            }
-          }
-        }
+        // Only load extension files that are actually shipped by the selected
+        // PHP build. Core extensions must not be loaded as DLLs.
+        const extLines = this._phpExtensionDirectives(profile, installPath);
 
         // Build Xdebug config if xdebug is enabled
         let xdebugConfig = '';
@@ -383,13 +643,24 @@ post_max_size = ${profile.postMaxSize || '64M'}
 display_errors = ${profile.displayErrors ? 'On' : 'Off'}
 error_reporting = ${profile.errorReporting || 'E_ALL'}
 date.timezone = ${profile.timezone || 'UTC'}
-${profile.opcache ? '[opcache]\nopcache.enable=1\nopcache.memory_consumption=' + (profile.opcacheMemory || 128) : ''}
+cgi.force_redirect = 0
+cgi.fix_pathinfo = 1
+fastcgi.logging = 0
+${this._isWindows() ? 'fastcgi.impersonate = 1' : ''}
+${profile.opcache ? '[opcache]\nopcache.enable=1\nopcache.enable_cli=0\nopcache.memory_consumption=' + (profile.opcacheMemory || 128) : ''}
 ${extLines.length ? '\n; Extensions\n' + extLines.join('\n') : ''}${xdebugConfig}
 ${profile.customIni || ''}`;
         fs.writeFileSync(path.join(installPath, 'php.ini'), phpIni, 'utf-8');
 
         if (this._isWindows()) {
-          return { args: ['-b', `127.0.0.1:${profile.port || 9000}`, '-c', path.join(installPath, 'php.ini')], exe: 'php-cgi.exe', env: {} };
+          return {
+            args: ['-b', `127.0.0.1:${profile.port || 9000}`, '-c', path.join(installPath, 'php.ini')],
+            exe: 'php-cgi.exe',
+            env: {
+              PHP_FCGI_CHILDREN: String(Math.max(1, Number(profile.fpmMaxChildren) || 5)),
+              PHP_FCGI_MAX_REQUESTS: '1000'
+            }
+          };
         }
         // Linux: prefer php-cgi (same -b flag), fall back to php-fpm with generated config
         const hasCgi = fs.existsSync(path.join(installPath, 'bin/php-cgi'));
@@ -410,15 +681,14 @@ pm.min_spare_servers = ${profile.fpmMinSpare || 1}
 pm.max_spare_servers = ${profile.fpmMaxSpare || 3}
 `;
         fs.writeFileSync(path.join(installPath, 'php-fpm-kitsune.conf'), fpmConf, 'utf-8');
-        return { args: ['--fpm-config', path.join(installPath, 'php-fpm-kitsune.conf'), '-c', path.join(installPath, 'php.ini'), '--nodaemonize'], exe: 'sbin/php-fpm', env: {} };
+        return { args: ['--fpm-config', path.join(installPath, 'php-fpm-kitsune.conf'), '-c', path.join(installPath, 'php.ini'), '--nodaemonize'], exe: 'sbin/php-fpm', env: {}, logFiles: [path.join(installPath, 'php-fpm.log')] };
       }
       case 'node': {
-        const projectDir = profile.project ? path.resolve('projects', 'node', profile.project) : null;
-        const entryPoint = projectDir
-          ? path.join(projectDir, profile.entryPoint || 'server.js')
-          : path.resolve(profile.entryPoint || 'server.js');
+        const project = profile.project ? this._projectEntry('node', profile.project, profile.entryPoint || 'server.js') : null;
+        const projectDir = project?.projectDir || null;
+        const entryPoint = project?.entryPoint || path.resolve(profile.entryPoint || 'server.js');
         const envVars = { NODE_ENV: profile.env || 'development', PORT: String(profile.port || 3000) };
-        if (profile.envVars) { for (const ev of profile.envVars) { if (ev.key) envVars[ev.key] = ev.value || ''; } }
+        this._mergeEnvVars(envVars, profile.envVars);
         const args = [entryPoint];
         if (profile.watchMode) args.unshift('--watch');
         if (profile.inspectEnabled) args.unshift(`--inspect=${profile.inspectPort || 9229}`);
@@ -429,11 +699,11 @@ pm.max_spare_servers = ${profile.fpmMaxSpare || 3}
         if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
         const pgVersionFile = path.join(dataDir, 'PG_VERSION');
         if (!fs.existsSync(pgVersionFile)) {
-          return { initdb: true, dataDir, username: profile.username || 'kitsuneserv', args: ['start', '-D', dataDir, '-l', path.join(dataDir, 'log.txt'), '-o', `-p ${profile.port || 5432}`], env: {},
+          return { initdb: true, dataDir, username: profile.username || 'kitsuneserv', args: ['start', '-D', dataDir, '-l', path.join(dataDir, 'log.txt'), '-o', `-p ${profile.port || 5432}`], env: {}, logFiles: [path.join(dataDir, 'log.txt')],
             postInit: () => this._writePostgresqlConf(dataDir, profile) };
         }
         this._writePostgresqlConf(dataDir, profile);
-        return { args: ['start', '-D', dataDir, '-l', path.join(dataDir, 'log.txt'), '-o', `-p ${profile.port || 5432}`], env: {} };
+        return { args: ['start', '-D', dataDir, '-l', path.join(dataDir, 'log.txt'), '-o', `-p ${profile.port || 5432}`], env: {}, logFiles: [path.join(dataDir, 'log.txt')] };
       }
       case 'redis': {
         // Write redis.conf so customConfig is applied
@@ -472,7 +742,7 @@ pm.max_spare_servers = ${profile.fpmMaxSpare || 3}
           mongodConf += `\n# Custom config\n${profile.customConfig}\n`;
           const confPath = path.join(dataDir, 'mongod.conf');
           fs.writeFileSync(confPath, mongodConf, 'utf-8');
-          return { args: ['--config', confPath], env: {} };
+          return { args: ['--config', confPath], env: {}, logFiles: profile.logging ? [path.join(dataDir, 'mongod.log')] : [] };
         }
         // Fallback to CLI args when no custom config
         const args = ['--dbpath', dataDir, '--port', String(profile.port || 27017), '--bind_ip', profile.host || '127.0.0.1'];
@@ -484,7 +754,7 @@ pm.max_spare_servers = ${profile.fpmMaxSpare || 3}
           if (profile.logLevel === 'debug') args.push('-vv');
           else if (profile.logLevel === 'info') args.push('-v');
         }
-        return { args, env: {} };
+        return { args, env: {}, logFiles: profile.logging ? [path.join(dataDir, 'mongod.log')] : [] };
       }
       case 'mysql': {
         const dataDir = path.resolve(profile.dataDir || `./data/mysql-${profile.version}`);
@@ -538,12 +808,11 @@ ${profile.customConfig || ''}
         return { initMariadb: needsInit, dataDir, args, env: {} };
       }
       case 'go': {
-        const projectDir = profile.project ? path.resolve('projects', 'go', profile.project) : null;
-        const entryPoint = projectDir
-          ? path.join(projectDir, profile.entryPoint || 'main.go')
-          : path.resolve(profile.entryPoint || 'main.go');
+        const project = profile.project ? this._projectEntry('go', profile.project, profile.entryPoint || 'main.go') : null;
+        const projectDir = project?.projectDir || null;
+        const entryPoint = project?.entryPoint || path.resolve(profile.entryPoint || 'main.go');
         const envVars = { PORT: String(profile.port || 8080) };
-        if (profile.envVars) { for (const ev of profile.envVars) { if (ev.key) envVars[ev.key] = ev.value || ''; } }
+        this._mergeEnvVars(envVars, profile.envVars);
         const goArgs = ['run'];
         if (profile.buildFlags) {
           const flags = profile.buildFlags.trim().split(/\s+/).filter(Boolean);
@@ -553,12 +822,11 @@ ${profile.customConfig || ''}
         return { args: goArgs, env: envVars, cwd: projectDir || path.dirname(entryPoint) };
       }
       case 'bun': {
-        const projectDir = profile.project ? path.resolve('projects', 'bun', profile.project) : null;
-        const entryPoint = projectDir
-          ? path.join(projectDir, profile.entryPoint || 'server.ts')
-          : path.resolve(profile.entryPoint || 'server.ts');
+        const project = profile.project ? this._projectEntry('bun', profile.project, profile.entryPoint || 'server.ts') : null;
+        const projectDir = project?.projectDir || null;
+        const entryPoint = project?.entryPoint || path.resolve(profile.entryPoint || 'server.ts');
         const envVars = { NODE_ENV: profile.env || 'development', PORT: String(profile.port || 3001) };
-        if (profile.envVars) { for (const ev of profile.envVars) { if (ev.key) envVars[ev.key] = ev.value || ''; } }
+        this._mergeEnvVars(envVars, profile.envVars);
         const args = ['run'];
         if (profile.watchMode) args.push('--watch');
         args.push(entryPoint);
@@ -577,21 +845,19 @@ ${profile.customConfig || ''}
         return { args, env: {} };
       }
       case 'python': {
-        const projectDir = profile.project ? path.resolve('projects', 'python', profile.project) : null;
-        const entryPoint = projectDir
-          ? path.join(projectDir, profile.entryPoint || 'app.py')
-          : path.resolve(profile.entryPoint || 'app.py');
+        const project = profile.project ? this._projectEntry('python', profile.project, profile.entryPoint || 'app.py') : null;
+        const projectDir = project?.projectDir || null;
+        const entryPoint = project?.entryPoint || path.resolve(profile.entryPoint || 'app.py');
         const envVars = { PORT: String(profile.port || 8000) };
-        if (profile.envVars) { for (const ev of profile.envVars) { if (ev.key) envVars[ev.key] = ev.value || ''; } }
+        this._mergeEnvVars(envVars, profile.envVars);
         return { args: [entryPoint], env: envVars, cwd: projectDir || path.dirname(entryPoint) };
       }
       case 'deno': {
-        const projectDir = profile.project ? path.resolve('projects', 'deno', profile.project) : null;
-        const entryPoint = projectDir
-          ? path.join(projectDir, profile.entryPoint || 'main.ts')
-          : path.resolve(profile.entryPoint || 'main.ts');
+        const project = profile.project ? this._projectEntry('deno', profile.project, profile.entryPoint || 'main.ts') : null;
+        const projectDir = project?.projectDir || null;
+        const entryPoint = project?.entryPoint || path.resolve(profile.entryPoint || 'main.ts');
         const envVars = { PORT: String(profile.port || 8000) };
-        if (profile.envVars) { for (const ev of profile.envVars) { if (ev.key) envVars[ev.key] = ev.value || ''; } }
+        this._mergeEnvVars(envVars, profile.envVars);
         const args = ['run'];
         if (profile.allowNet) args.push('--allow-net');
         if (profile.allowRead) args.push('--allow-read');
@@ -607,7 +873,7 @@ ${profile.customConfig || ''}
       case 'caddy': {
         const confDir = path.join(installPath, 'conf');
         if (!fs.existsSync(confDir)) fs.mkdirSync(confDir, { recursive: true });
-        const docRoot = path.resolve(profile.documentRoot || './www');
+        const docRoot = this._resolveDocumentRoot(profile);
         if (!fs.existsSync(docRoot)) fs.mkdirSync(docRoot, { recursive: true });
 
         let globalBlock = '';
@@ -630,12 +896,16 @@ ${profile.customConfig || ''}
         }
 
         if (profile.encode) caddyfile += '    encode gzip zstd\n';
+        if (profile.sslCertificate && profile.sslCertificateKey) {
+          caddyfile += `    tls "${path.resolve(profile.sslCertificate).replace(/\\/g, '/')}" "${path.resolve(profile.sslCertificateKey).replace(/\\/g, '/')}"\n`;
+        }
 
         // PHP support for the main document root, /adminer/ and /apps/
-        const phpSectionCaddy = this.configManager.getConfig().php;
+        const caddyConfig = this.configManager.getConfig();
+        const phpSectionCaddy = caddyConfig.php;
         let phpPortCaddy = null;
-        if (phpSectionCaddy) {
-          const phpProfileCaddy = this.configManager.getActiveProfile(this.configManager.getConfig(), 'php');
+        if (phpSectionCaddy?.enabled !== false && profile.phpEnabled !== false) {
+          const phpProfileCaddy = this.configManager.getActiveProfile(caddyConfig, 'php');
           if (phpProfileCaddy) phpPortCaddy = phpProfileCaddy.port || 9000;
         }
 
@@ -682,7 +952,11 @@ ${profile.customConfig || ''}
         caddyfile += '}\n';
 
         fs.writeFileSync(path.join(confDir, 'Caddyfile'), caddyfile, 'utf-8');
-        return { args: ['run', '--config', path.join(confDir, 'Caddyfile'), '--adapter', 'caddyfile'], env: {} };
+        return {
+          args: ['run', '--config', path.join(confDir, 'Caddyfile'), '--adapter', 'caddyfile'],
+          env: {},
+          logFiles: profile.accessLog ? [path.join(confDir, 'access.log')] : []
+        };
       }
       case 'minio': {
         const dataDir = path.resolve(profile.dataDir || `./data/minio-${profile.version}`);
@@ -702,9 +976,9 @@ ${profile.customConfig || ''}
   _checkDependencies(section, config) {
     const warnings = [];
     // Web servers need PHP if mod_proxy_fcgi or php is configured
-    if (['apache', 'nginx', 'caddy'].includes(section)) {
+    if (WEB_SERVICES.includes(section) && this._webServerNeedsPhp(section, config)) {
       const phpSection = config.php;
-      if (phpSection) {
+      if (phpSection?.enabled !== false) {
         const phpProfile = this.configManager.getActiveProfile(config, 'php');
         if (phpProfile && !this.downloadManager.isInstalled('php', phpProfile.version)) {
           warnings.push(`PHP ${phpProfile.version} is not installed — PHP integration will not work`);
@@ -715,9 +989,11 @@ ${profile.customConfig || ''}
     if (['node', 'go', 'bun', 'python', 'deno'].includes(section)) {
       const profile = this.configManager.getActiveProfile(config, section);
       if (profile && profile.project) {
-        const projectDir = path.resolve('projects', section, profile.project);
-        if (!fs.existsSync(projectDir)) {
-          warnings.push(`Project directory "${profile.project}" does not exist — will be created`);
+        try {
+          const projectDir = this._projectDir(section, profile.project);
+          if (!fs.existsSync(projectDir)) warnings.push(`Project directory "${profile.project}" does not exist — create it first`);
+        } catch {
+          warnings.push('The configured project path is invalid');
         }
       }
     }
@@ -738,22 +1014,170 @@ ${profile.customConfig || ''}
    * Auto-start PHP FastCGI if Apache (modProxyFcgi) or Nginx needs it.
    */
   async _autoStartPhpIfNeeded(section, config) {
-    if (this.processes.has('php')) return null;
-    let needsPhp = false;
-    if (section === 'apache') {
-      const profile = this.configManager.getActiveProfile(config, 'apache');
-      if (profile?.modProxyFcgi) needsPhp = true;
-    }
-    if (section === 'nginx') {
-      if (config.php) needsPhp = true;
-    }
-    if (section === 'caddy') {
-      if (config.php) needsPhp = true;
-    }
-    if (!needsPhp) return null;
+    if (!this._webServerNeedsPhp(section, config)) return { required: false, success: true };
+    if (this.processes.has('php')) return { required: true, success: true };
     const result = await this.startService('php');
-    if (result.success) return 'PHP FastCGI auto-started';
-    return null;
+    if (result.success) return { required: true, success: true, message: 'PHP FastCGI auto-started' };
+    return { required: true, success: false, error: result.error || 'PHP FastCGI could not be started' };
+  }
+
+  async _stopPhpIfOrphaned() {
+    if (!this.processes.has('php')) return;
+    const config = this.configManager.getConfig();
+    const hasDependentWeb = WEB_SERVICES.some(service => this.processes.has(service) && this._webServerNeedsPhp(service, config));
+    if (!hasDependentWeb) await this.stopService('php', { keepPhp: true });
+  }
+
+  validateConfigChange(proposedConfig) {
+    if (!proposedConfig || typeof proposedConfig !== 'object') return { success: false, error: 'Invalid configuration' };
+    const current = this.configManager.getConfig();
+    for (const section of SERVICE_IDS) {
+      const currentProfile = this.configManager.getActiveProfile(current, section);
+      const proposedProfile = this.configManager.getActiveProfile(proposedConfig, section);
+      const affectsRunningStack = this.processes.has(section)
+        || (section === 'php' && WEB_SERVICES.some(web => this.processes.has(web) && this._webServerNeedsPhp(web, current)));
+      if (!affectsRunningStack || !currentProfile) continue;
+      if (!proposedProfile) return { success: false, error: `The active ${section} configuration cannot be removed while it is running` };
+      if (currentProfile.id !== proposedProfile.id || currentProfile.version !== proposedProfile.version) {
+        return { success: false, error: `Use the profile/version switch action while ${section} is running` };
+      }
+      if (section === 'php' && Number(currentProfile.port || 9000) !== Number(proposedProfile.port || 9000)) {
+        return { success: false, error: 'Stop the web stack before changing the PHP FastCGI port' };
+      }
+    }
+    return { success: true };
+  }
+
+  async _restorePreviousStack(config, section, sectionWasRunning, dependentWebs) {
+    const errors = [];
+    this.configManager.saveConfig(config);
+    if (section === 'php') {
+      if ((sectionWasRunning || dependentWebs.length) && !this.processes.has('php')) {
+        const phpResult = await this.startService('php');
+        if (!phpResult.success) errors.push(`PHP rollback start failed: ${phpResult.error}`);
+      }
+      for (const web of dependentWebs) {
+        if (this.processes.has(web)) continue;
+        const result = await this.startService(web);
+        if (!result.success) errors.push(`${web} rollback start failed: ${result.error}`);
+      }
+    } else if (sectionWasRunning && !this.processes.has(section)) {
+      const result = await this.startService(section);
+      if (!result.success) errors.push(`${section} rollback start failed: ${result.error}`);
+    }
+    return errors;
+  }
+
+  async _applyActiveRuntimeChange(section, mutateConfig) {
+    if (!SERVICE_IDS.includes(section)) return { success: false, error: 'Unknown service' };
+    const previousConfig = this.configManager.getConfig();
+    const nextConfig = JSON.parse(JSON.stringify(previousConfig));
+    const previousProfile = this.configManager.getActiveProfile(previousConfig, section);
+    if (!previousProfile) return { success: false, error: `No active profile for ${section}` };
+
+    const mutation = mutateConfig(nextConfig);
+    if (mutation?.success === false) return mutation;
+    const nextProfile = this.configManager.getActiveProfile(nextConfig, section);
+    if (!nextProfile) return { success: false, error: `No target profile for ${section}` };
+    if (previousProfile.id === nextProfile.id && previousProfile.version === nextProfile.version) {
+      return { success: true, config: previousConfig, restarted: [], previousVersion: previousProfile.version, version: nextProfile.version };
+    }
+
+    const dependentWebs = section === 'php'
+      ? WEB_SERVICES.filter(web => this.processes.has(web) && this._webServerNeedsPhp(web, previousConfig))
+      : [];
+    const sectionWasRunning = this.processes.has(section);
+    const needsRestart = sectionWasRunning || dependentWebs.length > 0;
+    if (needsRestart && !this.downloadManager.isInstalled(section, nextProfile.version)) {
+      return { success: false, error: `${section} ${nextProfile.version} is not installed. Download it first.`, needsDownload: true };
+    }
+
+    const stopped = [];
+    const started = [];
+    try {
+      for (const web of dependentWebs) {
+        const result = await this.stopService(web, { keepPhp: true });
+        if (!result.success) throw new Error(`Could not stop ${web}: ${result.error}`);
+        stopped.push(web);
+      }
+      if (sectionWasRunning) {
+        const result = await this.stopService(section, { keepPhp: true });
+        if (!result.success) throw new Error(`Could not stop ${section}: ${result.error}`);
+        stopped.push(section);
+      }
+
+      const saved = this.configManager.saveConfig(nextConfig);
+      if (!saved.success) throw new Error(saved.error || 'Could not save the new configuration');
+
+      if (section === 'php') {
+        if (needsRestart) {
+          const phpResult = await this.startService('php');
+          if (!phpResult.success) throw new Error(`PHP ${nextProfile.version} failed to start: ${phpResult.error}`);
+          started.push('php');
+        }
+        for (const web of dependentWebs) {
+          const result = await this.startService(web);
+          if (!result.success) throw new Error(`${web} failed after the PHP switch: ${result.error}`);
+          started.push(web);
+        }
+      } else if (sectionWasRunning) {
+        const result = await this.startService(section);
+        if (!result.success) throw new Error(`${section} ${nextProfile.version} failed to start: ${result.error}`);
+        started.push(section);
+      }
+
+      return {
+        success: true,
+        config: this.configManager.getConfig(),
+        restarted: started,
+        previousVersion: previousProfile.version,
+        version: nextProfile.version
+      };
+    } catch (err) {
+      for (const service of [...started].reverse()) {
+        if (this.processes.has(service)) await this.stopService(service, { keepPhp: true });
+      }
+      const rollbackErrors = await this._restorePreviousStack(previousConfig, section, sectionWasRunning, dependentWebs);
+      return {
+        success: false,
+        error: `${err.message}. Previous configuration restored.${rollbackErrors.length ? ` ${rollbackErrors.join('; ')}` : ''}`,
+        rolledBack: true,
+        config: this.configManager.getConfig()
+      };
+    }
+  }
+
+  async switchVersion(section, version) {
+    try { assertSafeSegment(version, 'version'); }
+    catch (err) { return { success: false, error: err.message }; }
+    if (!this.downloadManager.isInstalled(section, version)) {
+      return { success: false, error: `${section} ${version} is not installed. Download it first.`, needsDownload: true };
+    }
+    return this._applyActiveRuntimeChange(section, config => {
+      const profile = this.configManager.getActiveProfile(config, section);
+      if (!profile) return { success: false, error: `No active profile for ${section}` };
+      const previousVersion = profile.version;
+      if (typeof profile.name === 'string' && profile.name.endsWith(` ${previousVersion}`)) {
+        profile.name = `${profile.name.slice(0, -previousVersion.length)}${version}`;
+      }
+      if (profile.dataDir === `./data/${section}-${previousVersion}`) {
+        profile.dataDir = `./data/${section}-${version}`;
+      }
+      profile.version = version;
+      return { success: true };
+    });
+  }
+
+  async switchProfile(section, profileId) {
+    try { assertSafeSegment(profileId, 'profile id'); }
+    catch (err) { return { success: false, error: err.message }; }
+    return this._applyActiveRuntimeChange(section, config => {
+      const service = config[section];
+      if (!service) return { success: false, error: 'Unknown service' };
+      if (!service.profiles.some(profile => profile.id === profileId)) return { success: false, error: 'Profile not found' };
+      service.activeProfileId = profileId;
+      return { success: true };
+    });
   }
 
   _checkPortConflict(section, port) {
@@ -785,6 +1209,7 @@ ${profile.customConfig || ''}
   }
 
   async startService(section) {
+    if (!SERVICE_IDS.includes(section)) return { success: false, error: 'Unknown service' };
     if (this.processes.has(section)) return { success: false, error: `${section} is already running` };
 
     const config = this.configManager.getConfig();
@@ -797,13 +1222,15 @@ ${profile.customConfig || ''}
     // Service dependency checks
     const depWarnings = this._checkDependencies(section, config);
 
-    // Auto-start PHP if Apache/Nginx needs it
-    const phpAutoMsg = await this._autoStartPhpIfNeeded(section, config);
-    if (phpAutoMsg) depWarnings.push(phpAutoMsg);
-
     // MinIO default credentials warning
     if (section === 'minio' && profile.rootUser === 'minioadmin' && profile.rootPassword === 'minioadmin') {
       depWarnings.push('MinIO is using default credentials (minioadmin/minioadmin). Change them in the MinIO profile.');
+    }
+
+    // Validate before probing the port to avoid invalid listen() calls.
+    const port = Number(profile.port);
+    if (profile.port && (!Number.isInteger(port) || port < 1 || port > 65535)) {
+      return { success: false, error: `Invalid port ${profile.port}. Must be between 1 and 65535.` };
     }
 
     // Check for port conflict with running services
@@ -820,11 +1247,6 @@ ${profile.customConfig || ''}
       }
     }
 
-    // Port range validation
-    if (profile.port && (profile.port < 1 || profile.port > 65535)) {
-      return { success: false, error: `Invalid port ${profile.port}. Must be between 1 and 65535.` };
-    }
-
     const dlKey = this._resolveDownloadKey(profile, section);
     const version = profile.version;
 
@@ -832,8 +1254,15 @@ ${profile.customConfig || ''}
       return { success: false, error: `${dlKey} ${version} is not installed. Download it first.`, needsDownload: true };
     }
 
-    const installPath = this.downloadManager.getInstallPath(dlKey, version);
-    const buildInfo = this._buildArgs(section, profile, installPath);
+    let installPath;
+    let buildInfo;
+    try {
+      installPath = this.downloadManager.getInstallPath(dlKey, version);
+      installPath = this._resolveServiceHome(installPath, dlKey);
+      buildInfo = this._buildArgs(section, profile, installPath);
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
 
     let exePath = this._findExecutable(installPath, dlKey);
     if (buildInfo.exe) {
@@ -841,6 +1270,16 @@ ${profile.customConfig || ''}
       if (fs.existsSync(alt)) exePath = alt;
     }
     if (!exePath) return { success: false, error: `Could not find executable for ${dlKey} in ${installPath}` };
+
+    // Start PHP only after the web server itself has passed validation. A PHP
+    // failure is fatal here; starting a server that can only return 502 is not
+    // a successful stack start.
+    const phpDependency = await this._autoStartPhpIfNeeded(section, config);
+    if (!phpDependency.success) {
+      return { success: false, error: `Cannot start ${section}: ${phpDependency.error}`, dependency: 'php' };
+    }
+    if (phpDependency.message) depWarnings.push(phpDependency.message);
+    const phpStartedForService = Boolean(phpDependency.message);
 
     // PostgreSQL initdb
     if (buildInfo.initdb) {
@@ -888,30 +1327,35 @@ ${profile.customConfig || ''}
       const spawnCwd = buildInfo.cwd || buildInfo.dataDir || installPath;
       const spawnOpts = { env, cwd: spawnCwd, stdio: ['ignore', 'pipe', 'pipe'] };
       if (this._isWindows()) spawnOpts.windowsHide = true;
+      const logTracker = this._createLogTracker(buildInfo.logFiles);
       const child = spawn(exePath, buildInfo.args, spawnOpts);
 
-      this.processes.set(section, { process: child, pid: child.pid, startedAt: Date.now(), profileId: profile.id });
+      this.processes.set(section, { process: child, pid: child.pid, startedAt: Date.now(), profileId: profile.id, logTracker });
       this.logs.set(section, []);
       const logArr = this.logs.get(section);
+      this._pushLog(logArr, `[KitsuneServ] Started ${section} ${profile.version} (PID ${child.pid}).\n`);
+      this._startLogTracker(logArr, logTracker);
 
-      child.stdout.on('data', (data) => { logArr.push(data.toString()); if (logArr.length > 500) logArr.shift(); });
-      child.stderr.on('data', (data) => { logArr.push('[ERR] ' + data.toString()); if (logArr.length > 500) logArr.shift(); });
+      child.stdout.on('data', (data) => this._pushLog(logArr, data.toString()));
+      child.stderr.on('data', (data) => this._pushLog(logArr, '[ERR] ' + data.toString()));
       child.on('exit', (code) => {
+        this._stopLogTracker(logArr, logTracker);
         this.processes.delete(section);
-        logArr.push(`[KitsuneServ] Process exited with code ${code}\n`);
+        this._pushLog(logArr, `[KitsuneServ] Process exited with code ${code}\n`);
         // Auto-restart if enabled and not intentionally stopped
         // Skip if watchMode is active on runtimes that handle their own restart (--watch)
         const watchModeActive = profile.watchMode && ['node', 'bun', 'deno'].includes(section);
         if (code !== 0 && profile.autoRestart && !watchModeActive && !this._stoppingAll && !this._stoppingSections?.has(section)) {
-          logArr.push(`[KitsuneServ] Auto-restarting ${section}...\n`);
+          this._pushLog(logArr, `[KitsuneServ] Auto-restarting ${section}...\n`);
           setTimeout(() => this.startService(section), 2000);
         }
         // Emit exit event for crash notification
         if (this._onServiceExit) this._onServiceExit(section, code);
       });
       child.on('error', (err) => {
+        this._stopLogTracker(logArr, logTracker);
         this.processes.delete(section);
-        logArr.push(`[KitsuneServ] Process error: ${err.message}\n`);
+        this._pushLog(logArr, `[KitsuneServ] Process error: ${err.message}\n`);
         if (this._onServiceExit) this._onServiceExit(section, -1);
       });
 
@@ -919,19 +1363,22 @@ ${profile.customConfig || ''}
       const crashed = await new Promise(resolve => {
         const timer = setTimeout(() => resolve(false), 1500);
         child.once('exit', (code) => { clearTimeout(timer); resolve(code); });
+        child.once('error', () => { clearTimeout(timer); resolve(-1); });
       });
-      if (crashed !== false && crashed !== 0) {
+      if (crashed !== false) {
         const lastLogs = logArr.slice(-5).join('').trim();
-        return { success: false, error: `${section} crashed immediately (code ${crashed}). ${lastLogs}` };
+        if (phpStartedForService) await this._stopPhpIfOrphaned();
+        return { success: false, error: `${section} exited immediately (code ${crashed}). ${lastLogs}` };
       }
 
       return { success: true, pid: child.pid, warnings: depWarnings };
     } catch (err) {
+      if (phpStartedForService) await this._stopPhpIfOrphaned();
       return { success: false, error: err.message };
     }
   }
 
-  stopService(section) {
+  stopService(section, options = {}) {
     const info = this.processes.get(section);
     if (!info) return Promise.resolve({ success: false, error: `${section} is not running` });
 
@@ -943,31 +1390,28 @@ ${profile.customConfig || ''}
     const stopTimeout = config.general?.stopTimeout || 5000;
 
     return new Promise((resolve) => {
-      // Wait for process to actually exit or timeout
-      const onExit = () => {
-        clearTimeout(timer);
-        this.processes.delete(section);
-        cleanup();
-        resolve({ success: true });
-      };
-      const timer = setTimeout(() => {
+      let settled = false;
+      let timer = null;
+      const finish = async (result) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
         info.process.removeListener('exit', onExit);
+        this._stopLogTracker(this.logs.get(section), info.logTracker);
         this.processes.delete(section);
-        cleanup();
-        resolve({ success: true });
+        setTimeout(() => this._stoppingSections?.delete(section), 2000);
+        if (WEB_SERVICES.includes(section) && !options.keepPhp && !this._stoppingAll) {
+          await this._stopPhpIfOrphaned();
+        }
+        resolve(result);
+      };
+      const onExit = () => { void finish({ success: true }); };
+      timer = setTimeout(async () => {
+        info.process.removeListener('exit', onExit);
+        await this._forceKill(info.process);
+        void finish({ success: true });
       }, stopTimeout);
       info.process.once('exit', onExit);
-
-      const cleanup = () => {
-        setTimeout(() => this._stoppingSections?.delete(section), 2000);
-        // Auto-stop PHP when no web server needs it
-        if ((section === 'apache' || section === 'nginx' || section === 'caddy') && this.processes.has('php')) {
-          const otherWebs = ['apache', 'nginx', 'caddy'].filter(s => s !== section);
-          if (!otherWebs.some(s => this.processes.has(s))) {
-            this.stopService('php');
-          }
-        }
-      };
 
       try {
         const profile = this.configManager.getActiveProfile(config, section);
@@ -979,12 +1423,12 @@ ${profile.customConfig || ''}
           const nginxExe = this._findExecutable(installPath, dlKey);
           if (nginxExe) spawn(nginxExe, ['-p', installPath, '-s', 'quit'], _spawnOpts);
         } else if (dlKey === 'apache' && profile) {
-          const installPath = this.downloadManager.getInstallPath(dlKey, profile.version);
+          const installPath = this._resolveServiceHome(this.downloadManager.getInstallPath(dlKey, profile.version), dlKey);
           const httpdExe = this._findExecutable(installPath, dlKey);
-          if (httpdExe) spawn(httpdExe, ['-k', 'stop', '-d', installPath], _spawnOpts);
+          if (httpdExe) spawn(httpdExe, ['-k', 'stop', '-d', installPath, '-f', path.join(installPath, 'conf', 'httpd.conf')], _spawnOpts);
           else { info.process.kill('SIGTERM'); }
         } else if (dlKey === 'postgresql' && profile) {
-          const installPath = this.downloadManager.getInstallPath(dlKey, profile.version);
+          const installPath = this._resolveServiceHome(this.downloadManager.getInstallPath(dlKey, profile.version), dlKey);
           const pgCtl = this._findFile(installPath, this._isWindows() ? ['bin/pg_ctl.exe', 'pgsql/bin/pg_ctl.exe'] : ['bin/pg_ctl', 'pgsql/bin/pg_ctl']);
           const dataDir = path.resolve(profile.dataDir || `./data/postgresql-${profile.version}`);
           if (pgCtl) spawn(pgCtl, ['stop', '-D', dataDir, '-m', 'fast'], _spawnOpts);
@@ -994,7 +1438,9 @@ ${profile.customConfig || ''}
           const port = profile.port || 3306;
           const user = profile.username || 'root';
           if (admin) {
-            spawn(admin, ['-u', user, `--port=${port}`, 'shutdown'], _spawnOpts);
+            const adminEnv = { ...process.env };
+            if (profile.password) adminEnv.MYSQL_PWD = String(profile.password);
+            spawn(admin, ['-u', user, `--port=${port}`, 'shutdown'], { ..._spawnOpts, env: adminEnv });
           } else {
             info.process.kill('SIGTERM');
             setTimeout(() => { try { info.process.kill('SIGKILL'); } catch { } }, stopTimeout);
@@ -1004,9 +1450,10 @@ ${profile.customConfig || ''}
           setTimeout(() => { try { info.process.kill('SIGKILL'); } catch { } }, stopTimeout);
         }
       } catch (err) {
-        clearTimeout(timer);
-        this.processes.delete(section);
-        resolve({ success: false, error: err.message });
+        void (async () => {
+          await this._forceKill(info.process);
+          await finish({ success: false, error: err.message });
+        })();
       }
     });
   }
@@ -1015,6 +1462,20 @@ ${profile.customConfig || ''}
     const info = this.processes.get(section);
     if (!info) return { running: false };
     return { running: true, pid: info.pid, uptime: Date.now() - info.startedAt, profileId: info.profileId };
+  }
+
+  _forceKill(child) {
+    if (!child || !child.pid) return Promise.resolve();
+    return new Promise(resolve => {
+      try {
+        if (this._isWindows()) {
+          execFile('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }, () => resolve());
+        } else {
+          child.kill('SIGKILL');
+          resolve();
+        }
+      } catch { resolve(); }
+    });
   }
 
   getAllStatuses() {
@@ -1029,14 +1490,24 @@ ${profile.customConfig || ''}
     return (this.logs.get(section) || []).slice(-lines);
   }
 
+  clearLogs(section) {
+    const logs = this.logs.get(section);
+    if (logs) logs.length = 0;
+    else this.logs.set(section, []);
+    return { success: true };
+  }
+
   async stopAll() {
     this._stoppingAll = true;
-    const promises = [];
-    for (const section of [...this.processes.keys()]) {
-      promises.push(this.stopService(section));
+    try {
+      const promises = [];
+      for (const section of [...this.processes.keys()]) {
+        promises.push(this.stopService(section));
+      }
+      return await Promise.allSettled(promises);
+    } finally {
+      this._stoppingAll = false;
     }
-    await Promise.allSettled(promises);
-    this._stoppingAll = false;
   }
 
   _findFile(baseDir, candidates) {
