@@ -1,5 +1,9 @@
 ﻿const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+const { MANAGED_IDS } = require('./path-utils');
+
+const CURRENT_SCHEMA_VERSION = 2;
 
 // Support both Electron and standalone Node.js (server mode)
 let electronApp = null;
@@ -16,6 +20,8 @@ class ConfigManager {
     }
     this.configDir = path.join(this.appRoot, 'config');
     this.configPath = path.join(this.configDir, 'kitsuneserv.json');
+    this.migrationHistoryPath = path.join(this.configDir, 'migrations.json');
+    this.lastMigration = { migrated: false, from: CURRENT_SCHEMA_VERSION, to: CURRENT_SCHEMA_VERSION, steps: [] };
     this._ensureDir(this.configDir);
   }
 
@@ -34,8 +40,9 @@ class ConfigManager {
   defaultApacheProfile(version = '2.4.66') {
     return {
       id: this._uid(), name: `Apache ${version}`, version,
-      port: 80, host: '0.0.0.0', sslPort: 443, sslEnabled: false, documentRoot: './www',
+      port: 80, host: '127.0.0.1', sslPort: 443, sslEnabled: false, documentRoot: './www',
       serverName: 'localhost', directoryIndex: 'index.html index.htm index.php',
+      sslCertificate: '', sslCertificateKey: '',
       modRewrite: true, modSsl: false, modProxy: false, modProxyHttp: false,
       modProxyFcgi: true, modHeaders: true, modDeflate: true, modExpires: false,
       modSecurity: false, modPhp: false,
@@ -45,11 +52,12 @@ class ConfigManager {
     };
   }
 
-  defaultNginxProfile(version = '1.27.4') {
+  defaultNginxProfile(version = '1.30.4') {
     return {
       id: this._uid(), name: `Nginx ${version}`, version,
-      port: 8080, host: '0.0.0.0', sslPort: 443, sslEnabled: false, documentRoot: './www',
-      serverName: 'localhost', autoStart: false, autoRestart: false,
+      port: 8080, host: '127.0.0.1', sslPort: 443, sslEnabled: false, documentRoot: './www',
+      serverName: 'localhost', phpEnabled: true, autoStart: false, autoRestart: false,
+      sslCertificate: '', sslCertificateKey: '',
       // Reverse proxy settings
       reverseProxy: false, upstreamName: 'backend', upstreamServer: '127.0.0.1', upstreamPort: 3000,
       loadBalancing: 'round_robin',
@@ -96,15 +104,15 @@ class ConfigManager {
     return base;
   }
 
-  defaultPostgresqlProfile(version = '17.4') {
+  defaultPostgresqlProfile(version = '18.4') {
     return this.defaultDbProfile('postgresql', version);
   }
 
-  defaultMysqlProfile(version = '8.4.4') {
+  defaultMysqlProfile(version = '8.4.10') {
     return this.defaultDbProfile('mysql', version);
   }
 
-  defaultMongodbProfile(version = '7.0.20') {
+  defaultMongodbProfile(version = '8.0.6') {
     return {
       id: this._uid(), name: `mongodb ${version}`, type: 'mongodb', version,
       port: 27017, host: '127.0.0.1',
@@ -115,11 +123,11 @@ class ConfigManager {
     };
   }
 
-  defaultMariadbProfile(version = '11.4.5') {
+  defaultMariadbProfile(version = '12.3.2') {
     return this.defaultDbProfile('mariadb', version);
   }
 
-  defaultPhpProfile(version = '8.4.20') {
+  defaultPhpProfile(version = '8.5.9') {
     return {
       id: this._uid(), name: `PHP ${version}`, version,
       port: 9000, autoStart: false, autoRestart: false,
@@ -150,7 +158,7 @@ class ConfigManager {
     };
   }
 
-  defaultNodeProfile(version = '20.19.0') {
+  defaultNodeProfile(version = '24.18.0') {
     return {
       id: this._uid(), name: `Node ${version}`, version,
       port: 3000, entryPoint: 'server.js', project: '', env: 'development',
@@ -158,7 +166,7 @@ class ConfigManager {
     };
   }
 
-  defaultGoProfile(version = '1.24.2') {
+  defaultGoProfile(version = '1.26.5') {
     return {
       id: this._uid(), name: `Go ${version}`, version,
       port: 8080, entryPoint: 'main.go', project: '', buildFlags: '', env: 'development',
@@ -166,7 +174,7 @@ class ConfigManager {
     };
   }
 
-  defaultBunProfile(version = '1.2.17') {
+  defaultBunProfile(version = '1.3.14') {
     return {
       id: this._uid(), name: `Bun ${version}`, version,
       port: 3001, entryPoint: 'server.ts', project: '', env: 'development',
@@ -174,7 +182,7 @@ class ConfigManager {
     };
   }
 
-  defaultRedisProfile(version = '7.4.8') {
+  defaultRedisProfile(version = '8.8.1') {
     return {
       id: this._uid(), name: `Redis ${version}`, version,
       port: 6379, host: '127.0.0.1', maxMemory: '256mb', maxMemoryPolicy: 'allkeys-lru',
@@ -183,7 +191,7 @@ class ConfigManager {
     };
   }
 
-  defaultMemcachedProfile(version = '1.6.32') {
+  defaultMemcachedProfile(version = '1.6.8') {
     return {
       id: this._uid(), name: `Memcached ${version}`, version,
       port: 11211, host: '127.0.0.1', maxMemory: 64, threads: 4,
@@ -191,7 +199,7 @@ class ConfigManager {
     };
   }
 
-  defaultPythonProfile(version = '3.13.5') {
+  defaultPythonProfile(version = '3.14.3') {
     return {
       id: this._uid(), name: `Python ${version}`, version,
       port: 8000, entryPoint: 'app.py', project: '', env: 'development',
@@ -199,7 +207,21 @@ class ConfigManager {
     };
   }
 
-  defaultDenoProfile(version = '2.4.1') {
+  defaultComposerProfile(version = '2.10.2') {
+    return {
+      id: this._uid(), name: `Composer ${version}`, version,
+      autoStart: false, startAllGroup: false
+    };
+  }
+
+  defaultJavaProfile(version = '25.0.4.7') {
+    return {
+      id: this._uid(), name: `Eclipse Temurin JDK ${version}`, version,
+      autoStart: false, startAllGroup: false
+    };
+  }
+
+  defaultDenoProfile(version = '2.9.4') {
     return {
       id: this._uid(), name: `Deno ${version}`, version,
       port: 8000, entryPoint: 'main.ts', project: '', env: 'development',
@@ -209,11 +231,12 @@ class ConfigManager {
     };
   }
 
-  defaultCaddyProfile(version = '2.9.1') {
+  defaultCaddyProfile(version = '2.11.4') {
     return {
       id: this._uid(), name: `Caddy ${version}`, version,
       port: 8443, httpPort: 8080, documentRoot: './www',
-      serverName: 'localhost', autoHttps: false,
+      serverName: 'localhost', autoHttps: false, phpEnabled: true,
+      sslCertificate: '', sslCertificateKey: '',
       reverseProxy: '', reverseProxyTarget: '',
       fileServer: true, encode: true,
       accessLog: false, corsEnabled: false, logLevel: 'INFO',
@@ -226,7 +249,7 @@ class ConfigManager {
       id: this._uid(), name: `MinIO ${version}`, version,
       port: 9000, consolePort: 9001, host: '127.0.0.1',
       dataDir: `./data/minio-${version}`,
-      rootUser: 'minioadmin', rootPassword: 'minioadmin',
+      rootUser: 'kitsune', rootPassword: crypto.randomBytes(18).toString('base64url'),
       browserEnabled: true,
       autoStart: false, autoRestart: false, startAllGroup: false
     };
@@ -247,10 +270,13 @@ class ConfigManager {
     const memcached = this.defaultMemcachedProfile();
     const python = this.defaultPythonProfile();
     const deno = this.defaultDenoProfile();
+    const composer = this.defaultComposerProfile();
+    const java = this.defaultJavaProfile();
     const caddy = this.defaultCaddyProfile();
     const minio = this.defaultMinioProfile();
 
     return {
+      schemaVersion: CURRENT_SCHEMA_VERSION,
       apache:      { enabled: true, activeProfileId: apache.id, profiles: [apache] },
       nginx:       { enabled: true, activeProfileId: nginx.id, profiles: [nginx] },
       caddy:       { enabled: true, activeProfileId: caddy.id, profiles: [caddy] },
@@ -267,10 +293,15 @@ class ConfigManager {
       minio:       { enabled: true, activeProfileId: minio.id, profiles: [minio] },
       python:      { enabled: true, activeProfileId: python.id, profiles: [python] },
       deno:        { enabled: true, activeProfileId: deno.id, profiles: [deno] },
+      composer:    { enabled: true, activeProfileId: composer.id, profiles: [composer] },
+      java:        { enabled: true, activeProfileId: java.id, profiles: [java] },
+      databaseManager: { connections: [], savedQueries: [], queryHistory: [] },
       general: {
         autoStartOnBoot: false, startMinimized: false,
         theme: 'dark', language: 'en', checkUpdates: true, logLevel: 'info',
-        stopTimeout: 5000
+        stopTimeout: 5000, pathServices: [], pathSelectionInitialized: false,
+        forceGlobalDocumentRoot: false, globalDocumentRoot: './www', offlineCache: true,
+        crashRecovery: true, projectPreflight: true
       }
     };
   }
@@ -282,24 +313,131 @@ class ConfigManager {
   }
 
   getConfig() {
-    try {
-      if (fs.existsSync(this.configPath)) {
-        const raw = fs.readFileSync(this.configPath, 'utf-8');
-        const config = JSON.parse(raw);
+    const candidates = [this.configPath, `${this.configPath}.bak`];
+    for (const candidate of candidates) {
+      try {
+        if (!fs.existsSync(candidate)) continue;
+        const config = JSON.parse(fs.readFileSync(candidate, 'utf-8'));
+        if (!config || typeof config !== 'object' || Array.isArray(config)) continue;
         if ((config.httpServer && !config.httpServer.profiles) || (config.database && !config.postgresql) || (config.httpServer && config.httpServer.profiles)) {
           return this._migrateOldConfig(config);
         }
-        // Merge defaults for any missing sections (e.g. newly added services)
-        const defaults = this.getDefaults();
-        for (const key of Object.keys(defaults)) {
-          if (!(key in config)) {
-            config[key] = defaults[key];
-          }
-        }
-        return config;
+        const migration = this._migrateVersionedConfig(config);
+        const normalized = this._mergeWithDefaults(migration.config);
+        this.lastMigration = migration.summary;
+        if (migration.summary.migrated) this._recordMigration(migration.summary);
+        if (candidate.endsWith('.bak') || migration.summary.migrated) this.saveConfig(normalized);
+        return normalized;
+      } catch (error) {
+        if (error?.code === 'UNSUPPORTED_CONFIG_SCHEMA') throw error;
+        // Try the backup before falling back to a fresh configuration.
       }
-    } catch { }
-    return this.getDefaults();
+    }
+    const defaults = this.getDefaults();
+    this.saveConfig(defaults);
+    return defaults;
+  }
+
+  _mergeWithDefaults(config) {
+    const defaults = this.getDefaults();
+    const factories = {
+      apache: 'defaultApacheProfile', nginx: 'defaultNginxProfile', caddy: 'defaultCaddyProfile',
+      postgresql: 'defaultPostgresqlProfile', mysql: 'defaultMysqlProfile', mariadb: 'defaultMariadbProfile', mongodb: 'defaultMongodbProfile',
+      php: 'defaultPhpProfile', node: 'defaultNodeProfile', go: 'defaultGoProfile', bun: 'defaultBunProfile',
+      redis: 'defaultRedisProfile', memcached: 'defaultMemcachedProfile', minio: 'defaultMinioProfile',
+      python: 'defaultPythonProfile', deno: 'defaultDenoProfile',
+      composer: 'defaultComposerProfile', java: 'defaultJavaProfile'
+    };
+
+    const merged = { ...config, schemaVersion: CURRENT_SCHEMA_VERSION };
+    for (const section of MANAGED_IDS) {
+      const source = config[section];
+      if (!source || typeof source !== 'object' || !Array.isArray(source.profiles) || source.profiles.length === 0) {
+        merged[section] = defaults[section];
+        continue;
+      }
+      const factory = factories[section];
+      const profiles = source.profiles
+        .filter(profile => profile && typeof profile === 'object' && !Array.isArray(profile))
+        .map(profile => {
+          const base = this[factory](profile.version);
+          const result = { ...base, ...profile };
+          if (base.xdebug || profile.xdebug) result.xdebug = { ...(base.xdebug || {}), ...(profile.xdebug || {}) };
+          return result;
+        });
+      if (!profiles.length) {
+        merged[section] = defaults[section];
+        continue;
+      }
+      const activeProfileId = profiles.some(profile => profile.id === source.activeProfileId)
+        ? source.activeProfileId
+        : profiles[0].id;
+      merged[section] = { ...defaults[section], ...source, profiles, activeProfileId, enabled: source.enabled !== false };
+    }
+    merged.general = { ...defaults.general, ...(config.general && typeof config.general === 'object' ? config.general : {}) };
+    merged.databaseManager = {
+      ...defaults.databaseManager,
+      ...(config.databaseManager && typeof config.databaseManager === 'object' ? config.databaseManager : {}),
+      connections: Array.isArray(config.databaseManager?.connections) ? config.databaseManager.connections : [],
+      savedQueries: Array.isArray(config.databaseManager?.savedQueries) ? config.databaseManager.savedQueries.slice(0, 200) : [],
+      queryHistory: Array.isArray(config.databaseManager?.queryHistory) ? config.databaseManager.queryHistory.slice(0, 100) : []
+    };
+    return merged;
+  }
+
+  _migrateVersionedConfig(config) {
+    const next = structuredClone(config);
+    const detected = Number.isInteger(Number(next.schemaVersion)) ? Number(next.schemaVersion) : 1;
+    if (detected > CURRENT_SCHEMA_VERSION) {
+      const error = new Error(`Configuration schema ${detected} is newer than supported schema ${CURRENT_SCHEMA_VERSION}`);
+      error.code = 'UNSUPPORTED_CONFIG_SCHEMA';
+      throw error;
+    }
+    const steps = [];
+    let version = detected;
+    if (version < 2) {
+      next.general = next.general && typeof next.general === 'object' ? next.general : {};
+      if (!Object.hasOwn(next.general, 'crashRecovery')) next.general.crashRecovery = true;
+      if (!Object.hasOwn(next.general, 'projectPreflight')) next.general.projectPreflight = true;
+      steps.push('Added crash recovery and project preflight settings');
+      version = 2;
+    }
+    next.schemaVersion = CURRENT_SCHEMA_VERSION;
+    return {
+      config: next,
+      summary: {
+        migrated: detected !== CURRENT_SCHEMA_VERSION,
+        from: detected,
+        to: CURRENT_SCHEMA_VERSION,
+        steps,
+        migratedAt: new Date().toISOString()
+      }
+    };
+  }
+
+  _recordMigration(summary) {
+    try {
+      let history = [];
+      try {
+        const parsed = JSON.parse(fs.readFileSync(this.migrationHistoryPath, 'utf8'));
+        if (Array.isArray(parsed)) history = parsed;
+      } catch {}
+      history.push(summary);
+      history = history.slice(-50);
+      const temp = `${this.migrationHistoryPath}.${process.pid}.tmp`;
+      fs.writeFileSync(temp, JSON.stringify(history, null, 2), { encoding: 'utf8', mode: 0o600 });
+      try {
+        fs.renameSync(temp, this.migrationHistoryPath);
+      } catch (error) {
+        if (!['EEXIST', 'EPERM'].includes(error.code)) throw error;
+        fs.copyFileSync(temp, this.migrationHistoryPath);
+        fs.unlinkSync(temp);
+      }
+    } catch {}
+  }
+
+  getMigrationInfo() {
+    return structuredClone(this.lastMigration);
   }
 
   _migrateOldConfig(old) {
@@ -372,14 +510,18 @@ class ConfigManager {
 
   saveConfig(config) {
     try {
+      if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('Invalid configuration');
+      const normalized = this._mergeWithDefaults(config);
       this._ensureDir(this.configDir);
       // Backup current config before overwriting
       if (fs.existsSync(this.configPath)) {
         const backupPath = this.configPath + '.bak';
         fs.copyFileSync(this.configPath, backupPath);
       }
-      fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2), 'utf-8');
-      this._ensureDataDirs(config);
+      const tempPath = `${this.configPath}.${process.pid}.tmp`;
+      fs.writeFileSync(tempPath, JSON.stringify(normalized, null, 2), { encoding: 'utf-8', mode: 0o600 });
+      fs.renameSync(tempPath, this.configPath);
+      this._ensureDataDirs(normalized);
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
@@ -388,9 +530,13 @@ class ConfigManager {
 
   _ensureDataDirs(config) {
     try {
+      const globalDocumentRoot = config.general?.forceGlobalDocumentRoot
+        ? config.general.globalDocumentRoot
+        : null;
       for (const httpSection of ['apache', 'nginx', 'caddy']) {
         const httpProfile = this.getActiveProfile(config, httpSection);
-        if (httpProfile?.documentRoot) this._ensureDir(path.resolve(httpProfile.documentRoot));
+        const documentRoot = globalDocumentRoot || httpProfile?.documentRoot;
+        if (documentRoot) this._ensureDir(path.resolve(documentRoot));
       }
       for (const dbSection of ['postgresql', 'mysql', 'mariadb', 'mongodb', 'minio']) {
         const dbProfile = this.getActiveProfile(config, dbSection);
@@ -404,5 +550,7 @@ class ConfigManager {
     return this.saveConfig(defaults);
   }
 }
+
+ConfigManager.CURRENT_SCHEMA_VERSION = CURRENT_SCHEMA_VERSION;
 
 module.exports = ConfigManager;

@@ -1,28 +1,143 @@
-const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, clipboard, Tray, Menu, nativeImage, dialog, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const ConfigManager = require('./config-manager');
 const DownloadManager = require('./download-manager');
 const ServiceManager = require('./service-manager');
 const DbViewer = require('./db-viewer');
 const AppStoreManager = require('./app-store-manager');
+const ActivityManager = require('./activity-manager');
+const ProjectManager = require('./project-manager');
+const DiagnosticsManager = require('./diagnostics-manager');
+const DomainManager = require('./domain-manager');
+const BackupManager = require('./backup-manager');
+const SecretStore = require('./secret-store');
+const CommandManager = require('./command-manager');
+const EnvironmentManager = require('./environment-manager');
+const PluginManager = require('./plugin-manager');
+const PlatformManager = require('./platform-manager');
+const TunnelManager = require('./tunnel-manager');
+const UpdateManager = require('./update-manager');
+const SupportManager = require('./support-manager');
+const IntegrationManager = require('./integration-manager');
+const ProjectDetector = require('./project-detector');
+const LabManager = require('./lab-manager');
+const ApiFlowManager = require('./api-flow-manager');
+const ObservabilityManager = require('./observability-manager');
+const AutomationManager = require('./automation-manager');
+const AuditManager = require('./audit-manager');
+const IdentityManager = require('./identity-manager');
+const HubManager = require('./hub-manager');
+const { initializeDesktopDataRoot } = require('./runtime-paths');
+const { isPathInside, resolveInside, assertProjectSection, assertProjectName } = require('./path-utils');
+const { PathManager } = require('./path-manager');
 
-// Ensure CWD is always the app root (next to the exe) so all relative paths work
-const _appRoot = app.isPackaged ? path.dirname(process.execPath) : app.getAppPath();
+const SAFE_MODE = process.argv.includes('--safe-mode') || process.env.KITSUNE_SAFE_MODE === '1';
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) app.quit();
+app.on('second-instance', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+});
+
+// Keep mutable services, databases and projects outside the installed application.
+// KITSUNE_DATA_DIR can be used to place large service data on another drive.
+const { dataRoot: _appRoot, defaultsRoot: _defaultsRoot } = initializeDesktopDataRoot(app);
 process.chdir(_appRoot);
 
 let mainWindow;
 let tray = null;
-const configManager = new ConfigManager();
+const configManager = new ConfigManager(_appRoot);
 let downloadManager;
 let serviceManager;
 let appStoreManager;
+let pathManager;
+let activityManager;
+let projectManager;
+let diagnosticsManager;
+let domainManager;
+let backupManager;
+let commandManager;
+let environmentManager;
+let pluginManager;
+let platformManager;
+let tunnelManager;
+let updateManager;
+let supportManager;
+let integrationManager;
+let projectDetector;
+let labManager;
+let apiFlowManager;
+let observabilityManager;
+let automationManager;
+let auditManager;
+let identityManager;
+let hubManager;
+let quitInProgress = false;
+let servicesStoppedForQuit = false;
+
+async function auditOperation(action, target, operation, details = {}) {
+  const started = Date.now();
+  try {
+    const result = await operation();
+    auditManager?.record({ source: 'desktop-ipc', action, target, success: result?.success !== false, durationMs: Date.now() - started, details });
+    return result;
+  } catch (error) {
+    auditManager?.record({ source: 'desktop-ipc', action, target, success: false, durationMs: Date.now() - started, details: { ...details, error: error.message } });
+    throw error;
+  }
+}
+
+function sendPythonManagerStatus(payload) {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('path:pythonManagerStatus', payload);
+  } catch {}
+}
+
+async function installOfficialPythonManager(automatic = false) {
+  if (!pathManager) return { success: false, error: 'PATH manager is not ready' };
+  const wasInstalled = pathManager.isOfficialPythonManagerInstalled();
+  if (!wasInstalled) sendPythonManagerStatus({ stage: 'installing', automatic });
+  const result = await pathManager.installOfficialPythonManager();
+  sendPythonManagerStatus({
+    stage: result?.success ? 'complete' : 'failed',
+    automatic,
+    alreadyInstalled: Boolean(result?.alreadyInstalled),
+    error: result?.error || ''
+  });
+  return result;
+}
+
+async function quitAfterStoppingServices() {
+  if (quitInProgress) return;
+  quitInProgress = true;
+  try {
+    commandManager?.stopAll();
+    tunnelManager?.stopAll();
+    labManager?.stopAll();
+    if (apiFlowManager) await apiFlowManager.stopAll();
+    observabilityManager?.stop();
+    if (projectManager) await projectManager.stopAll();
+    if (serviceManager) await serviceManager.stopAll();
+  } catch (err) {
+    console.warn('Could not stop every service during shutdown:', err.message);
+  } finally {
+    try { projectManager?.markCleanShutdown(); } catch {}
+    servicesStoppedForQuit = true;
+    app.quit();
+  }
+}
 
 function createWindow() {
   const general = configManager.getConfig().general || {};
 
+  const appIcon = path.join(__dirname, '..', 'assets', 'icon.png');
   mainWindow = new BrowserWindow({
     width: 1360,
     height: 860,
@@ -30,34 +145,116 @@ function createWindow() {
     minHeight: 640,
     title: 'KitsuneServ',
     backgroundColor: '#0f0f1a',
-    show: !general.startMinimized,
+    show: false,
+    icon: fs.existsSync(appIcon) ? appIcon : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      sandbox: true
     },
     frame: false,
     titleBarStyle: 'hidden'
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-
-  // If startMinimized, show the window once ready then immediately hide to tray
-  if (general.startMinimized) {
-    mainWindow.once('ready-to-show', () => {
-      // Don't show — keep hidden in tray
-    });
-  }
+  mainWindow.once('ready-to-show', () => {
+    if (!general.startMinimized && !process.argv.includes('--hidden')) mainWindow.show();
+  });
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const parsed = new URL(url);
+      if (['http:', 'https:'].includes(parsed.protocol)) shell.openExternal(parsed.toString());
+    } catch {}
+    return { action: 'deny' };
+  });
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url !== mainWindow.webContents.getURL()) event.preventDefault();
+  });
 }
 
-app.whenReady().then(() => {
-  downloadManager = new DownloadManager();
+app.whenReady().then(async () => {
+  downloadManager = new DownloadManager({ appRoot: _appRoot, catalogRoot: _defaultsRoot });
   serviceManager = new ServiceManager(downloadManager, configManager);
-  global.dbViewer = new DbViewer(downloadManager, configManager, serviceManager);
+  pathManager = new PathManager(downloadManager, configManager, {
+    systemIntegrationDisabled: SAFE_MODE || process.argv.includes('--smoke-test') || process.env.KITSUNE_SMOKE_TEST === '1'
+  });
+  activityManager = new ActivityManager(_appRoot);
+  domainManager = new DomainManager(_appRoot);
+  projectManager = new ProjectManager(_appRoot, configManager, downloadManager, serviceManager, activityManager, domainManager);
+  projectDetector = new ProjectDetector();
+  pluginManager = new PluginManager(_appRoot);
+  projectManager.setTemplateProvider(() => pluginManager.projectTemplates());
+  platformManager = new PlatformManager(_appRoot);
+  tunnelManager = new TunnelManager(projectManager);
+  updateManager = new UpdateManager(_appRoot, app.getVersion(), activityManager, { allowInstall: true });
+  diagnosticsManager = new DiagnosticsManager(_appRoot, configManager, downloadManager, serviceManager, pathManager, {
+    domainManager,
+    projectProvider: () => projectManager.list()
+  });
+  projectManager.setDiagnosticsManager(diagnosticsManager);
+  const recovery = await projectManager.recover({ enabled: configManager.getConfig().general?.crashRecovery !== false, safeMode: SAFE_MODE });
+  if (recovery.interrupted.length) console.warn(`Recovered ${recovery.interrupted.length} interrupted project state(s)${SAFE_MODE ? ' (safe mode: configuration restoration skipped)' : ''}.`);
+  commandManager = new CommandManager(projectManager, pathManager, activityManager, { allowDesktopIntegration: true, platformManager });
+  commandManager.setToolProvider(() => pluginManager.tools());
+  environmentManager = new EnvironmentManager(_appRoot, configManager, downloadManager, projectManager, pathManager, serviceManager);
+  commandManager.onOutput = payload => { try { mainWindow?.webContents.send('command:output', payload); } catch {} };
+  commandManager.onExit = payload => { try { mainWindow?.webContents.send('command:exit', payload); } catch {} };
+  tunnelManager.onChanged = payload => { try { mainWindow?.webContents.send('tunnel:changed', payload); } catch {} };
+  activityManager.on('changed', payload => {
+    try { mainWindow?.webContents.send('activity:changed', payload); } catch {}
+  });
+  if (!SAFE_MODE) {
+    try {
+      const selected = pathManager.getSelectedServices();
+      if (selected.length || pathManager.hasManagedEntries()) pathManager.sync(selected);
+    } catch (err) {
+      console.warn('Could not synchronize the Windows user PATH:', err.message);
+    }
+  }
+  const secretStore = new SecretStore(_appRoot, {
+    encrypt: value => {
+      if (!safeStorage.isEncryptionAvailable()) throw new Error('Platform encryption unavailable');
+      return safeStorage.encryptString(value).toString('base64');
+    },
+    decrypt: value => safeStorage.decryptString(Buffer.from(value, 'base64'))
+  });
+  integrationManager = new IntegrationManager(_appRoot, secretStore);
+  auditManager = new AuditManager(_appRoot);
+  projectManager.setSecretStore(secretStore);
+  projectManager.setHookRunner((projectId, commandName, options) => commandManager.runAndWait(projectId, commandName, options));
+  commandManager.setIntegrationEnvironmentProvider(() => integrationManager.buildEnvironment());
+  global.dbViewer = new DbViewer(downloadManager, configManager, serviceManager, secretStore);
+  backupManager = new BackupManager(_appRoot, configManager, downloadManager, global.dbViewer, activityManager);
+  supportManager = new SupportManager(_appRoot, { configManager, downloadManager, serviceManager, diagnosticsManager, projectManager, activityManager, environmentManager, pluginManager, platformManager });
+  if (!SAFE_MODE) {
+    const backupTimer = setInterval(() => backupManager.runDue().catch(error => console.warn('Scheduled backup warning:', error.message)), 60_000);
+    if (typeof backupTimer.unref === 'function') backupTimer.unref();
+    setTimeout(() => backupManager.runDue().catch(error => console.warn('Scheduled backup warning:', error.message)), 5_000);
+  }
   appStoreManager = new AppStoreManager(downloadManager, configManager, global.dbViewer, serviceManager);
+  labManager = new LabManager(_appRoot, { appStoreManager, serviceManager, configManager, downloadManager, pathManager, secretStore, activityManager });
+  labManager.onChanged = payload => { try { mainWindow?.webContents.send('lab:changed', payload); } catch {} };
+  apiFlowManager = new ApiFlowManager(_appRoot, { dbViewer: global.dbViewer, secretStore });
+  apiFlowManager.onChanged = payload => { try { mainWindow?.webContents.send('apiFlow:changed', payload); } catch {} };
+  identityManager = new IdentityManager(_appRoot, secretStore);
+  identityManager.bootstrap(process.env.KITSUNE_USER || 'admin', process.env.KITSUNE_PASS || crypto.randomBytes(24).toString('base64url'));
+  hubManager = new HubManager(_appRoot, { identityManager, secretStore, projectManager, labManager, apiFlowManager, environmentManager });
+  hubManager.onChanged = payload => { try { mainWindow?.webContents.send('hub:changed', payload); } catch {} };
+  observabilityManager = new ObservabilityManager(_appRoot, serviceManager);
+  automationManager = new AutomationManager(_appRoot, { serviceManager, projectManager, commandManager, labManager, backupManager, diagnosticsManager });
+  observabilityManager.onChanged = payload => { try { mainWindow?.webContents.send('observability:changed', payload); } catch {} };
+  automationManager.onChanged = payload => { try { mainWindow?.webContents.send('automation:changed', payload); } catch {} };
+  if (!SAFE_MODE) {
+    observabilityManager.start();
+    const automationTimer = setInterval(() => automationManager.runDue().catch(error => console.warn('Automation warning:', error.message)), 30000);
+    automationTimer.unref?.();
+  }
 
   // Notify renderer when a service exits unexpectedly
   serviceManager._onServiceExit = (section, code) => {
+    observabilityManager?.recordServiceExit(section, code);
+    auditManager?.record({ source: 'service-supervisor', action: code === 0 ? 'service.exit' : 'service.crash', target: section, success: code === 0, details: { exitCode: code } });
     try {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('service:exited', { section, code });
@@ -67,15 +264,21 @@ app.whenReady().then(() => {
 
   createWindow();
   createTray();
+  // Deterministic packaged-app probe used by release verification.
+  if (process.argv.includes('--smoke-test') || process.env.KITSUNE_SMOKE_TEST === '1') {
+    setTimeout(() => app.quit(), 1500);
+  }
 });
 
 function createTray() {
-  // Create a small 16x16 tray icon using nativeImage
-  const icon = nativeImage.createFromDataURL(
+  const generatedIcon = path.join(__dirname, '..', 'assets', 'icon.png');
+  let icon = fs.existsSync(generatedIcon)
+    ? nativeImage.createFromPath(generatedIcon).resize({ width: 16, height: 16 })
+    : nativeImage.createFromDataURL(
     'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAk0lEQVQ4T2NkoBAwUqifYdAb8P9/' +
     'AwMDgyZQTAkoZkPILEZ0F4DEmRj+MzIx/GdYCnTFBKAcI5oBjP8Z/jNwMDD8nwA0YANSM7oB/xkYGBj+M0xg+M+4FMkQsg0A+R7d' +
     'ACSDJoCCkgGvAf8ZGBj+MzNwMPxnXIDsFYINAIUh0AUcDEz/4TGBHAb/GUBhSHEiAgBVgjARlH2MjgAAAABJRU5ErkJggg=='
-  );
+    );
   tray = new Tray(icon);
   tray.setToolTip('KitsuneServ');
 
@@ -85,23 +288,20 @@ function createTray() {
     { label: 'Start All', click: () => { if (mainWindow) mainWindow.webContents.send('tray:start-all'); } },
     { label: 'Stop All', click: async () => { if (serviceManager) await serviceManager.stopAll(); } },
     { type: 'separator' },
-    { label: 'Quit', click: async () => { if (serviceManager) await serviceManager.stopAll(); app.quit(); } }
+    { label: 'Quit', click: () => { void quitAfterStoppingServices(); } }
   ]);
   tray.setContextMenu(contextMenu);
   tray.on('double-click', () => { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } });
 }
 
-app.on('window-all-closed', async () => {
-  if (serviceManager) await serviceManager.stopAll();
-  if (process.platform !== 'darwin') app.quit();
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') void quitAfterStoppingServices();
 });
 
-app.on('before-quit', async (e) => {
-  if (serviceManager?.processes?.size > 0) {
-    e.preventDefault();
-    await serviceManager.stopAll();
-    app.quit();
-  }
+app.on('before-quit', (e) => {
+  if (servicesStoppedForQuit || !serviceManager) return;
+  e.preventDefault();
+  void quitAfterStoppingServices();
 });
 
 app.on('activate', () => {
@@ -110,29 +310,32 @@ app.on('activate', () => {
 
 // ===== Config IPC =====
 ipcMain.handle('config:get', () => configManager.getConfig());
-ipcMain.handle('config:save', (_event, config) => {
+ipcMain.handle('config:save', (_event, config) => auditOperation('config.save', 'application', () => {
+  const previous = configManager.getConfig();
+  const validation = serviceManager?.validateConfigChange(config);
+  if (validation && !validation.success) return validation;
   const result = configManager.saveConfig(config);
   // Sync OS auto-start shortcut when autoStartOnBoot changes
-  _syncAutoStartOnBoot(config.general?.autoStartOnBoot);
-  return result;
-});
-ipcMain.handle('config:reset', () => configManager.resetConfig());
+  if (result.success) _syncAutoStartOnBoot(config?.general?.autoStartOnBoot);
+  return syncPathForConfigTransition(previous, configManager.getConfig(), result);
+}));
+ipcMain.handle('config:reset', () => auditOperation('config.reset', 'application', () => {
+  const previous = configManager.getConfig();
+  const defaults = configManager.getDefaults();
+  const validation = serviceManager?.validateConfigChange(defaults);
+  if (validation && !validation.success) return validation;
+  const result = configManager.saveConfig(defaults);
+  return syncPathForConfigTransition(previous, configManager.getConfig(), result);
+}));
 ipcMain.handle('config:getDefaults', () => configManager.getDefaults());
 ipcMain.handle('config:getAppRoot', () => downloadManager.getAppRoot());
 
 // ===== Auto-start on boot (Windows startup shortcut / Linux .desktop) =====
 function _syncAutoStartOnBoot(enabled) {
+  if (SAFE_MODE) return;
   try {
     if (process.platform === 'win32') {
-      const startupDir = path.join(process.env.APPDATA, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup');
-      const shortcutPath = path.join(startupDir, 'KitsuneServ.vbs');
-      if (enabled) {
-        const exePath = app.isPackaged ? process.execPath : `"${process.execPath}" "${path.join(app.getAppPath(), 'src', 'main.js')}"`;
-        const script = `Set WshShell = CreateObject("WScript.Shell")\nWshShell.Run "${exePath.replace(/\\/g, '\\\\')}", 0, False`;
-        fs.writeFileSync(shortcutPath, script.replace(/\\n/g, '\r\n'), 'utf-8');
-      } else {
-        if (fs.existsSync(shortcutPath)) fs.unlinkSync(shortcutPath);
-      }
+      app.setLoginItemSettings({ openAtLogin: Boolean(enabled), path: process.execPath, args: ['--hidden'] });
     } else if (process.platform === 'linux') {
       const autostartDir = path.join(process.env.HOME || '', '.config', 'autostart');
       const desktopPath = path.join(autostartDir, 'kitsuneserv.desktop');
@@ -149,7 +352,24 @@ function _syncAutoStartOnBoot(enabled) {
 }
 
 // ===== Profile IPC =====
-ipcMain.handle('config:newProfile', (_event, section, type, version, name) => {
+async function syncPathAfterChange(section, result) {
+  if (!result?.success || !pathManager) return result;
+  const pathResult = pathManager.syncIfSelected(section);
+  return pathResult.success
+    ? { ...result, pathUpdated: !pathResult.skipped, ...(pathResult.warning ? { pathWarning: pathResult.warning } : {}) }
+    : { ...result, pathWarning: pathResult.error };
+}
+
+function syncPathForConfigTransition(previous, current, result) {
+  if (!result?.success || !pathManager) return result;
+  const pathResult = pathManager.syncForConfigTransition(previous, current);
+  if (pathResult.skipped) return result;
+  return pathResult.success
+    ? { ...result, pathUpdated: true, ...(pathResult.warning ? { pathWarning: pathResult.warning } : {}) }
+    : { ...result, pathWarning: pathResult.error };
+}
+
+ipcMain.handle('config:newProfile', async (_event, section, type, version, name) => {
   const config = configManager.getConfig();
   let profile;
   switch (section) {
@@ -173,9 +393,10 @@ ipcMain.handle('config:newProfile', (_event, section, type, version, name) => {
   }
   if (name) profile.name = name;
   config[section].profiles.push(profile);
-  config[section].activeProfileId = profile.id;
-  configManager.saveConfig(config);
-  return { success: true, profile, config };
+  const saved = configManager.saveConfig(config);
+  if (!saved.success) return saved;
+  const switched = await syncPathAfterChange(section, await serviceManager.switchProfile(section, profile.id));
+  return { ...switched, profile, config: switched.config || configManager.getConfig() };
 });
 
 ipcMain.handle('config:renameProfile', (_event, section, profileId, newName) => {
@@ -189,17 +410,24 @@ ipcMain.handle('config:renameProfile', (_event, section, profileId, newName) => 
   return { success: true, config };
 });
 
-ipcMain.handle('config:deleteProfile', (_event, section, profileId) => {
-  const config = configManager.getConfig();
-  const svc = config[section];
+ipcMain.handle('config:deleteProfile', async (_event, section, profileId) => {
+  let config = configManager.getConfig();
+  let svc = config[section];
   if (!svc || svc.profiles.length <= 1) return { success: false, error: 'Cannot delete last profile' };
+  if (!svc.profiles.some(profile => profile.id === profileId)) return { success: false, error: 'Profile not found' };
+  if (svc.activeProfileId === profileId) {
+    const replacement = svc.profiles.find(profile => profile.id !== profileId);
+    const switched = await syncPathAfterChange(section, await serviceManager.switchProfile(section, replacement.id));
+    if (!switched.success) return switched;
+    config = configManager.getConfig();
+    svc = config[section];
+  }
   svc.profiles = svc.profiles.filter(p => p.id !== profileId);
-  if (svc.activeProfileId === profileId) svc.activeProfileId = svc.profiles[0].id;
-  configManager.saveConfig(config);
-  return { success: true, config };
+  const saved = configManager.saveConfig(config);
+  return saved.success ? { success: true, config: configManager.getConfig() } : saved;
 });
 
-ipcMain.handle('config:duplicateProfile', (_event, section, profileId) => {
+ipcMain.handle('config:duplicateProfile', async (_event, section, profileId) => {
   const config = configManager.getConfig();
   const svc = config[section];
   if (!svc) return { success: false, error: 'Unknown section' };
@@ -209,54 +437,108 @@ ipcMain.handle('config:duplicateProfile', (_event, section, profileId) => {
   clone.id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   clone.name = source.name + ' (copy)';
   svc.profiles.push(clone);
-  svc.activeProfileId = clone.id;
-  configManager.saveConfig(config);
-  return { success: true, config };
+  const saved = configManager.saveConfig(config);
+  if (!saved.success) return saved;
+  return syncPathAfterChange(section, await serviceManager.switchProfile(section, clone.id));
 });
 
-ipcMain.handle('config:setActiveProfile', (_event, section, profileId) => {
-  const config = configManager.getConfig();
-  const svc = config[section];
-  if (!svc) return { success: false, error: 'Unknown section' };
-  const exists = svc.profiles.find(p => p.id === profileId);
-  if (!exists) return { success: false, error: 'Profile not found' };
-  svc.activeProfileId = profileId;
-  configManager.saveConfig(config);
-  return { success: true, config };
-});
+ipcMain.handle('config:setActiveProfile', async (_event, section, profileId) => syncPathAfterChange(section, await serviceManager.switchProfile(section, profileId)));
+
+ipcMain.handle('config:setDocumentRoot', (_event, section, directory) => serviceManager.setDocumentRoot(section, directory));
+ipcMain.handle('config:setGlobalDocumentRoot', (_event, enabled, directory) => serviceManager.setGlobalDocumentRoot(enabled, directory));
 
 // ===== Download IPC =====
 ipcMain.handle('download:getVersions', () => downloadManager.getVersionMap());
+ipcMain.handle('download:catalog', () => downloadManager.getCatalog());
+ipcMain.handle('download:refreshCatalog', () => downloadManager.refreshCatalog());
 ipcMain.handle('download:status', () => downloadManager.getStatus());
 ipcMain.handle('download:isInstalled', (_event, service, version) => downloadManager.isInstalled(service, version));
 ipcMain.handle('download:installedVersions', (_event, service) => downloadManager.getInstalledVersions(service));
 ipcMain.handle('download:install', async (_event, service, version) => {
-  const result = await downloadManager.download(service, version, (progress) => {
-    mainWindow?.webContents.send('download:progress', progress);
-  });
+  const progress = payload => mainWindow?.webContents.send('download:progress', payload);
+  let result;
+  if (service === 'python' && process.platform === 'win32') {
+    progress({ service, version, stage: 'python-manager', percent: 5 });
+    const managerResult = await installOfficialPythonManager(true);
+    if (!managerResult.success) return { success: false, error: managerResult.error || 'Python Install Manager installation failed' };
+    result = await pathManager.installPythonRuntime(version, progress);
+  } else {
+    result = await downloadManager.download(service, version, progress);
+  }
+  if (result.success) {
+    const pathResult = pathManager.syncIfSelected(service);
+    if (!pathResult.success) result.pathWarning = pathResult.error;
+  }
   return result;
 });
-ipcMain.handle('download:remove', (_event, service, version) => downloadManager.removeVersion(service, version));
+ipcMain.handle('download:remove', async (_event, service, version) => {
+  const config = configManager.getConfig();
+  const referenced = config[service]?.profiles?.some(profile => profile.version === version);
+  if (referenced) return { success: false, error: `${service} ${version} is used by a profile. Change or delete that profile first.` };
+  const result = downloadManager.removeVersion(service, version);
+  if (result.success && service === 'python') {
+    const pathResult = pathManager.syncIfSelected('python');
+    if (!pathResult.success) result.pathWarning = pathResult.error;
+    if (downloadManager.getInstalledVersions('python').length === 0) {
+      sendPythonManagerStatus({ stage: 'removing', automatic: true });
+      const managerResult = await pathManager.uninstallOfficialPythonManagerIfUnused();
+      sendPythonManagerStatus({
+        stage: managerResult.removed ? 'removed' : (managerResult.success ? 'complete' : 'failed'),
+        automatic: true,
+        skipped: Boolean(managerResult.skipped),
+        error: managerResult.error || ''
+      });
+      if (!managerResult.success) result.pythonManagerWarning = managerResult.error;
+    }
+  }
+  return result;
+});
+ipcMain.handle('app:getInfo', () => ({
+  name: app.getName(), version: app.getVersion(), dataRoot: _appRoot, platform: process.platform, mode: 'desktop', safeMode: SAFE_MODE,
+  migration: configManager.getMigrationInfo(), recovery: projectManager?.getRecoveryReport()
+}));
 
 // ===== Service IPC =====
-ipcMain.handle('service:start', async (_event, service) => serviceManager.startService(service));
-ipcMain.handle('service:stop', (_event, service) => serviceManager.stopService(service));
-ipcMain.handle('service:restart', async (_event, service) => {
+ipcMain.handle('service:start', (_event, service) => auditOperation('service.start', service, () => serviceManager.startService(service)));
+ipcMain.handle('service:stop', (_event, service) => auditOperation('service.stop', service, () => serviceManager.stopService(service)));
+ipcMain.handle('service:restart', (_event, service) => auditOperation('service.restart', service, async () => {
   await serviceManager.stopService(service);
   return serviceManager.startService(service);
-});
+}));
+ipcMain.handle('service:switchVersion', async (_event, service, version) => syncPathAfterChange(service, await serviceManager.switchVersion(service, version)));
 ipcMain.handle('service:status', (_event, service) => serviceManager.getServiceStatus(service));
 ipcMain.handle('service:allStatuses', () => serviceManager.getAllStatuses());
 ipcMain.handle('service:logs', (_event, service, lines) => serviceManager.getLogs(service, lines));
-ipcMain.handle('service:stopAll', () => serviceManager.stopAll());
+ipcMain.handle('service:clearLogs', (_event, service) => serviceManager.clearLogs(service));
+ipcMain.handle('service:stopAll', () => auditOperation('service.stop-all', 'all', () => serviceManager.stopAll()));
 
 // ===== Database Viewer IPC =====
 ipcMain.handle('db:listDatabases', (_e, section) => global.dbViewer.listDatabases(section));
 ipcMain.handle('db:listTables', (_e, section, database) => global.dbViewer.listTables(section, database));
 ipcMain.handle('db:tableData', (_e, section, database, table, limit, offset) => global.dbViewer.tableData(section, database, table, limit, offset));
-ipcMain.handle('db:executeQuery', (_e, section, database, query) => global.dbViewer.executeQuery(section, database, query));
-ipcMain.handle('db:createDatabase', (_e, section, name) => global.dbViewer.createDatabase(section, name));
-ipcMain.handle('db:dropDatabase', (_e, section, name) => global.dbViewer.dropDatabase(section, name));
+ipcMain.handle('db:executeQuery', (_e, section, database, query) => auditOperation('database.execute', `${section}:${database}`, () => global.dbViewer.executeQuery(section, database, query)));
+ipcMain.handle('db:createDatabase', (_e, section, name) => auditOperation('database.create', `${section}:${name}`, () => global.dbViewer.createDatabase(section, name)));
+ipcMain.handle('db:dropDatabase', (_e, section, name) => auditOperation('database.drop', `${section}:${name}`, () => global.dbViewer.dropDatabase(section, name)));
+ipcMain.handle('db:connections', () => global.dbViewer.listConnections());
+ipcMain.handle('db:saveConnection', (_e, connection) => auditOperation('database.connection-save', connection?.id || connection?.name || 'new', () => global.dbViewer.saveConnection(connection)));
+ipcMain.handle('db:removeConnection', (_e, id) => auditOperation('database.connection-remove', id, () => global.dbViewer.removeConnection(id)));
+ipcMain.handle('db:testConnection', (_e, connection) => auditOperation('database.connection-test', connection?.id || connection?.name || connection?.type || 'connection', () => global.dbViewer.testConnection(connection)));
+ipcMain.handle('db:listDatabasesFor', (_e, connection) => global.dbViewer.listDatabasesFor(connection));
+ipcMain.handle('db:listTablesFor', (_e, connection, database) => global.dbViewer.listTablesFor(connection, database));
+ipcMain.handle('db:listObjectsFor', (_e, connection, database) => global.dbViewer.listObjectsFor(connection, database));
+ipcMain.handle('db:describeObjectFor', (_e, connection, database, schema, objectName) => global.dbViewer.describeObjectFor(connection, database, schema, objectName));
+ipcMain.handle('db:tableDataFor', (_e, connection, database, table, limit, offset, schema) => global.dbViewer.tableDataFor(connection, database, table, limit, offset, schema));
+ipcMain.handle('db:executeQueryFor', (_e, connection, database, query) => auditOperation('database.execute', `${connection?.id || connection?.type || 'connection'}:${database}`, () => global.dbViewer.executeQueryFor(connection, database, query)));
+ipcMain.handle('db:executeWorkbench', (_e, connection, database, query, options) => auditOperation('database.workbench-execute', `${connection?.id || connection?.type || 'connection'}:${database}`, () => global.dbViewer.executeWorkbench(connection, database, query, options), { readOnly: options?.readOnly !== false, transaction: Boolean(options?.transaction), explain: Boolean(options?.explain) }));
+ipcMain.handle('db:cancelQuery', (_e, id) => global.dbViewer.cancelQuery(id));
+ipcMain.handle('db:activeQueries', () => global.dbViewer.listActiveQueries());
+ipcMain.handle('db:queryHistory', (_e, limit) => global.dbViewer.queryHistory(limit));
+ipcMain.handle('db:clearQueryHistory', () => auditOperation('database.history-clear', 'workbench', () => global.dbViewer.clearQueryHistory()));
+ipcMain.handle('db:savedQueries', () => global.dbViewer.listSavedQueries());
+ipcMain.handle('db:saveQuery', (_e, input) => auditOperation('database.saved-query-save', input?.id || input?.name || 'new', () => global.dbViewer.saveQuery(input)));
+ipcMain.handle('db:removeSavedQuery', (_e, id) => auditOperation('database.saved-query-remove', id, () => global.dbViewer.removeSavedQuery(id)));
+ipcMain.handle('db:createDatabaseFor', (_e, connection, name) => auditOperation('database.create', `${connection?.id || connection?.type || 'connection'}:${name}`, () => global.dbViewer.createDatabaseFor(connection, name)));
+ipcMain.handle('db:dropDatabaseFor', (_e, connection, name) => auditOperation('database.drop', `${connection?.id || connection?.type || 'connection'}:${name}`, () => global.dbViewer.dropDatabaseFor(connection, name)));
 ipcMain.handle('db:getToolUrl', async (_e, section, database) => {
   await appStoreManager.ensureAdminer();
   return appStoreManager.getDbToolUrl(section, database);
@@ -264,49 +546,203 @@ ipcMain.handle('db:getToolUrl', async (_e, section, database) => {
 
 // ===== Shell IPC =====
 ipcMain.handle('shell:openPath', (_event, targetPath) => {
-  const resolved = path.resolve(targetPath);
-  const appRoot = downloadManager.getAppRoot();
-  if (!resolved.startsWith(appRoot)) return { success: false, error: 'Path outside app root' };
-  if (!fs.existsSync(resolved)) fs.mkdirSync(resolved, { recursive: true });
-  shell.openPath(resolved);
-  return { success: true };
+  try {
+    if (typeof targetPath !== 'string') throw new Error('Invalid path');
+    const resolved = path.resolve(targetPath);
+    const appRoot = downloadManager.getAppRoot();
+    if (!isPathInside(appRoot, resolved)) throw new Error('Path outside app root');
+    if (!fs.existsSync(resolved)) fs.mkdirSync(resolved, { recursive: true });
+    return shell.openPath(resolved).then(error => error ? { success: false, error } : { success: true });
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+ipcMain.handle('backup:list', (_event, filters) => backupManager.list(filters));
+ipcMain.handle('backup:create', (_event, connection, database, options) => auditOperation('backup.create', database, () => backupManager.create(connection, database, options)));
+ipcMain.handle('backup:verify', (_event, id) => backupManager.verify(id));
+ipcMain.handle('backup:restore', (_event, id, connection, database) => auditOperation('backup.restore', `${id}:${database}`, () => backupManager.restore(id, connection, database)));
+ipcMain.handle('backup:remove', (_event, id) => auditOperation('backup.remove', id, () => backupManager.remove(id)));
+ipcMain.handle('backup:schedules', () => backupManager.schedules());
+ipcMain.handle('backup:saveSchedule', (_event, schedule) => auditOperation('backup.schedule-save', schedule?.id || schedule?.database || 'new', () => backupManager.saveSchedule(schedule)));
+ipcMain.handle('backup:removeSchedule', (_event, id) => auditOperation('backup.schedule-remove', id, () => backupManager.removeSchedule(id)));
+ipcMain.handle('backup:runDue', () => auditOperation('backup.run-due', 'scheduled', () => backupManager.runDue()));
+
+ipcMain.handle('shell:selectDirectory', async (_event, initialPath) => {
+  const defaultPath = typeof initialPath === 'string' && initialPath.trim() && fs.existsSync(path.resolve(initialPath))
+    ? path.resolve(initialPath)
+    : downloadManager.getAppRoot();
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Choose document root',
+    defaultPath,
+    properties: ['openDirectory', 'createDirectory']
+  });
+  return result.canceled || !result.filePaths.length
+    ? { success: false, canceled: true }
+    : { success: true, path: result.filePaths[0] };
 });
 
 ipcMain.handle('shell:openExternal', (_event, url) => {
-  // Only allow http/https URLs
-  if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
-    shell.openExternal(url);
+  try {
+    const parsed = new URL(url);
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) throw new Error('Invalid URL');
+    shell.openExternal(parsed.toString());
     return { success: true };
+  } catch {
+    return { success: false, error: 'Invalid URL' };
   }
-  return { success: false, error: 'Invalid URL' };
+});
+
+ipcMain.handle('shell:openSystemSettings', async (_event, page) => {
+  if (process.platform !== 'win32' || page !== 'appExecutionAliases') {
+    return { success: false, error: 'This Windows settings page is not available' };
+  }
+  try {
+    // Windows does not publish a stable URI for the App execution aliases
+    // subpage. Open the documented Apps page and copy a localized search
+    // phrase instead of silently falling back to the Settings home screen.
+    clipboard.writeText('Aliasy wykonywania aplikacji');
+    await shell.openExternal('ms-settings:appsfeatures');
+    return {
+      success: true,
+      message: 'Opened Apps settings. Go to Advanced app settings → App execution aliases. Polish search text was copied to the clipboard.'
+    };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 });
 
 ipcMain.handle('projects:list', (_event, section) => {
-  const projectsDir = path.resolve('projects', section);
-  if (!fs.existsSync(projectsDir)) fs.mkdirSync(projectsDir, { recursive: true });
   try {
+    assertProjectSection(section);
+    const projectsDir = resolveInside(path.resolve('projects'), section);
+    if (!fs.existsSync(projectsDir)) fs.mkdirSync(projectsDir, { recursive: true });
     const entries = fs.readdirSync(projectsDir, { withFileTypes: true });
     return entries.filter(e => e.isDirectory()).map(e => e.name);
   } catch { return []; }
 });
 
 ipcMain.handle('projects:create', (_event, section, name) => {
-  const safeName = name.replace(/[^a-zA-Z0-9_\-. ]/g, '').trim();
-  if (!safeName) return { success: false, error: 'Invalid project name' };
-  const projectDir = path.resolve('projects', section, safeName);
-  if (fs.existsSync(projectDir)) return { success: false, error: 'Project already exists' };
-  fs.mkdirSync(projectDir, { recursive: true });
-  return { success: true, path: projectDir };
+  try {
+    assertProjectSection(section);
+    const safeName = assertProjectName(name);
+    const projectDir = resolveInside(path.resolve('projects'), section, safeName);
+    if (fs.existsSync(projectDir)) return { success: false, error: 'Project already exists' };
+    fs.mkdirSync(projectDir, { recursive: false });
+    return { success: true, path: projectDir };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 });
 
 ipcMain.handle('projects:delete', (_event, section, name) => {
-  const safeName = name.replace(/[^a-zA-Z0-9_\-. ]/g, '').trim();
-  const projectDir = path.resolve('projects', section, safeName);
-  const projectsRoot = path.resolve('projects', section);
-  if (!projectDir.startsWith(projectsRoot) || !fs.existsSync(projectDir)) return { success: false, error: 'Not found' };
-  fs.rmSync(projectDir, { recursive: true, force: true });
-  return { success: true };
+  try {
+    assertProjectSection(section);
+    const safeName = assertProjectName(name);
+    const projectDir = resolveInside(path.resolve('projects'), section, safeName);
+    if (!fs.existsSync(projectDir)) return { success: false, error: 'Not found' };
+    fs.rmSync(projectDir, { recursive: true, force: false });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 });
+
+// ===== Project workspaces / stack orchestration =====
+ipcMain.handle('workspace:templates', () => projectManager.templates());
+ipcMain.handle('workspace:list', () => projectManager.list());
+ipcMain.handle('workspace:get', (_event, id) => projectManager.get(id));
+const synchronizeWorkspaceMutation = result => {
+  if (result?.success === false) return result;
+  return { ...result, hostsSync: projectManager.syncDomains({ elevate: true }) };
+};
+ipcMain.handle('workspace:create', (_event, options) => auditOperation('workspace.create', options?.id || options?.name || 'new', () => synchronizeWorkspaceMutation(projectManager.create(options))));
+ipcMain.handle('workspace:update', (_event, id, patch) => auditOperation('workspace.update', id, () => synchronizeWorkspaceMutation(projectManager.update(id, patch))));
+ipcMain.handle('workspace:remove', (_event, id, options) => auditOperation('workspace.remove', id, () => synchronizeWorkspaceMutation(projectManager.remove(id, options))));
+ipcMain.handle('workspace:start', (_event, id) => auditOperation('workspace.start', id, () => projectManager.start(id)));
+ipcMain.handle('workspace:stop', (_event, id) => auditOperation('workspace.stop', id, () => projectManager.stop(id)));
+ipcMain.handle('workspace:export', (_event, id) => projectManager.exportManifest(id));
+ipcMain.handle('workspace:import', (_event, manifest, options) => auditOperation('workspace.import', manifest?.project?.id || manifest?.project?.name || 'manifest', () => synchronizeWorkspaceMutation(projectManager.importManifest(manifest, options))));
+ipcMain.handle('workspace:detect', (_event, directory) => projectDetector.detect(directory));
+ipcMain.handle('workspace:inspectCompose', (_event, file) => projectDetector.inspectCompose(file));
+ipcMain.handle('workspace:inspectDevcontainer', (_event, file) => projectDetector.inspectDevcontainer(file));
+ipcMain.handle('workspace:secretKeys', (_event, id) => projectManager.listSecretKeys(id));
+ipcMain.handle('workspace:setSecrets', (_event, id, secrets) => auditOperation('workspace.secrets-update', id, () => projectManager.setSecrets(id, secrets), { keysChanged: Object.keys(secrets || {}).length }));
+ipcMain.handle('workspace:environment', (_event, id) => projectManager.resolveEnvironment(id, { includeSecrets: false }));
+ipcMain.handle('workspace:url', (_event, id) => ({ url: projectManager.getUrl(id) }));
+ipcMain.handle('workspace:open', async (_event, id) => {
+  const project = projectManager.get(id);
+  const error = await shell.openPath(project.root);
+  return error ? { success: false, error } : { success: true, path: project.root };
+});
+
+ipcMain.handle('activity:list', (_event, options) => activityManager.list(options));
+ipcMain.handle('activity:cancel', (_event, id) => activityManager.cancel(id));
+ipcMain.handle('activity:clear', () => activityManager.clearCompleted());
+
+ipcMain.handle('diagnostics:doctor', (_event, projectId) => diagnosticsManager.doctor(projectId ? projectManager.get(projectId) : null));
+ipcMain.handle('diagnostics:compatibility', (_event, projectId) => diagnosticsManager.compatibility(projectId ? projectManager.get(projectId) : null));
+ipcMain.handle('diagnostics:preflight', (_event, projectId) => diagnosticsManager.preflight(projectManager.get(projectId)));
+ipcMain.handle('diagnostics:ports', () => diagnosticsManager.ports());
+ipcMain.handle('diagnostics:findFreePort', (_event, start, end) => diagnosticsManager.findFreePort(start, end));
+ipcMain.handle('diagnostics:repair', (_event, issue) => diagnosticsManager.repair(issue));
+ipcMain.handle('diagnostics:repairAll', (_event, projectId) => diagnosticsManager.repairAll(projectId ? projectManager.get(projectId) : null));
+ipcMain.handle('integration:list', () => integrationManager.list());
+ipcMain.handle('integration:save', (_event, id, config, secrets) => auditOperation('integration.save', id, () => integrationManager.save(id, config, secrets), { secretFieldsChanged: Object.keys(secrets || {}).length }));
+ipcMain.handle('integration:remove', (_event, id) => auditOperation('integration.remove', id, () => integrationManager.remove(id)));
+ipcMain.handle('integration:test', (_event, id) => auditOperation('integration.test', id, () => integrationManager.test(id)));
+ipcMain.handle('integration:readiness', (_event, category) => integrationManager.readiness(category));
+ipcMain.handle('integration:assistant', (_event, prompt, context) => integrationManager.assistant(prompt, context));
+ipcMain.handle('command:start', (_event, projectId, name, execution, distribution) => commandManager.start(projectId, name, execution, distribution));
+ipcMain.handle('command:stop', (_event, id) => commandManager.stop(id));
+ipcMain.handle('command:list', (_event, projectId) => commandManager.list(projectId));
+ipcMain.handle('command:get', (_event, id) => commandManager.get(id));
+ipcMain.handle('command:clear', () => commandManager.clearFinished());
+ipcMain.handle('toolchain:list', () => commandManager.toolchains());
+ipcMain.handle('toolchain:repair', (_event, id) => commandManager.repairTool(id, progress => {
+  mainWindow?.webContents.send('download:progress', progress);
+}));
+ipcMain.handle('ide:list', () => commandManager.ides());
+ipcMain.handle('ide:open', (_event, projectId, ideId) => commandManager.openIDE(projectId, ideId));
+ipcMain.handle('environment:export', (_event, label) => environmentManager.export(label));
+ipcMain.handle('environment:inspect', (_event, payload) => environmentManager.inspect(payload));
+ipcMain.handle('environment:apply', (_event, payload, options) => environmentManager.apply(payload, options));
+ipcMain.handle('environment:createSnapshot', (_event, label) => environmentManager.createSnapshot(label));
+ipcMain.handle('environment:listSnapshots', () => environmentManager.listSnapshots());
+ipcMain.handle('environment:restoreSnapshot', (_event, id, options) => environmentManager.restoreSnapshot(id, options));
+ipcMain.handle('environment:removeSnapshot', (_event, id) => environmentManager.removeSnapshot(id));
+ipcMain.handle('plugin:list', () => pluginManager.list());
+ipcMain.handle('plugin:install', (_event, directory) => pluginManager.install(directory));
+ipcMain.handle('plugin:setEnabled', (_event, id, enabled) => pluginManager.setEnabled(id, enabled));
+ipcMain.handle('plugin:remove', (_event, id) => pluginManager.remove(id));
+ipcMain.handle('platform:inventory', () => platformManager.inventory());
+ipcMain.handle('platform:wslPath', (_event, directory, distribution) => platformManager.toWslPath(directory, distribution));
+ipcMain.handle('platform:installSystemd', (_event, options) => platformManager.installSystemdUserService(options));
+ipcMain.handle('platform:removeSystemd', () => platformManager.removeSystemdUserService());
+ipcMain.handle('tunnel:providers', () => tunnelManager.providers());
+ipcMain.handle('tunnel:list', (_event, projectId) => tunnelManager.list(projectId));
+ipcMain.handle('tunnel:start', (_event, projectId, provider) => tunnelManager.start(projectId, provider));
+ipcMain.handle('tunnel:stop', (_event, id) => tunnelManager.stop(id));
+ipcMain.handle('update:status', () => updateManager.status());
+ipcMain.handle('update:check', () => updateManager.check());
+ipcMain.handle('update:download', () => updateManager.download());
+ipcMain.handle('update:install', () => {
+  const result = updateManager.install();
+  if (result.success && result.launched) setTimeout(() => void quitAfterStoppingServices(), 750);
+  return result;
+});
+ipcMain.handle('support:generate', () => supportManager.generate());
+ipcMain.handle('security:status', () => ({ mode: 'desktop', https: false, totpEnabled: false, apiTokenEnabled: false, allowlistEnabled: false, allowedRules: [], sessionCount: 0 }));
+ipcMain.handle('security:sessions', () => []);
+ipcMain.handle('security:revokeSession', () => ({ success: false, error: 'Web sessions exist only in server mode' }));
+ipcMain.handle('security:revokeOtherSessions', () => ({ success: true, removed: 0 }));
+ipcMain.handle('audit:list', (_event, options) => auditManager.list(options));
+ipcMain.handle('audit:verify', () => auditManager.verify());
+
+ipcMain.handle('domain:status', () => domainManager.status(projectManager.list()));
+ipcMain.handle('domain:apply', () => projectManager.syncDomains({ elevate: true }));
+ipcMain.handle('domain:certificateStatus', (_event, domain) => domainManager.certificateStatus(domain));
+ipcMain.handle('domain:installCertificateAuthority', () => domainManager.installCertificateAuthority());
+ipcMain.handle('domain:issueCertificate', (_event, domain) => domainManager.issueCertificate(domain));
 
 // ===== Window IPC =====
 ipcMain.handle('window:minimize', () => mainWindow.minimize());
@@ -328,48 +764,7 @@ const terminals = new Map(); // id -> { process, id }
 let terminalIdCounter = 0;
 
 function buildTerminalEnv() {
-  const config = configManager.getConfig();
-  const sections = ['apache', 'nginx', 'caddy', 'postgresql', 'mysql', 'mariadb', 'mongodb', 'php', 'node', 'go', 'bun', 'redis', 'memcached', 'minio', 'python', 'deno'];
-  const extraPaths = [];
-
-  for (const section of sections) {
-    const profile = configManager.getActiveProfile(config, section);
-    if (!profile) continue;
-    const dlKey = section;
-    const version = profile.version;
-    if (!downloadManager.isInstalled(dlKey, version)) continue;
-    const installPath = downloadManager.getInstallPath(dlKey, version);
-
-    const binCandidates = {
-      apache: ['bin'],
-      nginx: ['.'],
-      caddy: ['.'],
-      postgresql: ['bin', 'pgsql/bin'],
-      mysql: ['bin'],
-      mariadb: ['bin'],
-      mongodb: ['bin'],
-      php: ['.'],
-      node: [process.platform === 'win32' ? '.' : 'bin'],
-      go: ['bin'],
-      bun: ['.'],
-      redis: [process.platform === 'win32' ? '.' : 'bin'],
-      memcached: ['.', 'bin'],
-      minio: ['.'],
-      python: [process.platform === 'win32' ? '.' : 'bin'],
-      deno: ['.']
-    };
-    for (const rel of (binCandidates[section] || ['.'])) {
-      const binDir = path.join(installPath, rel);
-      if (fs.existsSync(binDir)) extraPaths.push(binDir);
-    }
-  }
-
-  const env = { ...process.env };
-  const pathSep = process.platform === 'win32' ? ';' : ':';
-  if (extraPaths.length) {
-    env.PATH = extraPaths.join(pathSep) + pathSep + (env.PATH || '');
-  }
-  return env;
+  return pathManager.buildEnvironment(process.env);
 }
 
 ipcMain.handle('terminal:create', () => {
@@ -403,6 +798,7 @@ ipcMain.handle('terminal:create', () => {
 ipcMain.handle('terminal:write', (_event, id, data) => {
   const term = terminals.get(id);
   if (!term) return { success: false, error: 'Terminal not found' };
+  if (typeof data !== 'string' || data.length > 65536) return { success: false, error: 'Invalid terminal input' };
   term.process.stdin.write(data);
   return { success: true };
 });
@@ -428,8 +824,11 @@ ipcMain.handle('composer:getStatus', () => {
   const version = phpProfile.version;
   if (!downloadManager.isInstalled('php', version)) return { installed: false, phpAvailable: false };
   const phpPath = downloadManager.getInstallPath('php', version);
-  const composerPath = path.join(phpPath, 'composer.phar');
-  return { installed: fs.existsSync(composerPath), phpAvailable: true, phpPath };
+  const composerProfile = configManager.getActiveProfile(config, 'composer');
+  const managedPath = composerProfile && downloadManager.isInstalled('composer', composerProfile.version)
+    ? downloadManager.getInstallPath('composer', composerProfile.version) : '';
+  const composerPath = managedPath ? path.join(managedPath, 'composer.phar') : path.join(phpPath, 'composer.phar');
+  return { installed: fs.existsSync(composerPath), phpAvailable: true, phpPath, composerPath, version: composerProfile?.version || '', managed: Boolean(managedPath) };
 });
 
 ipcMain.handle('composer:install', async () => {
@@ -438,27 +837,14 @@ ipcMain.handle('composer:install', async () => {
   if (!phpProfile) return { success: false, error: 'No active PHP profile' };
   const version = phpProfile.version;
   if (!downloadManager.isInstalled('php', version)) return { success: false, error: 'PHP not installed' };
-  const phpPath = downloadManager.getInstallPath('php', version);
-  const isWin = process.platform === 'win32';
-  const phpExe = path.join(phpPath, isWin ? 'php.exe' : 'bin/php');
-  const composerPath = path.join(phpPath, 'composer.phar');
-  try {
-    // Download composer-setup.php and install
-    const https = require('https');
-    const setupPath = path.join(phpPath, 'composer-setup.php');
-    await new Promise((resolve, reject) => {
-      const file = fs.createWriteStream(setupPath);
-      https.get('https://getcomposer.org/installer', (response) => {
-        response.pipe(file);
-        file.on('finish', () => { file.close(); resolve(); });
-      }).on('error', (err) => { fs.unlinkSync(setupPath); reject(err); });
-    });
-    execSync(`"${phpExe}" "${setupPath}" --install-dir="${phpPath}" --filename=composer.phar`, { encoding: 'utf-8', timeout: 60000 });
-    try { fs.unlinkSync(setupPath); } catch {}
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err.message };
+  const composerProfile = configManager.getActiveProfile(config, 'composer');
+  if (!composerProfile) return { success: false, error: 'No active Composer profile' };
+  const result = await downloadManager.download('composer', composerProfile.version, progress => mainWindow?.webContents.send('download:progress', progress));
+  if (result.success) {
+    const pathResult = pathManager.syncIfSelected('composer');
+    if (!pathResult.success) result.pathWarning = pathResult.error;
   }
+  return result;
 });
 
 ipcMain.handle('composer:run', (_event, command, cwd) => {
@@ -470,7 +856,10 @@ ipcMain.handle('composer:run', (_event, command, cwd) => {
   const phpPath = downloadManager.getInstallPath('php', version);
   const isWin = process.platform === 'win32';
   const phpExe = path.join(phpPath, isWin ? 'php.exe' : 'bin/php');
-  const composerPhar = path.join(phpPath, 'composer.phar');
+  const composerProfile = configManager.getActiveProfile(config, 'composer');
+  const managedPath = composerProfile && downloadManager.isInstalled('composer', composerProfile.version)
+    ? downloadManager.getInstallPath('composer', composerProfile.version) : '';
+  const composerPhar = managedPath ? path.join(managedPath, 'composer.phar') : path.join(phpPath, 'composer.phar');
   if (!fs.existsSync(composerPhar)) return { success: false, output: 'Composer not installed. Install it first.' };
   // Split command into safe args array — no shell interpolation
   const args = command.trim().split(/\s+/).filter(Boolean);
@@ -479,12 +868,15 @@ ipcMain.handle('composer:run', (_event, command, cwd) => {
     return { success: false, output: `Command "${args[0]}" is not allowed. Allowed: ${allowedCmds.join(', ')}` };
   }
   try {
-    const { execFileSync } = require('child_process');
+    const resolvedCwd = cwd ? path.resolve(cwd) : _appRoot;
+    if (!isPathInside(_appRoot, resolvedCwd) || !fs.existsSync(resolvedCwd)) {
+      return { success: false, output: 'Working directory must be inside the KitsuneServ data directory' };
+    }
     const output = execFileSync(phpExe, [composerPhar, ...args], {
       encoding: 'utf-8',
       timeout: 120000,
-      cwd: cwd && fs.existsSync(cwd) ? cwd : path.resolve('.'),
-      env: { ...process.env, COMPOSER_HOME: path.join(phpPath, 'composer') }
+      cwd: resolvedCwd,
+      env: { ...pathManager.buildEnvironment(process.env), COMPOSER_HOME: path.join(managedPath || phpPath, 'composer-home') }
     });
     return { success: true, output };
   } catch (err) {
@@ -493,131 +885,11 @@ ipcMain.handle('composer:run', (_event, command, cwd) => {
 });
 
 // ===== PATH Management IPC =====
-const PATH_MARKER = '# KitsuneServ';
-
-function getKitsunePathEntries() {
-  const config = configManager.getConfig();
-  const sections = ['apache', 'nginx', 'caddy', 'postgresql', 'mysql', 'mariadb', 'mongodb', 'php', 'node', 'go', 'bun', 'redis', 'memcached', 'minio', 'python', 'deno'];
-  const entries = [];
-
-  for (const section of sections) {
-    const profile = configManager.getActiveProfile(config, section);
-    if (!profile) continue;
-    const dlKey = section;
-    const version = profile.version;
-    if (!downloadManager.isInstalled(dlKey, version)) continue;
-    const installPath = downloadManager.getInstallPath(dlKey, version);
-
-    const binCandidates = {
-      apache: ['bin'],
-      nginx: ['.'],
-      caddy: ['.'],
-      postgresql: ['bin', 'pgsql/bin'],
-      mysql: ['bin'],
-      mariadb: ['bin'],
-      mongodb: ['bin'],
-      php: ['.'],
-      node: ['.'],
-      go: ['bin'],
-      bun: ['.'],
-      redis: ['.'],
-      memcached: ['.', 'bin'],
-      minio: ['.'],
-      python: ['.'],
-      deno: ['.']
-    };
-    for (const rel of (binCandidates[section] || ['.'])) {
-      const binDir = path.resolve(path.join(installPath, rel));
-      if (fs.existsSync(binDir)) entries.push(binDir);
-    }
-  }
-  return entries;
-}
-
-ipcMain.handle('path:getStatus', () => {
-  if (process.platform === 'win32') {
-    try {
-      const userPath = execSync('powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable(\'Path\',\'User\')"', { encoding: 'utf-8' }).trim();
-      const kitsuneEntries = getKitsunePathEntries();
-      const pathParts = userPath.split(';').map(p => p.replace(/\\/g, '/').toLowerCase());
-      const added = kitsuneEntries.some(e => pathParts.includes(e.replace(/\\/g, '/').toLowerCase()));
-      return { added, entries: kitsuneEntries };
-    } catch {
-      return { added: false, entries: [] };
-    }
-  } else {
-    // Linux/macOS: check if shell profile has KitsuneServ entries
-    try {
-      const shellRc = _getShellRcPath();
-      if (shellRc && fs.existsSync(shellRc)) {
-        const content = fs.readFileSync(shellRc, 'utf-8');
-        const added = content.includes('# KitsuneServ PATH');
-        return { added, entries: getKitsunePathEntries() };
-      }
-      return { added: false, entries: getKitsunePathEntries() };
-    } catch {
-      return { added: false, entries: [] };
-    }
-  }
-});
-
-function _getShellRcPath() {
-  const home = process.env.HOME || '';
-  if (!home) return null;
-  const shell = process.env.SHELL || '';
-  if (shell.includes('zsh')) return path.join(home, '.zshrc');
-  return path.join(home, '.bashrc');
-}
-
-ipcMain.handle('path:add', () => {
-  try {
-    const entries = getKitsunePathEntries();
-    if (!entries.length) return { success: false, error: 'No installed services found' };
-    if (process.platform === 'win32') {
-      const userPath = execSync('powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable(\'Path\',\'User\')"', { encoding: 'utf-8' }).trim();
-      const pathParts = userPath.split(';').filter(Boolean);
-      const appRoot = downloadManager.getAppRoot().replace(/\\/g, '/').toLowerCase();
-      const cleaned = pathParts.filter(p => !p.replace(/\\/g, '/').toLowerCase().includes(appRoot + '/servers'));
-      const newPath = [...entries, ...cleaned].join(';');
-      execSync(`powershell -NoProfile -Command "[Environment]::SetEnvironmentVariable('Path','${newPath.replace(/'/g, "''")}','User')"`, { encoding: 'utf-8' });
-    } else {
-      const shellRc = _getShellRcPath();
-      if (!shellRc) return { success: false, error: 'Could not determine shell config file' };
-      let content = fs.existsSync(shellRc) ? fs.readFileSync(shellRc, 'utf-8') : '';
-      // Remove old KitsuneServ block
-      content = content.replace(/\n# KitsuneServ PATH - START[\s\S]*?# KitsuneServ PATH - END\n?/g, '');
-      const block = `\n# KitsuneServ PATH - START\nexport PATH="${entries.join(':')}:$PATH"\n# KitsuneServ PATH - END\n`;
-      content += block;
-      fs.writeFileSync(shellRc, content, 'utf-8');
-    }
-    return { success: true, entries };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-});
-
-ipcMain.handle('path:remove', () => {
-  try {
-    if (process.platform === 'win32') {
-      const userPath = execSync('powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable(\'Path\',\'User\')"', { encoding: 'utf-8' }).trim();
-      const pathParts = userPath.split(';').filter(Boolean);
-      const appRoot = downloadManager.getAppRoot().replace(/\\/g, '/').toLowerCase();
-      const cleaned = pathParts.filter(p => !p.replace(/\\/g, '/').toLowerCase().includes(appRoot + '/servers'));
-      const newPath = cleaned.join(';');
-      execSync(`powershell -NoProfile -Command "[Environment]::SetEnvironmentVariable('Path','${newPath.replace(/'/g, "''")}','User')"`, { encoding: 'utf-8' });
-    } else {
-      const shellRc = _getShellRcPath();
-      if (shellRc && fs.existsSync(shellRc)) {
-        let content = fs.readFileSync(shellRc, 'utf-8');
-        content = content.replace(/\n# KitsuneServ PATH - START[\s\S]*?# KitsuneServ PATH - END\n?/g, '');
-        fs.writeFileSync(shellRc, content, 'utf-8');
-      }
-    }
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-});
+ipcMain.handle('path:getStatus', () => pathManager.getStatus());
+ipcMain.handle('path:apply', (_event, services) => pathManager.apply(services));
+ipcMain.handle('path:add', (_event, services) => pathManager.add(services));
+ipcMain.handle('path:remove', (_event, services) => pathManager.remove(services));
+ipcMain.handle('path:installPythonManager', () => installOfficialPythonManager(false));
 
 // ===== Health Check IPC =====
 const http = require('http');
@@ -662,8 +934,6 @@ ipcMain.handle('service:healthCheck', async (_event, section) => {
 });
 
 // ===== Config Import/Export IPC =====
-const { dialog } = require('electron');
-
 ipcMain.handle('config:export', async () => {
   const result = await dialog.showSaveDialog(mainWindow, {
     defaultPath: `kitsuneserv-config-${new Date().toISOString().slice(0, 10)}.json`,
@@ -688,8 +958,13 @@ ipcMain.handle('config:import', async () => {
     if (!imported.general && !imported.apache && !imported.nginx) {
       return { success: false, error: 'Invalid config file' };
     }
-    configManager.saveConfig(imported);
-    return { success: true, config: imported };
+    const validation = serviceManager.validateConfigChange(imported);
+    if (!validation.success) return validation;
+    const previous = configManager.getConfig();
+    const saved = configManager.saveConfig(imported);
+    if (!saved.success) return saved;
+    const current = configManager.getConfig();
+    return { ...syncPathForConfigTransition(previous, current, { success: true }), config: current };
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -698,7 +973,6 @@ ipcMain.handle('config:import', async () => {
 // ===== Auto-start services on launch =====
 ipcMain.handle('service:autoStart', async () => {
   const config = configManager.getConfig();
-  if (!config.general?.autoStartOnBoot) return { started: [] };
   const started = [];
   const sections = ['apache', 'nginx', 'caddy', 'postgresql', 'mysql', 'mariadb', 'mongodb', 'php', 'node', 'go', 'bun', 'redis', 'memcached', 'minio', 'python', 'deno'];
   // Start ordering: databases → cache → php → web servers → runtimes
@@ -771,22 +1045,7 @@ ipcMain.handle('service:resourceUsage', async () => {
 // ===== Disk Usage per service =====
 // ===== App Store IPC =====
 ipcMain.handle('appStore:catalog', () => {
-  const catalog = appStoreManager.getCatalog();
-  const instances = appStoreManager._loadInstances();
-  return catalog.map(app => {
-    const appInstances = Object.entries(instances)
-      .filter(([, v]) => v.appId === app.id)
-      .map(([name, v]) => ({ instanceName: name, dbName: v.dbName }));
-    // Also check for legacy folder match (no instance record yet)
-    if (appInstances.length === 0 && appStoreManager.isInstalled(app.id)) {
-      appInstances.push({ instanceName: app.id, dbName: app.database || '' });
-    }
-    return {
-      ...app,
-      installed: appInstances.length > 0,
-      instances: appInstances
-    };
-  });
+  return appStoreManager.getCatalogWithStatus();
 });
 
 ipcMain.handle('appStore:installed', () => appStoreManager.getInstalledApps());
@@ -808,11 +1067,97 @@ ipcMain.handle('appStore:addCustomApp', (_event, opts) => appStoreManager.addCus
 ipcMain.handle('appStore:removeCustomApp', (_event, appId) => appStoreManager.removeCustomApp(appId));
 
 ipcMain.handle('appStore:checkRequirements', (_event, appId) => {
-  const catalog = appStoreManager.getCatalog();
-  const appDef = catalog.find(a => a.id === appId);
-  if (!appDef) return { ok: true, missing: [] };
-  return appStoreManager.checkRequirements(appDef);
+  return appStoreManager.checkRequirementsById(appId);
 });
+
+ipcMain.handle('lab:recipes', () => labManager.recipes());
+ipcMain.handle('lab:preview', (_event, input) => labManager.preview(input));
+ipcMain.handle('lab:list', () => labManager.list());
+ipcMain.handle('lab:get', (_event, id) => labManager.get(id));
+ipcMain.handle('lab:create', (_event, input, secrets) => auditOperation('lab.create', input?.id || input?.name || 'new', () => labManager.create(input, secrets), { recipe: input?.recipe || '' }));
+ipcMain.handle('lab:update', (_event, id, patch, secrets) => auditOperation('lab.update', id, () => labManager.update(id, patch, secrets)));
+ipcMain.handle('lab:provision', (_event, id) => auditOperation('lab.provision', id, () => labManager.provision(id, progress => mainWindow?.webContents.send('lab:progress', progress))));
+ipcMain.handle('lab:start', (_event, id) => auditOperation('lab.start', id, () => labManager.start(id)));
+ipcMain.handle('lab:stop', (_event, id) => auditOperation('lab.stop', id, () => labManager.stop(id)));
+ipcMain.handle('lab:health', (_event, id) => labManager.health(id));
+ipcMain.handle('lab:remove', (_event, id, options) => auditOperation('lab.remove', id, () => labManager.remove(id, options)));
+ipcMain.handle('apiFlow:catalog', () => apiFlowManager.catalog());
+ipcMain.handle('apiFlow:list', () => apiFlowManager.list());
+ipcMain.handle('apiFlow:get', (_event, id) => apiFlowManager.get(id));
+ipcMain.handle('apiFlow:validate', (_event, input) => apiFlowManager.validate(input));
+ipcMain.handle('apiFlow:save', (_event, input) => auditOperation('api-flow.save', input?.id || input?.name || 'new', () => apiFlowManager.save(input), { endpoints: input?.endpoints?.length || 0 }));
+ipcMain.handle('apiFlow:remove', (_event, id) => auditOperation('api-flow.remove', id, () => apiFlowManager.remove(id)));
+ipcMain.handle('apiFlow:start', (_event, id) => auditOperation('api-flow.start', id, () => apiFlowManager.start(id)));
+ipcMain.handle('apiFlow:stop', (_event, id) => auditOperation('api-flow.stop', id, () => apiFlowManager.stop(id)));
+ipcMain.handle('apiFlow:status', (_event, id) => apiFlowManager.status(id));
+ipcMain.handle('apiFlow:test', (_event, projectId, endpointId, request) => auditOperation('api-flow.test', `${projectId}:${endpointId}`, () => apiFlowManager.test(projectId, endpointId, request)));
+ipcMain.handle('apiFlow:request', (_event, projectId, endpointId, request) => auditOperation('api-flow.request', `${projectId}:${endpointId}`, () => apiFlowManager.request(projectId, endpointId, request)));
+ipcMain.handle('apiFlow:logs', (_event, projectId, limit) => apiFlowManager.logs(projectId, limit));
+ipcMain.handle('apiFlow:clearLogs', (_event, projectId) => auditOperation('api-flow.logs-clear', projectId || 'all', () => apiFlowManager.clearLogs(projectId)));
+const desktopPrincipal = () => {
+  const user = identityManager.listUsers().find(item => item.roles.includes('owner')) || identityManager.listUsers()[0];
+  return user ? identityManager.principal(user, { provider: 'desktop-local' }) : null;
+};
+ipcMain.handle('identity:roles', () => identityManager.roles());
+ipcMain.handle('identity:users', () => identityManager.listUsers());
+ipcMain.handle('identity:createUser', (_event, input) => auditOperation('identity.user-create', input?.username || 'new', () => identityManager.createUser(input)));
+ipcMain.handle('identity:updateUser', (_event, id, patch) => auditOperation('identity.user-update', id, () => identityManager.updateUser(id, patch)));
+ipcMain.handle('identity:removeUser', (_event, id) => auditOperation('identity.user-remove', id, () => identityManager.removeUser(id)));
+ipcMain.handle('identity:enableTotp', (_event, id) => identityManager.enableTotp(id));
+ipcMain.handle('identity:disableTotp', (_event, id) => identityManager.disableTotp(id));
+ipcMain.handle('identity:tokens', () => identityManager.listTokens());
+ipcMain.handle('identity:createToken', (_event, input) => identityManager.createToken(input));
+ipcMain.handle('identity:revokeToken', (_event, id) => identityManager.revokeToken(id));
+ipcMain.handle('identity:invitations', () => identityManager.listInvitations());
+ipcMain.handle('identity:createInvitation', (_event, input) => identityManager.createInvitation({ ...input, createdBy: desktopPrincipal()?.userId || '' }));
+ipcMain.handle('identity:removeInvitation', (_event, id) => identityManager.removeInvitation(id));
+ipcMain.handle('hub:status', () => hubManager.status());
+ipcMain.handle('hub:settings', () => hubManager.settings());
+ipcMain.handle('hub:configure', (_event, input) => auditOperation('hub.configure', input?.panelDomain || 'hub', () => hubManager.configure(input)));
+ipcMain.handle('hub:teams', () => hubManager.listTeams());
+ipcMain.handle('hub:saveTeam', (_event, input) => hubManager.saveTeam(input, desktopPrincipal()));
+ipcMain.handle('hub:removeTeam', (_event, id) => hubManager.removeTeam(id));
+ipcMain.handle('hub:nodes', () => hubManager.listNodes());
+ipcMain.handle('hub:createPairing', (_event, input) => hubManager.createPairing(input, desktopPrincipal()));
+ipcMain.handle('hub:revokeNode', (_event, id) => hubManager.revokeNode(id));
+ipcMain.handle('hub:routes', () => hubManager.listRoutes());
+ipcMain.handle('hub:saveRoute', (_event, input) => hubManager.saveRoute(input));
+ipcMain.handle('hub:removeRoute', (_event, id) => hubManager.removeRoute(id));
+ipcMain.handle('hub:inventory', (_event, filters) => hubManager.inventory(filters));
+ipcMain.handle('hub:publishLocal', (_event, options) => hubManager.publishLocal(options, desktopPrincipal()));
+ipcMain.handle('hub:publish', (_event, input) => hubManager.publish(input, desktopPrincipal()));
+ipcMain.handle('hub:history', (_event, id) => hubManager.history(id));
+ipcMain.handle('hub:rollback', (_event, id, revision) => hubManager.rollback(id, revision, desktopPrincipal()));
+ipcMain.handle('hub:applyObject', (_event, id, options) => hubManager.applyObject(id, options));
+ipcMain.handle('hub:deployments', (_event, filters) => hubManager.listDeployments(filters));
+ipcMain.handle('hub:createDeployment', (_event, input) => hubManager.createDeployment(input, desktopPrincipal()));
+ipcMain.handle('hub:approveDeployment', (_event, id) => hubManager.approveDeployment(id, desktopPrincipal()));
+ipcMain.handle('hub:updateDeployment', (_event, id, input) => hubManager.updateDeployment(id, input));
+ipcMain.handle('hub:connectors', () => hubManager.listConnectors());
+ipcMain.handle('hub:saveConnector', (_event, input, secret) => hubManager.saveConnector(input, secret));
+ipcMain.handle('hub:removeConnector', (_event, id) => hubManager.removeConnector(id));
+ipcMain.handle('hub:remotes', () => hubManager.listRemotes());
+ipcMain.handle('hub:saveRemote', (_event, input, token) => hubManager.saveRemote(input, token));
+ipcMain.handle('hub:removeRemote', (_event, id) => hubManager.removeRemote(id));
+ipcMain.handle('hub:pushRemote', (_event, id, options) => hubManager.pushToRemote(id, options, desktopPrincipal()));
+ipcMain.handle('hub:pullRemote', (_event, id, options) => hubManager.pullFromRemote(id, options, desktopPrincipal()));
+ipcMain.handle('hub:syncRemote', (_event, id, options) => hubManager.syncRemote(id, options, desktopPrincipal()));
+ipcMain.handle('hub:reconcile', () => hubManager.reconcile());
+ipcMain.handle('observability:overview', () => observabilityManager.overview());
+ipcMain.handle('observability:collect', () => observabilityManager.collect());
+ipcMain.handle('observability:history', (_event, options) => observabilityManager.history(options));
+ipcMain.handle('observability:alerts', () => observabilityManager.alertsList());
+ipcMain.handle('observability:acknowledge', (_event, id) => observabilityManager.acknowledgeAlert(id));
+ipcMain.handle('observability:rules', () => observabilityManager.rulesList());
+ipcMain.handle('observability:saveRule', (_event, input) => observabilityManager.saveRule(input));
+ipcMain.handle('observability:removeRule', (_event, id) => observabilityManager.removeRule(id));
+ipcMain.handle('observability:prometheus', () => observabilityManager.prometheus());
+ipcMain.handle('automation:list', () => automationManager.list());
+ipcMain.handle('automation:history', (_event, limit) => automationManager.history(limit));
+ipcMain.handle('automation:save', (_event, input) => auditOperation('automation.save', input?.id || input?.name || 'new', () => automationManager.save(input)));
+ipcMain.handle('automation:remove', (_event, id) => auditOperation('automation.remove', id, () => automationManager.remove(id)));
+ipcMain.handle('automation:run', (_event, id) => auditOperation('automation.run', id, () => automationManager.run(id, { manual: true })));
+ipcMain.handle('automation:runDue', () => auditOperation('automation.run-due', 'scheduled', () => automationManager.runDue(), { automatic: true }));
 
 let _diskUsageCache = null;
 let _diskUsageCacheTime = 0;
@@ -843,3 +1188,7 @@ ipcMain.handle('download:diskUsage', () => {
   _diskUsageCacheTime = Date.now();
   return usage; // { nginx: 12.3, php: 85.1, ... } in MB
 });
+ipcMain.handle('download:cacheStatus', () => downloadManager.cacheStatus());
+ipcMain.handle('download:clearCache', (_event, service, version) => downloadManager.clearCache(service, version));
+ipcMain.handle('download:exportCache', (_event, directory) => downloadManager.exportCache(directory));
+ipcMain.handle('download:importCache', (_event, directory) => downloadManager.importCache(directory));

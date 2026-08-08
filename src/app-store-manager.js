@@ -2,10 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFile, execFileSync } = require('child_process');
 const crypto = require('crypto');
-
-// Support both Electron and standalone Node.js (server mode)
-let electronApp = null;
-try { electronApp = require('electron').app; } catch {}
+const { resolveInside, assertSafeSegment } = require('./path-utils');
 
 /**
  * App Store Manager — installs and manages web applications
@@ -18,11 +15,7 @@ class AppStoreManager {
     this.configManager = configManager;
     this.dbViewer = dbViewer;
     this.serviceManager = serviceManager;
-    if (electronApp) {
-      this.appRoot = electronApp.isPackaged ? path.dirname(process.execPath) : electronApp.getAppPath();
-    } else {
-      this.appRoot = process.cwd();
-    }
+    this.appRoot = downloadManager?.getAppRoot?.() || process.cwd();
     this.wwwDir = path.join(this.appRoot, 'www');
     this.appsDir = path.join(this.wwwDir, 'apps');
     this.customAppsFile = path.join(this.appRoot, 'config', 'custom-apps.json');
@@ -33,6 +26,11 @@ class AppStoreManager {
 
   _ensureDir(dir) {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  }
+
+  _resolveAppDir(instanceName) {
+    assertSafeSegment(instanceName, 'instance name');
+    return resolveInside(this.appsDir, instanceName);
   }
 
   // ===== Instance tracking =====
@@ -444,7 +442,8 @@ class AppStoreManager {
     for (const [instanceName, info] of Object.entries(instances)) {
       const appDef = catalog.find(a => a.id === info.appId);
       if (!appDef) continue;
-      const appDir = path.join(this.appsDir, instanceName);
+      let appDir;
+      try { appDir = this._resolveAppDir(instanceName); } catch { continue; }
       if (fs.existsSync(appDir) && fs.readdirSync(appDir).length > 0) {
         installed.push({
           ...appDef,
@@ -459,7 +458,7 @@ class AppStoreManager {
 
     // Also detect legacy installs (folders matching appId without instance record)
     for (const appDef of catalog) {
-      const appDir = path.join(this.appsDir, appDef.id);
+      const appDir = this._resolveAppDir(appDef.id);
       if (fs.existsSync(appDir) && fs.readdirSync(appDir).length > 0) {
         if (!instances[appDef.id]) {
           // Migrate: register as instance
@@ -478,9 +477,33 @@ class AppStoreManager {
     return installed;
   }
 
+  getCatalogWithStatus() {
+    const catalog = this.getCatalog();
+    const instances = this._loadInstances();
+    return catalog.map(app => {
+      const appInstances = Object.entries(instances)
+        .filter(([, value]) => value?.appId === app.id)
+        .map(([instanceName, value]) => ({ instanceName, dbName: value.dbName }));
+      if (appInstances.length === 0 && this.isInstalled(app.id)) {
+        appInstances.push({ instanceName: app.id, dbName: app.database || '' });
+      }
+      return { ...app, installed: appInstances.length > 0, instances: appInstances };
+    });
+  }
+
+  checkRequirementsById(appId) {
+    const appDef = this.getCatalog().find(app => app.id === appId);
+    if (!appDef) return { ok: false, missing: [], error: 'App not found in catalog' };
+    return this.checkRequirements(appDef);
+  }
+
   isInstalled(instanceName) {
-    const appDir = path.join(this.appsDir, instanceName);
-    return fs.existsSync(appDir) && fs.readdirSync(appDir).length > 0;
+    try {
+      const appDir = this._resolveAppDir(instanceName);
+      return fs.existsSync(appDir) && fs.readdirSync(appDir).length > 0;
+    } catch {
+      return false;
+    }
   }
 
   // ===== Pre-flight checks =====
@@ -518,7 +541,7 @@ class AppStoreManager {
     const instName = (instanceName || appDef.id).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     if (!instName) return { success: false, error: 'Invalid instance name' };
 
-    const appDir = path.join(this.appsDir, instName);
+    const appDir = this._resolveAppDir(instName);
     if (this.isInstalled(instName)) {
       return { success: true, path: appDir, alreadyInstalled: true };
     }
@@ -683,6 +706,15 @@ class AppStoreManager {
     return null;
   }
 
+  _composerPhar(config, phpDir) {
+    const composerProfile = this.configManager.getActiveProfile(config, 'composer');
+    if (composerProfile && this.downloadManager.isInstalled('composer', composerProfile.version)) {
+      const managed = path.join(this.downloadManager.getInstallPath('composer', composerProfile.version), 'composer.phar');
+      if (fs.existsSync(managed)) return managed;
+    }
+    return path.join(phpDir, 'composer.phar');
+  }
+
   async _runComposerInstall(appDir) {
     const config = this.configManager.getConfig();
     const phpProfile = this.configManager.getActiveProfile(config, 'php');
@@ -690,7 +722,7 @@ class AppStoreManager {
 
     const phpDir = path.join(this.downloadManager.dataDir, 'php', phpProfile.version);
     const phpExe = path.join(phpDir, process.platform === 'win32' ? 'php.exe' : 'bin/php');
-    const composerPhar = path.join(phpDir, 'composer.phar');
+    const composerPhar = this._composerPhar(config, phpDir);
     if (!fs.existsSync(phpExe) || !fs.existsSync(composerPhar)) return;
 
     return new Promise((resolve) => {
@@ -753,7 +785,8 @@ class AppStoreManager {
   // ===== Remove =====
 
   async remove(instanceName) {
-    const appDir = path.join(this.appsDir, instanceName);
+    let appDir;
+    try { appDir = this._resolveAppDir(instanceName); } catch (err) { return { success: false, error: err.message }; }
     if (!fs.existsSync(appDir)) return { success: false, error: 'App not installed' };
 
     // Drop associated database if one was created
@@ -822,7 +855,8 @@ class AppStoreManager {
   }
 
   getExePath(instanceName) {
-    const appDir = path.join(this.appsDir, instanceName);
+    let appDir;
+    try { appDir = this._resolveAppDir(instanceName); } catch { return null; }
     if (!fs.existsSync(appDir)) return null;
     const files = fs.readdirSync(appDir);
     const isWin = process.platform === 'win32';
@@ -941,8 +975,8 @@ MAIL_PASSWORD=null
     const phpExe = path.join(phpDir, process.platform === 'win32' ? 'php.exe' : 'bin/php');
     if (!fs.existsSync(phpExe)) return { success: false, error: `PHP ${phpProfile.version} is not installed` };
 
-    const composerPhar = path.join(phpDir, 'composer.phar');
-    if (!fs.existsSync(composerPhar)) return { success: false, error: 'Composer is not installed. Install Composer from the PHP panel first.' };
+    const composerPhar = this._composerPhar(config, phpDir);
+    if (!fs.existsSync(composerPhar)) return { success: false, error: 'Composer is not installed. Install it from Version Manager or the PHP panel first.' };
 
     if (fs.existsSync(appDir)) fs.rmSync(appDir, { recursive: true, force: true });
 

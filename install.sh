@@ -18,7 +18,7 @@ if command -v node &>/dev/null; then
     echo "[OK] Node.js found: $NODE_VER"
 else
     echo "[!] Node.js not found."
-    echo "    Please install Node.js 18+ from https://nodejs.org"
+    echo "    Please install Node.js 22.19+ from https://nodejs.org"
     echo "    Or use your package manager:"
     echo ""
     if command -v apt-get &>/dev/null; then
@@ -43,16 +43,17 @@ else
     exit 1
 fi
 
-# Node version check (need 18+)
+# Node version check (need 22.19+)
 NODE_MAJOR=$(node -v | sed 's/v//' | cut -d. -f1)
-if [ "$NODE_MAJOR" -lt 18 ]; then
-    echo "[!] Node.js 18+ required (found v$NODE_MAJOR). Please upgrade."
+NODE_MINOR=$(node -v | sed 's/v//' | cut -d. -f2)
+if [ "$NODE_MAJOR" -lt 22 ] || { [ "$NODE_MAJOR" -eq 22 ] && [ "$NODE_MINOR" -lt 19 ]; }; then
+    echo "[!] Node.js 22.19+ required (found $(node -v)). Please upgrade."
     exit 1
 fi
 
 echo ""
 echo "[1/2] Installing npm dependencies..."
-npm install
+npm ci
 echo "[OK] Dependencies installed."
 
 echo ""

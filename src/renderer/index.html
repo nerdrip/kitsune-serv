@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
   <title>KitsuneServ</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -14,11 +14,12 @@
       <span class="titlebar-logo">🦊</span>
       <span class="titlebar-title">KitsuneServ</span>
       <span class="titlebar-version">v1.0</span>
+      <span class="safe-mode-badge hidden" id="safe-mode-badge">SAFE MODE</span>
     </div>
     <div class="titlebar-controls">
-      <button class="titlebar-btn" id="btn-minimize">─</button>
-      <button class="titlebar-btn" id="btn-maximize">□</button>
-      <button class="titlebar-btn titlebar-btn-close" id="btn-close">✕</button>
+      <button class="titlebar-btn" id="btn-minimize" title="Minimize" aria-label="Minimize">─</button>
+      <button class="titlebar-btn" id="btn-maximize" title="Maximize or restore" aria-label="Maximize or restore">□</button>
+      <button class="titlebar-btn titlebar-btn-close" id="btn-close" title="Hide to tray" aria-label="Hide to tray">✕</button>
     </div>
   </header>
 
@@ -45,6 +46,7 @@
             <button class="nav-btn nav-btn-start" title="Start">▶</button>
             <button class="nav-btn nav-btn-stop hidden" title="Stop">⏹</button>
             <button class="nav-btn nav-btn-restart hidden" title="Restart">🔄</button>
+            <button class="nav-btn nav-btn-open hidden" data-open-service="apache" title="Open site in browser">🌐</button>
             <span class="nav-status-dot"></span>
           </div>
         </li>
@@ -56,6 +58,7 @@
             <button class="nav-btn nav-btn-start" title="Start">▶</button>
             <button class="nav-btn nav-btn-stop hidden" title="Stop">⏹</button>
             <button class="nav-btn nav-btn-restart hidden" title="Restart">🔄</button>
+            <button class="nav-btn nav-btn-open hidden" data-open-service="nginx" title="Open site in browser">🌐</button>
             <span class="nav-status-dot"></span>
           </div>
         </li>
@@ -67,6 +70,7 @@
             <button class="nav-btn nav-btn-start" title="Start">▶</button>
             <button class="nav-btn nav-btn-stop hidden" title="Stop">⏹</button>
             <button class="nav-btn nav-btn-restart hidden" title="Restart">🔄</button>
+            <button class="nav-btn nav-btn-open hidden" data-open-service="caddy" title="Open site in browser">🌐</button>
             <span class="nav-status-dot"></span>
           </div>
         </li>
@@ -157,6 +161,28 @@
             <span class="nav-status-dot"></span>
           </div>
         </li>
+        <li class="nav-item" data-panel="python">
+          <span class="nav-icon">🐍</span>
+          <div class="nav-label-group"><span class="nav-label">Python</span><span class="nav-version" id="nav-version-python"></span></div>
+          <div class="nav-controls" data-service="python">
+            <input type="checkbox" class="nav-group-check" data-service="python" title="Include in Start All">
+            <button class="nav-btn nav-btn-start" title="Start">▶</button>
+            <button class="nav-btn nav-btn-stop hidden" title="Stop">⏹</button>
+            <button class="nav-btn nav-btn-restart hidden" title="Restart">🔄</button>
+            <span class="nav-status-dot"></span>
+          </div>
+        </li>
+        <li class="nav-item" data-panel="deno">
+          <span class="nav-icon">🦕</span>
+          <div class="nav-label-group"><span class="nav-label">Deno</span><span class="nav-version" id="nav-version-deno"></span></div>
+          <div class="nav-controls" data-service="deno">
+            <input type="checkbox" class="nav-group-check" data-service="deno" title="Include in Start All">
+            <button class="nav-btn nav-btn-start" title="Start">▶</button>
+            <button class="nav-btn nav-btn-stop hidden" title="Stop">⏹</button>
+            <button class="nav-btn nav-btn-restart hidden" title="Restart">🔄</button>
+            <span class="nav-status-dot"></span>
+          </div>
+        </li>
         <li class="sidebar-group-label" data-group="cache"><span class="group-label-text">Cache</span><span class="group-toggle">▾</span></li>
         <li class="nav-item" data-panel="redis">
           <span class="nav-icon">🔴</span>
@@ -192,30 +218,25 @@
             <span class="nav-status-dot"></span>
           </div>
         </li>
-        <li class="nav-item" data-panel="python">
-          <span class="nav-icon">🐍</span>
-          <div class="nav-label-group"><span class="nav-label">Python</span><span class="nav-version" id="nav-version-python"></span></div>
-          <div class="nav-controls" data-service="python">
-            <input type="checkbox" class="nav-group-check" data-service="python" title="Include in Start All">
-            <button class="nav-btn nav-btn-start" title="Start">▶</button>
-            <button class="nav-btn nav-btn-stop hidden" title="Stop">⏹</button>
-            <button class="nav-btn nav-btn-restart hidden" title="Restart">🔄</button>
-            <span class="nav-status-dot"></span>
-          </div>
-        </li>
-        <li class="nav-item" data-panel="deno">
-          <span class="nav-icon">🦕</span>
-          <div class="nav-label-group"><span class="nav-label">Deno</span><span class="nav-version" id="nav-version-deno"></span></div>
-          <div class="nav-controls" data-service="deno">
-            <input type="checkbox" class="nav-group-check" data-service="deno" title="Include in Start All">
-            <button class="nav-btn nav-btn-start" title="Start">▶</button>
-            <button class="nav-btn nav-btn-stop hidden" title="Stop">⏹</button>
-            <button class="nav-btn nav-btn-restart hidden" title="Restart">🔄</button>
-            <span class="nav-status-dot"></span>
-          </div>
-        </li>
-
         <li class="sidebar-divider"></li>
+        <li class="nav-item" data-panel="workspaces">
+          <span class="nav-icon">🚀</span><span class="nav-label">Projects</span>
+        </li>
+        <li class="nav-item" data-panel="test-lab">
+          <span class="nav-icon">🧪</span><span class="nav-label">Test Lab</span>
+        </li>
+        <li class="nav-item" data-panel="hub">
+          <span class="nav-icon">🌐</span><span class="nav-label">Hub &amp; Servers</span><span class="hub-nav-dot" id="hub-nav-dot"></span>
+        </li>
+        <li class="nav-item" data-panel="monitoring">
+          <span class="nav-icon">📈</span><span class="nav-label">Monitoring</span>
+        </li>
+        <li class="nav-item" data-panel="database-manager">
+          <span class="nav-icon">🗃️</span><span class="nav-label">Database Manager</span>
+        </li>
+        <li class="nav-item" data-panel="versions">
+          <span class="nav-icon">🧰</span><span class="nav-label">Version Manager</span>
+        </li>
         <li class="nav-item" data-panel="appstore">
           <span class="nav-icon">📦</span><span class="nav-label">App Store</span>
         </li>
@@ -236,21 +257,37 @@
 
       <!-- DASHBOARD -->
       <section class="panel active" id="panel-dashboard">
-        <div class="panel-header"><h1>Dashboard</h1><p class="panel-subtitle">Overview of all services</p></div>
+        <div class="panel-header"><h1>Dashboard</h1><p class="panel-subtitle">Overview of services and projects</p></div>
         <div class="dashboard-toolbar">
-          <input type="text" class="dashboard-search" id="dash-search" placeholder="🔍 Filter services..." autocomplete="off" spellcheck="false">
+          <input type="text" class="dashboard-search" id="dash-search" placeholder="🔍 Filter services and projects..." autocomplete="off" spellcheck="false">
           <button class="btn btn-toolbar" id="dash-start-all" title="Start All Services">▶ Start All</button>
           <button class="btn btn-toolbar" id="dash-stop-all" title="Stop All Services">⏹ Stop All</button>
           <button class="btn btn-toolbar" id="dash-health-all" title="Run Health Check on All Services">🩺 Health Check All</button>
-          <button class="btn btn-toolbar" id="dash-download-all" title="Download all missing service binaries">⬇ Download Missing</button>
+          <button class="btn btn-toolbar" id="dash-download-all" title="Install and manage service versions">📦 Version Manager</button>
         </div>
         <div class="dashboard-grid" id="dashboard-grid"></div>
+        <section class="dashboard-projects" aria-labelledby="dashboard-projects-title">
+          <div class="dashboard-section-head">
+            <div>
+              <h2 id="dashboard-projects-title">Projects</h2>
+              <p>Local development environments and their current state</p>
+            </div>
+            <div class="dashboard-section-actions">
+              <span class="dashboard-projects-summary" id="dash-projects-summary">Loading…</span>
+              <button class="btn btn-toolbar" id="dash-projects-manage" type="button">Manage projects</button>
+            </div>
+          </div>
+          <div class="dashboard-project-grid" id="dashboard-project-grid" aria-live="polite">
+            <div class="dashboard-project-empty">Loading projects…</div>
+          </div>
+        </section>
       </section>
 
       <!-- APACHE -->
       <section class="panel" id="panel-apache">
         <div class="panel-header">
           <div class="panel-header-left"><h1>Apache HTTP Server</h1><p class="panel-subtitle">Configure Apache web server</p></div>
+          <div class="panel-header-right"><button class="btn btn-open-web" data-open-service="apache" title="Open Apache site in browser" disabled>🌐 Open site</button></div>
         </div>
         <div class="profile-strip" id="profile-strip-apache"></div>
         <div class="progress-bar-container hidden" id="progress-apache">
@@ -278,14 +315,14 @@
             <div class="form-grid">
               <div class="form-group"><label>HTTP Port</label><input type="number" id="apache-port" data-pkey="port" min="1" max="65535"></div>
               <div class="form-group"><label>HTTPS Port</label><input type="number" id="apache-sslPort" data-pkey="sslPort" min="1" max="65535"></div>
-              <div class="form-group"><label>Listen Host</label><input type="text" id="apache-host" data-pkey="host" placeholder="0.0.0.0"></div>
+              <div class="form-group"><label>Listen Host</label><input type="text" id="apache-host" data-pkey="host" placeholder="127.0.0.1"></div>
               <div class="form-group"><label>Server Name</label><input type="text" id="apache-serverName" data-pkey="serverName"></div>
               <div class="form-group form-group-toggle"><label>Enable SSL</label><label class="toggle-switch small"><input type="checkbox" id="apache-sslEnabled" data-pkey="sslEnabled"><span class="toggle-slider"></span></label></div>
             </div>
           </div>
           <div class="config-section">
             <h3 class="section-title">Document Root</h3>
-            <div class="form-grid"><div class="form-group full-width"><label>Document Root Path</label><div class="input-with-btn"><input type="text" id="apache-documentRoot" data-pkey="documentRoot"><button class="btn btn-folder" id="btn-open-apache-docroot" title="Open Document Root">📂</button></div></div></div>
+            <div class="form-grid"><div class="form-group full-width"><label>Document Root Path</label><div class="input-with-btn"><input type="text" id="apache-documentRoot" data-pkey="documentRoot" readonly><button class="btn btn-folder" id="btn-open-apache-docroot" title="Choose Document Root">📁 Choose…</button></div><small class="form-help">Choosing a folder saves this profile immediately and restarts Apache when it is running.</small></div></div>
           </div>
           <div class="config-section">
             <h3 class="section-title">Directory Index</h3>
@@ -356,6 +393,7 @@
       <section class="panel" id="panel-nginx">
         <div class="panel-header">
           <div class="panel-header-left"><h1>Nginx</h1><p class="panel-subtitle">Configure Nginx reverse proxy &amp; web server</p></div>
+          <div class="panel-header-right"><button class="btn btn-open-web" data-open-service="nginx" title="Open Nginx site in browser" disabled>🌐 Open site</button></div>
         </div>
         <div class="profile-strip" id="profile-strip-nginx"></div>
         <div class="progress-bar-container hidden" id="progress-nginx">
@@ -383,14 +421,14 @@
             <div class="form-grid">
               <div class="form-group"><label>HTTP Port</label><input type="number" id="nginx-port" data-pkey="port" min="1" max="65535"></div>
               <div class="form-group"><label>HTTPS Port</label><input type="number" id="nginx-sslPort" data-pkey="sslPort" min="1" max="65535"></div>
-              <div class="form-group"><label>Listen Host</label><input type="text" id="nginx-host" data-pkey="host" placeholder="0.0.0.0"></div>
+              <div class="form-group"><label>Listen Host</label><input type="text" id="nginx-host" data-pkey="host" placeholder="127.0.0.1"></div>
               <div class="form-group"><label>Server Name</label><input type="text" id="nginx-serverName" data-pkey="serverName"></div>
               <div class="form-group form-group-toggle"><label>Enable SSL</label><label class="toggle-switch small"><input type="checkbox" id="nginx-sslEnabled" data-pkey="sslEnabled"><span class="toggle-slider"></span></label></div>
             </div>
           </div>
           <div class="config-section">
             <h3 class="section-title">Document Root</h3>
-            <div class="form-grid"><div class="form-group full-width"><label>Document Root Path</label><div class="input-with-btn"><input type="text" id="nginx-documentRoot" data-pkey="documentRoot"><button class="btn btn-folder" id="btn-open-nginx-docroot" title="Open Document Root">📂</button></div></div></div>
+            <div class="form-grid"><div class="form-group full-width"><label>Document Root Path</label><div class="input-with-btn"><input type="text" id="nginx-documentRoot" data-pkey="documentRoot" readonly><button class="btn btn-folder" id="btn-open-nginx-docroot" title="Choose Document Root">📁 Choose…</button></div><small class="form-help">Choosing a folder saves this profile immediately and restarts Nginx when it is running.</small></div></div>
           </div>
         </div>
         </div>
@@ -492,6 +530,7 @@
       <section class="panel" id="panel-caddy">
         <div class="panel-header">
           <div class="panel-header-left"><h1>Caddy</h1><p class="panel-subtitle">Configure Caddy web server with automatic HTTPS</p></div>
+          <div class="panel-header-right"><button class="btn btn-open-web" data-open-service="caddy" title="Open Caddy site in browser" disabled>🌐 Open site</button></div>
         </div>
         <div class="profile-strip" id="profile-strip-caddy"></div>
         <div class="progress-bar-container hidden" id="progress-caddy"><div class="progress-label"><span id="progress-label-caddy">Downloading...</span></div><div class="progress-track"><div class="progress-fill" id="progress-fill-caddy"></div></div></div>
@@ -516,7 +555,7 @@
               <div class="form-group"><label>HTTPS Port</label><input type="number" id="caddy-port" data-pkey="port" min="1" max="65535"></div>
               <div class="form-group"><label>HTTP Port</label><input type="number" id="caddy-httpPort" data-pkey="httpPort" min="1" max="65535"></div>
               <div class="form-group"><label>Server Name</label><input type="text" id="caddy-serverName" data-pkey="serverName"></div>
-              <div class="form-group"><label>Document Root</label><div class="input-with-btn"><input type="text" id="caddy-documentRoot" data-pkey="documentRoot"><button class="btn btn-folder" id="btn-open-caddy-docroot" title="Open Document Root">📂</button></div></div>
+              <div class="form-group"><label>Document Root</label><div class="input-with-btn"><input type="text" id="caddy-documentRoot" data-pkey="documentRoot" readonly><button class="btn btn-folder" id="btn-open-caddy-docroot" title="Choose Document Root">📁 Choose…</button></div><small class="form-help">Choosing a folder saves this profile immediately and restarts Caddy when it is running.</small></div>
             </div>
           </div>
           <div class="config-section">
@@ -1437,11 +1476,423 @@
         </div>
       </section>
 
+      <!-- PROJECT WORKSPACES -->
+      <section class="panel" id="panel-workspaces">
+        <div class="panel-header">
+          <div class="panel-header-left"><h1>🚀 Projects</h1><p class="panel-subtitle">Complete local environments with pinned runtimes, dependencies and one-click orchestration</p></div>
+          <div class="panel-header-right">
+            <button class="btn btn-toolbar" id="workspace-import" title="Import a single project manifest">⇧ Project</button>
+            <button class="btn btn-toolbar" id="workspace-env-export" title="Export every project and environment setting">⇩ Environment</button>
+            <button class="btn btn-toolbar" id="workspace-env-import" title="Restore projects and settings from an environment file">⇧ Environment</button>
+            <button class="btn btn-toolbar" id="workspace-snapshot" title="Create an integrity-checked local environment snapshot">◉ Snapshot</button>
+            <button class="btn btn-toolbar" id="workspace-domain-sync">🌐 Sync domains</button>
+            <button class="btn btn-toolbar" id="workspace-doctor">🩺 Run Doctor</button>
+            <button class="btn btn-toolbar" id="workspace-detect">⌕ Detect folder</button>
+            <button class="btn btn-add" id="workspace-new">＋ New project</button>
+          </div>
+        </div>
+
+        <div class="workspace-summary" id="workspace-summary">
+          <div><strong id="workspace-count">0</strong><span>projects</span></div>
+          <div><strong id="workspace-running-count">0</strong><span>running</span></div>
+          <div><strong id="workspace-issue-count">—</strong><span>doctor issues</span></div>
+          <div><strong id="workspace-busy-count">0</strong><span>operations</span></div>
+        </div>
+
+        <div class="workspace-editor hidden" id="workspace-editor">
+          <div class="workspace-editor-head"><div><h3 id="workspace-editor-title">Create project</h3><p>Choose a stack and KitsuneServ will manage its required services in the correct order.</p></div><button class="btn btn-small" id="workspace-editor-close">✕</button></div>
+          <input type="hidden" id="workspace-id">
+          <input type="hidden" id="workspace-create-directory" value="true">
+          <input type="hidden" id="workspace-source">
+          <div class="workspace-detection hidden" id="workspace-detection"></div>
+          <div class="form-grid workspace-form-grid">
+            <div class="form-group"><label>Name</label><input id="workspace-name" type="text" maxlength="100" placeholder="My application"></div>
+            <div class="form-group"><label>Stack template</label><select id="workspace-template"></select></div>
+            <div class="form-group form-span-2"><label>Project directory</label><div class="path-picker-row"><input id="workspace-root" type="text" readonly placeholder="Automatic workspace directory"><button class="btn btn-folder" id="workspace-pick-root" type="button">📂 Choose</button></div></div>
+            <div class="form-group"><label>Local domain</label><input id="workspace-domain" type="text" placeholder="my-app.test"></div>
+            <div class="form-group"><label>Public directory</label><input id="workspace-public-dir" type="text" value="." placeholder="public"></div>
+            <div class="form-group form-group-toggle"><label>Local HTTPS</label><label class="toggle-switch small"><input type="checkbox" id="workspace-https"><span class="toggle-slider"></span></label></div>
+            <div class="form-group form-group-toggle"><label>Open after start</label><label class="toggle-switch small"><input type="checkbox" id="workspace-auto-open" checked><span class="toggle-slider"></span></label></div>
+            <div class="form-group"><label>Tags</label><input id="workspace-tags" type="text" maxlength="400" placeholder="api, customer-a, experimental"></div>
+            <div class="form-group"><label>Card color</label><input id="workspace-color" type="color" value="#e94560"></div>
+          </div>
+          <div class="workspace-services"><label>Managed services</label><div id="workspace-service-choices" class="workspace-service-choices"></div></div>
+          <div class="workspace-template-description" id="workspace-template-description"></div>
+          <details class="workspace-advanced" id="workspace-advanced">
+            <summary>Advanced environment, commands and automation</summary>
+            <div class="form-grid workspace-form-grid">
+              <div class="form-group"><label>Active environment</label><input id="workspace-environment" type="text" value="development" maxlength="30" placeholder="development"></div>
+              <div class="form-group"><label>Profile description</label><input id="workspace-environment-description" type="text" maxlength="300" placeholder="Local development"></div>
+              <div class="form-group"><label>Memory limit (MB, 0 = unlimited)</label><input id="workspace-memory" type="number" min="0" max="131072" value="0"></div>
+              <div class="form-group"><label>Idle stop (minutes, 0 = disabled)</label><input id="workspace-idle" type="number" min="0" max="10080" value="0"></div>
+              <div class="form-group form-span-2"><label>Base environment</label><textarea class="code-textarea workspace-code-field" id="workspace-env" rows="4" placeholder="APP_DEBUG=true&#10;PORT=3000"></textarea><span class="form-help">Public KEY=value pairs shared by every environment. Put passwords and tokens in Encrypted secrets.</span></div>
+              <div class="form-group form-span-2"><label>Active profile environment</label><textarea class="code-textarea workspace-code-field" id="workspace-profile-env" rows="4" placeholder="NODE_ENV=development"></textarea></div>
+              <div class="form-group form-span-2"><label>Encrypted secrets</label><textarea class="code-textarea workspace-code-field" id="workspace-secrets" rows="3" placeholder="DATABASE_PASSWORD=new value&#10;OLD_TOKEN=&lt;remove&gt;"></textarea><span class="form-help" id="workspace-secret-keys">No stored secrets. Values are encrypted and are never displayed again.</span></div>
+              <div class="form-group form-span-2"><label>Named commands</label><textarea class="code-textarea workspace-code-field" id="workspace-commands" rows="5" placeholder="install=npm install&#10;dev=npm run dev&#10;test=npm test"></textarea></div>
+              <div class="form-group"><label>Before start hook</label><input id="workspace-hook-before-start" type="text" placeholder="install"></div>
+              <div class="form-group"><label>After start hook</label><input id="workspace-hook-after-start" type="text" placeholder="migrate"></div>
+              <div class="form-group"><label>Before stop hook</label><input id="workspace-hook-before-stop" type="text" placeholder="flush"></div>
+              <div class="form-group"><label>After stop hook</label><input id="workspace-hook-after-stop" type="text" placeholder="cleanup"></div>
+            </div>
+          </details>
+          <div class="workspace-editor-actions"><button class="btn" id="workspace-editor-cancel">Cancel</button><button class="btn btn-primary" id="workspace-editor-save">Create project</button></div>
+        </div>
+
+        <div class="workspace-toolbar">
+          <input type="text" class="dashboard-search" id="workspace-search" placeholder="🔍 Search projects, domains and services..." autocomplete="off">
+          <select id="workspace-state-filter"><option value="all">All states</option><option value="running">Running</option><option value="stopped">Stopped</option><option value="interrupted">Interrupted</option><option value="failed">Failed</option></select>
+          <button class="btn btn-toolbar" id="workspace-refresh">↻ Refresh</button>
+        </div>
+        <div class="workspace-grid" id="workspace-grid"><div class="workspace-empty">No projects yet. Create the first environment from a stack template.</div></div>
+
+        <div class="workspace-lower-grid">
+          <section class="workspace-tool-card">
+            <div class="workspace-tool-head"><div><h3>Activity Center</h3><p>Downloads, installs, project orchestration and maintenance tasks</p></div><button class="btn btn-small" id="activity-clear">Clear completed</button></div>
+            <div class="activity-list" id="activity-list"><div class="workspace-empty compact">No operations yet.</div></div>
+          </section>
+          <section class="workspace-tool-card">
+            <div class="workspace-tool-head"><div><h3>Kitsune Doctor</h3><p>Compatibility, PATH, directories and port conflicts</p></div><div class="doctor-head-actions"><button class="btn btn-small" id="doctor-repair-all" disabled>Repair safe issues</button><button class="btn btn-small btn-primary" id="doctor-run">Run scan</button></div></div>
+            <div class="doctor-results" id="doctor-results"><div class="workspace-empty compact">Run a scan to verify the environment.</div></div>
+          </section>
+          <section class="workspace-tool-card">
+            <div class="workspace-tool-head"><div><h3>Developer Toolchains</h3><p>Package managers and build tools visible in the KitsuneServ environment</p></div><button class="btn btn-small" id="toolchain-refresh">↻ Scan</button></div>
+            <div class="toolchain-list" id="toolchain-list"><div class="workspace-empty compact">Scan to detect developer tools.</div></div>
+          </section>
+          <section class="workspace-tool-card">
+            <div class="workspace-tool-head"><div><h3>Project Tasks</h3><p>Named commands from each project's declarative configuration</p></div><button class="btn btn-small" id="command-clear">Clear finished</button></div>
+            <div class="command-task-list" id="command-task-list"><div class="workspace-empty compact">No project commands started.</div></div>
+          </section>
+          <section class="workspace-tool-card">
+            <div class="workspace-tool-head"><div><h3>Environment Snapshots</h3><p>Integrity-checked configuration and project restore points without secrets</p></div><button class="btn btn-small" id="snapshot-refresh">↻</button></div>
+            <div class="snapshot-list" id="snapshot-list"><div class="workspace-empty compact">No snapshots yet.</div></div>
+          </section>
+          <section class="workspace-tool-card">
+            <div class="workspace-tool-head"><div><h3>Declarative Plugins</h3><p>Integrity-checked project templates and tool definitions without executable plugin code</p></div><button class="btn btn-small btn-primary" id="plugin-install">＋ Install folder</button></div>
+            <div class="plugin-list" id="plugin-list"><div class="workspace-empty compact">No plugins installed.</div></div>
+          </section>
+          <section class="workspace-tool-card">
+            <div class="workspace-tool-head"><div><h3>System Integration</h3><p>WSL, package managers and Linux systemd user service</p></div><button class="btn btn-small" id="platform-refresh">↻</button></div>
+            <div class="platform-inventory" id="platform-inventory"><div class="workspace-empty compact">Detect platform features.</div></div>
+          </section>
+          <section class="workspace-tool-card">
+            <div class="workspace-tool-head"><div><h3>Secure Project Sharing</h3><p>Temporary Cloudflare or ngrok URLs; the tunnel is stopped together with KitsuneServ</p></div><button class="btn btn-small" id="tunnel-refresh">↻</button></div>
+            <div class="tunnel-providers" id="tunnel-providers"></div>
+            <div class="tunnel-list" id="tunnel-list"><div class="workspace-empty compact">No active tunnels.</div></div>
+          </section>
+        </div>
+
+        <section class="workspace-tool-card port-manager-card">
+          <div class="workspace-tool-head"><div><h3>Port Manager</h3><p>Every configured endpoint and potential conflict in one place</p></div><div class="port-find"><input id="port-find-start" type="number" min="1024" max="65535" value="3000"><button class="btn btn-small" id="port-find">Find free port</button></div></div>
+          <div class="port-table-wrap"><table class="port-table"><thead><tr><th>Service</th><th>Purpose</th><th>Port</th><th>Service state</th><th>Availability</th></tr></thead><tbody id="port-table-body"><tr><td colspan="5">Open this panel to inspect ports.</td></tr></tbody></table></div>
+        </section>
+      </section>
+
+      <!-- TEST LAB -->
+      <section class="panel" id="panel-test-lab">
+        <div class="panel-header">
+          <div class="panel-header-left"><h1>🧪 Visual Test Lab</h1><p class="panel-subtitle">Buduj środowiska testowe albo prawdziwe endpointy REST z połączonych bloków</p></div>
+          <div class="panel-header-right"><button class="btn btn-toolbar" id="lab-refresh">↻ Odśwież</button><button class="btn btn-add" id="lab-new">＋ Otwórz kreator</button></div>
+        </div>
+        <nav class="lab-mode-switch"><button class="active" type="button" data-lab-mode="environment">▦ Środowiska</button><button type="button" data-lab-mode="api-flow">⤳ API Flow Builder <span>NOWE</span></button></nav>
+        <div id="lab-environment-mode">
+        <div class="lab-template-gallery" id="lab-template-gallery"><div class="workspace-empty compact">Ładowanie gotowych szablonów…</div></div>
+        <div class="lab-editor hidden" id="lab-editor">
+          <div class="lab-studio-head"><div><span class="lab-studio-kicker">WIZUALNY BUILDER</span><h3 id="lab-editor-title">Nowe środowisko testowe</h3><p>Wybierz szablon, klikaj bloki aby je konfigurować, potem użyj „Utwórz i uruchom”.</p></div><button class="btn btn-small" id="lab-editor-close">✕ Zamknij</button></div>
+          <input type="hidden" id="lab-id">
+          <div class="lab-studio-meta">
+            <div class="form-group"><label>Nazwa Labu</label><input id="lab-name" type="text" maxlength="100" placeholder="np. Endpoint Builder — WordPress"></div>
+            <div class="form-group"><label>Projekt KitsuneServ</label><div class="lab-inline-control"><select id="lab-project"><option value="">Bez powiązania</option></select><button class="btn btn-small" id="lab-use-project" type="button">Użyj projektu</button></div></div>
+            <div class="lab-step-indicator"><span class="active">1 Szablon</span><span class="active">2 Bloki</span><span>3 Test planu</span><span>4 Start</span></div>
+          </div>
+          <div class="lab-builder-shell">
+            <aside class="lab-builder-palette">
+              <div class="lab-builder-section"><strong>Gotowe układy</strong><span>Kliknięcie przebuduje diagram</span><div id="lab-recipe-palette" class="lab-palette-list"></div></div>
+              <div class="lab-builder-section" id="lab-component-palette"><strong>Dodaj komponent</strong><span>Bazy i cache uruchomią się przed API</span><button type="button" data-lab-service="postgresql">＋ PostgreSQL</button><button type="button" data-lab-service="mysql">＋ MySQL</button><button type="button" data-lab-service="mongodb">＋ MongoDB</button><button type="button" data-lab-service="redis">＋ Redis</button><button type="button" id="lab-palette-plugin">＋ Plugin WordPress</button></div>
+            </aside>
+            <div class="lab-builder-workspace">
+              <div class="lab-builder-tabs"><button type="button" class="active" data-lab-view="flow">Diagram</button><button type="button" data-lab-view="plan">Plan i kontrola</button><span></span><button type="button" id="lab-fit">◎ Dopasuj</button><button type="button" id="lab-auto-layout">↗ Ułóż</button><button type="button" id="lab-inspector-toggle">☷ Inspektor</button></div>
+              <div class="lab-flow-canvas" id="lab-flow-canvas">
+                <svg class="lab-flow-svg" id="lab-flow-svg"><defs><marker id="lab-flow-arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z"></path></marker></defs></svg>
+                <div class="lab-flow-nodes" id="lab-flow-nodes"></div>
+                <div class="lab-flow-hint">Kliknij blok, aby zmienić jego ustawienia. Przeciągnij, aby zmienić układ.</div>
+              </div>
+              <div class="lab-plan-panel hidden" id="lab-plan-panel"><div class="workspace-empty compact">Kliknij „Sprawdź plan”, aby zobaczyć wszystkie operacje przed uruchomieniem.</div></div>
+            </div>
+            <aside class="lab-node-inspector">
+              <div class="lab-inspector-head"><div><span>USTAWIENIA BLOKU</span><strong id="lab-inspector-title">Wybierz blok</strong><small id="lab-inspector-help">Kliknij element diagramu.</small></div><button type="button" id="lab-inspector-close" title="Zwiń inspektor">×</button></div>
+              <div class="lab-inspector-panel" data-lab-inspector="source">
+                <div class="form-group"><label>Katalog źródłowy</label><div class="path-picker-row"><input id="lab-root" type="text" readonly placeholder="Wybierz projekt"><button class="btn btn-folder" id="lab-pick-root" type="button">📂</button></div></div>
+                <button class="btn btn-small btn-primary" id="lab-detect-root" type="button">✨ Wykryj technologię i ustaw wszystko</button><div class="lab-detection-result" id="lab-detection-result">KitsuneServ rozpozna package.json, Composer, Python, Go, Compose lub plugin WordPress.</div>
+              </div>
+              <div class="lab-inspector-panel hidden" data-lab-inspector="runtime">
+                <div class="form-group"><label>Silnik / przepis</label><select id="lab-recipe"></select></div>
+                <details class="lab-advanced"><summary>Zaawansowane — wygenerowane polecenia</summary><div id="lab-sidecar-fields"><div class="form-group"><label>Przygotowanie</label><input id="lab-setup-command" type="text" maxlength="4000"></div><div class="form-group"><label>Uruchomienie</label><input id="lab-command" type="text" maxlength="4000"></div><div class="form-group"><label>Zmienne środowiskowe</label><textarea class="code-textarea" id="lab-env" rows="5" placeholder="NODE_ENV=development"></textarea></div></div></details>
+              </div>
+              <div class="lab-inspector-panel hidden" data-lab-inspector="health">
+                <div class="form-group"><label>Port API</label><input id="lab-port" type="number" min="1" max="65535" value="3001"></div><div class="form-group"><label>Adres testowy</label><input id="lab-health-path" type="text" value="/" placeholder="/health"></div><p class="form-help">Po starcie Lab automatycznie sprawdzi odpowiedź HTTP.</p>
+              </div>
+              <div class="lab-inspector-panel hidden" data-lab-inspector="service"><div id="lab-selected-service"></div><button class="btn btn-small btn-danger" id="lab-remove-service" type="button">Usuń komponent z diagramu</button></div>
+              <div class="lab-inspector-panel hidden" data-lab-inspector="wordpress" id="lab-wordpress-fields">
+                <div class="form-group"><label>Serwer WWW</label><select id="lab-wp-web"><option value="apache">Apache</option><option value="nginx">Nginx</option><option value="caddy">Caddy</option></select></div><div class="form-group"><label>Baza</label><select id="lab-wp-database"><option value="mysql">MySQL</option><option value="mariadb">MariaDB</option></select></div><div class="form-group"><label>Tytuł strony</label><input id="lab-wp-title" type="text" placeholder="Plugin Test Site"></div><div class="form-group"><label>Administrator</label><input id="lab-wp-user" type="text" value="admin" autocomplete="username"></div><div class="form-group"><label>E-mail</label><input id="lab-wp-email" type="email" value="admin@example.test"></div><div class="form-group"><label>Hasło</label><input id="lab-wp-password" type="password" autocomplete="new-password" placeholder="Puste = wygeneruj bezpiecznie"></div>
+              </div>
+              <div class="lab-inspector-panel hidden" data-lab-inspector="plugin">
+                <textarea class="hidden" id="lab-plugin-paths"></textarea><div class="lab-plugin-list" id="lab-plugin-list"></div><button class="btn btn-small btn-primary" id="lab-add-plugin" type="button">＋ Wybierz katalog pluginu</button><p class="form-help">Plugin zostanie podłączony na żywo. Zmiany w źródłach będą widoczne bez ponownej instalacji.</p>
+              </div>
+            </aside>
+          </div>
+          <div class="lab-studio-footer"><div class="lab-plan-status" id="lab-plan-status"><span>○</span><div><strong>Plan nie został sprawdzony</strong><small>Najpierw wybierz szablon i źródła.</small></div></div><button class="btn" id="lab-editor-cancel">Anuluj</button><button class="btn" id="lab-preview">✓ Sprawdź plan</button><button class="btn" id="lab-editor-save">Zapisz blueprint</button><button class="btn btn-primary" id="lab-editor-launch">▶ Utwórz, uruchom i otwórz</button></div>
+        </div>
+        <div class="lab-grid" id="lab-grid"><div class="workspace-empty">Wybierz gotowy szablon powyżej albo otwórz wizualny kreator.</div></div>
+        </div>
+        <div class="api-flow-studio hidden" id="api-flow-mode">
+          <header class="api-flow-projectbar">
+            <div class="api-flow-project-select"><label>Projekt API</label><select id="api-flow-project-select"><option value="">Nowy projekt API</option></select></div>
+            <div class="form-group"><label>Nazwa</label><input id="api-flow-name" type="text" maxlength="100" placeholder="np. Nerd REST API"></div>
+            <div class="form-group api-flow-listen"><label>Host / port</label><div><select id="api-flow-host"><option value="127.0.0.1">tylko lokalnie</option><option value="0.0.0.0">sieć LAN</option></select><input id="api-flow-port" type="number" min="1024" max="65535" value="9393"></div></div>
+            <div class="form-group"><label>Ścieżka bazowa</label><input id="api-flow-base-path" type="text" value="/api" placeholder="/api"></div>
+            <label class="api-flow-cors"><input id="api-flow-cors" type="checkbox" checked> CORS</label>
+            <div class="api-flow-project-actions"><button class="btn btn-small" id="api-flow-new">＋ Nowy</button><button class="btn btn-small" id="api-flow-save">💾 Zapisz</button><button class="btn btn-small btn-primary" id="api-flow-toggle">▶ Uruchom API</button><button class="btn btn-small btn-danger" id="api-flow-delete" title="Usuń projekt API">🗑</button></div>
+          </header>
+          <section class="api-flow-runtime" id="api-flow-runtime" data-state="stopped">
+            <div class="api-flow-runtime-state"><i id="api-flow-runtime-led"></i><div><small>RUNTIME</small><strong id="api-flow-runtime-label">API zatrzymane</strong></div></div>
+            <div class="api-flow-runtime-url"><code id="api-flow-runtime-url">Zapisz i uruchom projekt, aby otrzymać aktywny adres.</code><button type="button" id="api-flow-copy-url" title="Kopiuj URL">⧉</button><button type="button" id="api-flow-open-url" title="Otwórz API w przeglądarce">↗</button></div>
+            <div class="api-flow-runtime-metrics"><span><small>UPTIME</small><b id="api-flow-runtime-uptime">—</b></span><span><small>ŻĄDANIA</small><b id="api-flow-runtime-requests">0</b></span><span><small>BŁĘDY</small><b id="api-flow-runtime-errors">0</b></span><span><small>OSTATNIE</small><b id="api-flow-runtime-last">—</b></span></div>
+            <div class="api-flow-runtime-message" id="api-flow-runtime-message">Serwer nie nasłuchuje. Tester może uruchomić go automatycznie.</div>
+          </section>
+          <div class="api-flow-shell">
+            <aside class="api-flow-left-rail">
+              <nav class="api-flow-rail-tabs"><button class="active" type="button" data-api-flow-rail="endpoints">Trasy</button><button type="button" data-api-flow-rail="blocks">＋ Bloki</button></nav>
+            <section class="api-flow-endpoints" data-api-flow-rail-pane="endpoints">
+              <div class="api-flow-side-head"><div><strong>ENDPOINTY</strong><small>Wiele tras w jednym API</small></div><button type="button" id="api-flow-add-endpoint" title="Dodaj endpoint">＋</button></div>
+              <div id="api-flow-endpoint-list" class="api-flow-endpoint-list"></div>
+              <div class="api-flow-route-editor">
+                <label>Wybrana trasa</label><div><select id="api-flow-method"><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>OPTIONS</option></select><input id="api-flow-path" type="text" value="/hello" placeholder="/users/:id"></div>
+                <input id="api-flow-endpoint-name" type="text" placeholder="Nazwa endpointu">
+                <label class="api-flow-enabled"><input id="api-flow-endpoint-enabled" type="checkbox" checked> Endpoint aktywny</label>
+                <button class="btn btn-small btn-danger" id="api-flow-remove-endpoint">Usuń endpoint</button>
+              </div>
+            </section>
+            <section class="api-flow-palette hidden" data-api-flow-rail-pane="blocks">
+              <div class="api-flow-side-head"><div><strong>BLOKI</strong><small>Kliknij, aby dodać</small></div><input id="api-flow-block-search" type="search" placeholder="Szukaj…"></div>
+              <div id="api-flow-block-palette" class="api-flow-block-palette"></div>
+            </section>
+            </aside>
+            <main class="api-flow-workspace">
+              <nav class="api-flow-tabs"><button class="active" type="button" data-api-flow-view="editor">Edytor</button><button type="button" data-api-flow-view="test">Klient REST</button><button type="button" data-api-flow-view="logs">Logi</button><button type="button" id="api-flow-open-blocks">＋ Blok</button><span id="api-flow-dirty-state">Gotowy</span><button type="button" id="api-flow-fit">◎ Dopasuj</button><button type="button" id="api-flow-auto-layout">↗ Ułóż</button><button type="button" id="api-flow-inspector-toggle">☷ Inspektor</button><button type="button" id="api-flow-validate">✓ Sprawdź</button></nav>
+              <section class="api-flow-canvas" id="api-flow-canvas" data-api-flow-pane="editor">
+                <svg id="api-flow-svg" class="api-flow-svg"><defs><marker id="api-flow-arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z"></path></marker></defs></svg>
+                <div id="api-flow-nodes" class="api-flow-nodes"></div>
+                <div class="api-flow-canvas-help" id="api-flow-canvas-help">Kliknij kropkę wyjściową, a potem wejście innego bloku. Przeciągaj bloki za nagłówek.</div>
+              </section>
+              <section class="api-flow-tester hidden" data-api-flow-pane="test">
+                <div class="api-flow-rest-client-head"><div><span class="api-flow-live-badge" id="api-flow-client-mode">AUTO LIVE</span><strong>Wbudowany klient REST</strong><small>Zapisuje zmiany, uruchamia API i wysyła prawdziwe żądanie HTTP.</small></div><label><input id="api-flow-test-autostart" type="checkbox" checked> Automatycznie uruchom API</label></div>
+                <div class="api-flow-test-request"><div class="api-flow-test-url"><strong id="api-flow-test-method">GET</strong><input id="api-flow-test-url" type="text" readonly value="http://127.0.0.1:9393/api/hello"><button class="btn btn-small" id="api-flow-copy-test" title="Kopiuj URL">⧉</button><button class="btn btn-small btn-primary" id="api-flow-send-test">▶ Wyślij live</button></div><div class="api-flow-test-columns"><div><label for="api-flow-test-query">Query JSON</label><textarea id="api-flow-test-query" class="code-textarea" rows="5" spellcheck="false">{}</textarea><label for="api-flow-test-headers">Nagłówki JSON</label><textarea id="api-flow-test-headers" class="code-textarea" rows="5" spellcheck="false">{}</textarea></div><div><label for="api-flow-test-params">Parametry ścieżki JSON</label><textarea id="api-flow-test-params" class="code-textarea" rows="5" spellcheck="false">{}</textarea><label for="api-flow-test-body">Body JSON / tekst</label><textarea id="api-flow-test-body" class="code-textarea" rows="5" spellcheck="false">{}</textarea></div></div></div>
+                <div class="api-flow-test-response"><div><strong>ODPOWIEDŹ LIVE I TRACE BLOKÓW</strong><span id="api-flow-test-status">Jeszcze nie wysłano</span></div><pre id="api-flow-test-result">Kliknij „Wyślij live”. Klient w razie potrzeby uruchomi serwer i wykona prawdziwe żądanie do endpointu.</pre><div id="api-flow-test-trace" class="api-flow-trace"></div></div>
+              </section>
+              <section class="api-flow-logs hidden" data-api-flow-pane="logs"><div class="api-flow-log-head"><div><strong>ŻĄDANIA</strong><small>Tester i ruch prawdziwego serwera</small></div><button class="btn btn-small" id="api-flow-refresh-logs">↻</button><button class="btn btn-small btn-danger" id="api-flow-clear-logs">Wyczyść</button></div><div id="api-flow-log-list" class="api-flow-log-list"></div></section>
+            </main>
+            <aside class="api-flow-inspector">
+              <div class="api-flow-side-head"><div><strong>INSPEKTOR BLOKU</strong><small id="api-flow-inspector-help">Wybierz blok na diagramie</small></div><button type="button" id="api-flow-inspector-close" title="Zwiń inspektor">×</button></div>
+              <div id="api-flow-inspector" class="api-flow-inspector-body"><div class="workspace-empty compact">Tutaj pojawią się ustawienia, połączenia i ścieżka błędu wybranego bloku.</div></div>
+            </aside>
+          </div>
+          <footer class="api-flow-footer"><div id="api-flow-validation"><span>○</span><div><strong>Graf nie został sprawdzony</strong><small>Połącz Input z blokami i zakończ przepływ Outputem.</small></div></div><div class="api-flow-legend"><span><i class="green"></i> wejście</span><span><i class="cyan"></i> dane</span><span><i class="orange"></i> sieć</span><span><i class="yellow"></i> sterowanie</span><span><i class="red"></i> bezpieczeństwo</span></div></footer>
+        </div>
+      </section>
+
+      <!-- KITSUNE HUB -->
+      <section class="panel" id="panel-hub">
+        <div class="panel-header hub-panel-header">
+          <div class="panel-header-left"><div class="hub-title-line"><h1>🌐 Kitsune Hub</h1><span class="hub-state-pill" id="hub-state-pill">OFFLINE</span></div><p class="panel-subtitle">Jedno centrum dla kont, serwerów Plesk, projektów, Test Labów, API Flow i wdrożeń</p></div>
+          <div class="panel-header-right"><button class="btn btn-toolbar" id="hub-reconcile">◇ Sprawdź węzły</button><button class="btn btn-primary" id="hub-sync-local">↥ Synchronizuj lokalne</button></div>
+        </div>
+        <div class="hub-shell">
+          <div class="hub-hero">
+            <div class="hub-hero-copy"><span class="hub-eyebrow">CONTROL PLANE</span><h2 id="hub-domain-display">Skonfiguruj domenę panelu</h2><p id="hub-domain-hint">Hub utworzy płaskie adresy typu project-sklep.panel.example.com i bezpiecznie skieruje je do właściwych usług.</p><div class="hub-live-line"><i id="hub-live-dot"></i><span id="hub-live-text">Hub jest wyłączony</span></div></div>
+            <div class="hub-hero-actions"><label class="hub-switch"><input type="checkbox" id="hub-enabled"><span></span>Hub aktywny</label><button class="btn btn-primary" data-hub-tab-target="settings">Skonfiguruj domenę</button></div>
+          </div>
+          <div class="hub-stats" id="hub-stats">
+            <div><span>Węzły online</span><strong id="hub-stat-nodes">0 / 0</strong><small>desktop, serwer, Plesk</small></div><div><span>Trasy</span><strong id="hub-stat-routes">0</strong><small>subdomeny gatewaya</small></div><div><span>Obiekty sync</span><strong id="hub-stat-objects">0</strong><small>projekty, laby, API</small></div><div><span>Wdrożenia</span><strong id="hub-stat-deployments">0</strong><small>oczekujące operacje</small></div>
+          </div>
+          <div class="hub-tabs" role="tablist">
+            <button class="active" data-hub-tab="overview">Przegląd</button><button data-hub-tab="nodes">Węzły</button><button data-hub-tab="sync">Synchronizacja</button><button data-hub-tab="routes">Domeny i trasy</button><button data-hub-tab="users">Użytkownicy</button><button data-hub-tab="plesk">Plesk</button><button data-hub-tab="settings">Ustawienia</button>
+          </div>
+          <div class="hub-view active" data-hub-view="overview">
+            <div class="hub-grid hub-grid-2"><article class="hub-card"><div class="hub-card-head"><div><span>AKTYWNOŚĆ WĘZŁÓW</span><h3>Połączone serwery</h3></div><button class="btn btn-small" data-hub-tab-target="nodes">Zarządzaj</button></div><div id="hub-overview-nodes" class="hub-list"></div></article><article class="hub-card"><div class="hub-card-head"><div><span>OSTATNIE ZMIANY</span><h3>Repozytorium synchronizacji</h3></div><button class="btn btn-small" data-hub-tab-target="sync">Otwórz</button></div><div id="hub-overview-sync" class="hub-list"></div></article></div>
+            <article class="hub-card"><div class="hub-card-head"><div><span>WDROŻENIA</span><h3>Kolejka i historia publikacji</h3></div></div><div id="hub-deployments" class="hub-table"></div></article>
+          </div>
+          <div class="hub-view" data-hub-view="nodes"><div class="hub-view-head"><div><h2>Węzły i urządzenia</h2><p>Paruj desktop, agenta serwerowego albo rozszerzenie Plesk kodem ważnym przez 10 minut.</p></div><button class="btn btn-primary" id="hub-pair-node">＋ Sparuj urządzenie</button></div><div id="hub-node-list" class="hub-card-grid"></div></div>
+          <div class="hub-view" data-hub-view="sync"><div class="hub-view-head"><div><h2>Wersjonowana synchronizacja</h2><p>Sekrety są pomijane. Każda zmiana ma rewizję, konflikt, historię i rollback.</p></div><div class="hub-filter"><select id="hub-sync-filter"><option value="">Wszystkie typy</option><option value="project">Projekty</option><option value="lab">Test Laby</option><option value="api-flow">API Flow</option></select><button class="btn btn-primary" id="hub-sync-refresh">↥ Publikuj lokalne</button></div></div><div id="hub-sync-list" class="hub-card-grid"></div></div>
+          <div class="hub-view" data-hub-view="routes"><div class="hub-view-head"><div><h2>Domeny i reverse proxy</h2><p>Pojedynczy wildcard DNS i TLS obsługują wszystkie zasoby bez zagnieżdżonych subdomen.</p></div><button class="btn btn-primary" id="hub-route-add">＋ Dodaj trasę</button></div><div id="hub-route-form" class="hub-inline-form hidden"><input id="hub-route-name" placeholder="Nazwa, np. Sklep"><select id="hub-route-kind"><option value="project">Projekt</option><option value="lab">Test Lab</option><option value="api-flow">API Flow</option><option value="preview">Preview</option></select><input id="hub-route-target" placeholder="http://127.0.0.1:8080"><select id="hub-route-auth"><option value="session">Sesja Hub</option><option value="token">Bearer token</option><option value="public">Publiczna</option></select><button class="btn btn-primary" id="hub-route-save">Zapisz</button></div><div id="hub-route-list" class="hub-card-grid"></div></div>
+          <div class="hub-view" data-hub-view="users"><div class="hub-view-head"><div><h2>Konta i uprawnienia</h2><p>Role globalne i dostęp zakresowy do zespołu, projektu, laba, API Flow lub węzła.</p></div><button class="btn btn-primary" id="hub-user-add">＋ Nowe konto</button></div><div id="hub-user-form" class="hub-inline-form hidden"><input id="hub-user-name" placeholder="login"><input id="hub-user-display" placeholder="Nazwa wyświetlana"><input id="hub-user-email" type="email" placeholder="email"><input id="hub-user-password" type="password" placeholder="hasło min. 12 znaków"><select id="hub-user-role"><option value="developer">Developer</option><option value="operator">Operator</option><option value="auditor">Auditor</option><option value="viewer">Viewer</option><option value="admin">Admin</option></select><button class="btn btn-primary" id="hub-user-save">Utwórz</button></div><div id="hub-user-list" class="hub-card-grid"></div></div>
+          <div class="hub-view" data-hub-view="plesk"><div class="hub-view-head"><div><h2>Rozszerzenia Plesk</h2><p>Podpisane SSO, mapowanie ról, provisioning domen i agent KitsuneServ bez przechowywania hasła Pleska.</p></div><button class="btn btn-primary" id="hub-plesk-add">＋ Dodaj Plesk</button></div><div id="hub-plesk-form" class="hub-inline-form hidden"><input id="hub-plesk-url" placeholder="https://plesk.example.com"><input id="hub-plesk-name" placeholder="Nazwa serwera"><select id="hub-plesk-auth"><option value="hybrid">Plesk + niezależne konta</option><option value="plesk">Tylko Plesk</option><option value="independent">Niezależne</option></select><input id="hub-plesk-secret" type="password" placeholder="Wspólny sekret (opcjonalny)"><button class="btn btn-primary" id="hub-plesk-save">Połącz</button></div><div id="hub-plesk-list" class="hub-card-grid"></div><article class="hub-card hub-package-note"><span>PAKIET INSTALACYJNY</span><h3>KitsuneServ Bridge for Plesk</h3><p>Gotowy ZIP rozszerzenia znajduje się obok paczek wydania. Instalujesz go w Extensions → My Extensions → Upload Extension.</p></article></div>
+          <div class="hub-view" data-hub-view="settings"><div class="hub-grid hub-grid-2"><article class="hub-card"><div class="hub-card-head"><div><span>DOMENA PANELU</span><h3>DNS, TLS i uwierzytelnianie</h3></div></div><div class="hub-settings-form"><label>Domena bazowa<input id="hub-panel-domain" placeholder="panel.example.com"></label><label>Tryb kont<select id="hub-auth-mode"><option value="hybrid">Hybrydowy: lokalne + Plesk</option><option value="independent">Niezależne konta</option><option value="plesk">Konta Plesk</option></select></label><label>TLS<select id="hub-tls-mode"><option value="managed">Zarządzany przez Kitsune/Plesk</option><option value="external">Zewnętrzny reverse proxy</option><option value="disabled">Wyłączony (lokalnie)</option></select></label><label class="hub-check"><input type="checkbox" id="hub-gateway-enabled"> Włącz gateway HTTP/WebSocket</label><button class="btn btn-primary" id="hub-settings-save">Zapisz konfigurację</button></div></article><article class="hub-card"><div class="hub-card-head"><div><span>POLITYKI</span><h3>Bezpieczne wdrożenia</h3></div></div><div class="hub-settings-form"><label class="hub-check"><input type="checkbox" id="hub-policy-auth"> Wymagaj logowania dla API</label><label class="hub-check"><input type="checkbox" id="hub-policy-backup"> Backup przed wdrożeniem</label><label class="hub-check"><input type="checkbox" id="hub-policy-approval"> Wymagaj zatwierdzenia wdrożeń</label><label>Maks. labów na użytkownika<input type="number" id="hub-policy-labs" min="0" max="1000"></label><label>Maks. API Flow na użytkownika<input type="number" id="hub-policy-flows" min="0" max="5000"></label></div></article></div><article class="hub-card" style="margin-top:12px"><div class="hub-card-head"><div><span>ZDALNY KITSUNE HUB</span><h3>Logowanie desktopu do serwera i synchronizacja</h3></div><button class="btn btn-small" id="hub-remote-add">＋ Dodaj serwer</button></div><div id="hub-remote-form" class="hub-inline-form hidden"><input id="hub-remote-url" placeholder="https://panel.example.com"><input id="hub-remote-name" placeholder="Nazwa"><input id="hub-remote-token" type="password" placeholder="Token urządzenia / API"><input id="hub-remote-fingerprint" placeholder="SHA-256 certyfikatu (opcjonalny)"><button class="btn btn-primary" id="hub-remote-save">Połącz</button></div><div id="hub-remote-list" class="hub-card-grid"></div></article></div>
+        </div>
+      </section>
+
+      <!-- MONITORING AND AUTOMATION -->
+      <section class="panel" id="panel-monitoring">
+        <div class="panel-header">
+          <div class="panel-header-left"><h1>📈 Monitoring & Automation</h1><p class="panel-subtitle">Service metrics, crash history, threshold alerts, Prometheus export and scheduled actions</p></div>
+          <div class="panel-header-right"><button class="btn btn-toolbar" id="monitor-copy-prometheus">Copy Prometheus</button><button class="btn btn-toolbar" id="monitor-refresh">↻ Collect now</button></div>
+        </div>
+        <div class="workspace-summary">
+          <div><strong id="monitor-running">0</strong><span>running services</span></div>
+          <div><strong id="monitor-memory">0 MB</strong><span>managed memory</span></div>
+          <div><strong id="monitor-alert-count">0</strong><span>active alerts</span></div>
+          <div><strong id="monitor-sample-time">—</strong><span>last sample</span></div>
+        </div>
+        <div class="monitor-service-grid" id="monitor-service-grid"><div class="workspace-empty">Collecting service metrics…</div></div>
+        <div class="monitor-layout">
+          <section class="workspace-tool-card">
+            <div class="workspace-tool-head"><div><h3>Alerts and crash events</h3><p>Acknowledge incidents after reviewing them</p></div></div>
+            <div id="monitor-alerts" class="monitor-list"><div class="workspace-empty compact">No active alerts.</div></div>
+            <div id="monitor-events" class="monitor-list"></div>
+          </section>
+          <section class="workspace-tool-card">
+            <div class="workspace-tool-head"><div><h3>Threshold rules</h3><p>Memory, CPU and uptime conditions</p></div></div>
+            <div class="monitor-inline-form">
+              <select id="monitor-rule-service"></select>
+              <select id="monitor-rule-metric"><option value="memoryMB">Memory MB</option><option value="cpuPercent">CPU %</option><option value="uptimeSeconds">Uptime seconds</option></select>
+              <select id="monitor-rule-operator"><option value=">">above</option><option value="<">below</option></select>
+              <input id="monitor-rule-threshold" type="number" min="0" value="1024">
+              <select id="monitor-rule-severity"><option value="warning">Warning</option><option value="error">Error</option><option value="info">Info</option></select>
+              <button class="btn btn-small" id="monitor-rule-add">＋ Add</button>
+            </div>
+            <div id="monitor-rules" class="monitor-list"><div class="workspace-empty compact">No custom rules.</div></div>
+          </section>
+        </div>
+        <section class="workspace-tool-card monitor-automation-card">
+          <div class="workspace-tool-head"><div><h3>Automations</h3><p>Repeat safe, named operations without arbitrary background scripts</p></div><button class="btn btn-small" id="automation-run-due">Run due now</button></div>
+          <div class="monitor-inline-form automation-form">
+            <input id="automation-name" type="text" maxlength="120" placeholder="Morning API start">
+            <select id="automation-action"><option value="service-start">Start service</option><option value="service-stop">Stop service</option><option value="service-restart">Restart service</option><option value="project-start">Start project</option><option value="project-stop">Stop project</option><option value="project-command">Run named project command</option><option value="lab-start">Start lab</option><option value="lab-stop">Stop lab</option><option value="lab-provision">Provision lab</option><option value="backup-run-due">Run due backups</option><option value="doctor">Run Doctor</option></select>
+            <input id="automation-target" type="text" placeholder="service / project / lab id">
+            <input id="automation-command" type="text" placeholder="named command" class="hidden">
+            <label>Every <input id="automation-interval" type="number" min="1" max="525600" value="60"> min</label>
+            <button class="btn btn-small btn-primary" id="automation-add">＋ Schedule</button>
+          </div>
+          <div id="automation-list" class="automation-list"><div class="workspace-empty compact">No automations.</div></div>
+        </section>
+        <div class="monitor-layout">
+          <section class="workspace-tool-card">
+            <div class="workspace-tool-head"><div><h3>AI Operations Assistant</h3><p>Opt-in analysis through the configured OpenAI-compatible endpoint; context is redacted before sending</p></div></div>
+            <textarea class="code-textarea" id="monitor-ai-prompt" rows="5" placeholder="Explain the active alerts and suggest safe diagnostic checks…"></textarea>
+            <div class="workspace-editor-actions"><button class="btn btn-small btn-primary" id="monitor-ai-run">Analyze sanitized context</button></div>
+            <pre class="lab-output hidden" id="monitor-ai-result"></pre>
+          </section>
+          <section class="workspace-tool-card">
+            <div class="workspace-tool-head"><div><h3>Publishing readiness</h3><p>Nothing is uploaded automatically; credentials and formal certificates can be added later</p></div></div>
+            <div class="monitor-list" id="monitor-publishing-readiness"><div class="workspace-empty compact">Loading publishing adapters…</div></div>
+          </section>
+        </div>
+      </section>
+
+      <!-- DATABASE MANAGER -->
+      <section class="panel" id="panel-database-manager">
+        <div class="panel-header">
+          <div class="panel-header-left"><h1>🗃️ Database Manager</h1><p class="panel-subtitle">Connect to KitsuneServ databases or any local/remote PostgreSQL, MySQL, MariaDB and MongoDB instance</p></div>
+          <div class="panel-header-right"><button class="btn btn-toolbar" id="dbm-refresh-connections">↻ Detect connections</button></div>
+        </div>
+        <div class="database-manager-layout">
+          <aside class="dbm-sidebar">
+            <div class="dbm-navigator-head"><strong>Database Navigator</strong><button class="dbm-icon-btn" id="dbm-new-connection" title="New connection">＋</button></div>
+            <input class="dbm-navigator-search" id="dbm-connection-filter" type="search" placeholder="Filter connections…" autocomplete="off">
+            <div class="dbm-connection-list" id="dbm-connection-list"><div class="dbm-empty">Detecting databases…</div></div>
+            <section class="dbm-object-explorer hidden" id="dbm-object-explorer">
+              <div class="dbm-navigator-head"><strong>Objects</strong><button class="dbm-icon-btn" id="dbm-refresh-objects" title="Refresh objects">↻</button></div>
+              <input class="dbm-navigator-search" id="dbm-object-filter" type="search" placeholder="Filter schemas and objects…" autocomplete="off">
+              <div class="dbm-object-tree" id="dbm-object-tree"><div class="dbm-empty">Select a database.</div></div>
+            </section>
+          </aside>
+          <div class="dbm-main">
+            <details class="dbm-connection-editor" id="dbm-connection-editor" open>
+              <summary><span>Connection settings</span><span class="dbm-status" id="dbm-status">Not connected</span></summary>
+              <div class="dbm-connection-editor-body">
+                <div class="form-grid">
+                  <div class="form-group"><label>Name</label><input id="dbm-name" type="text" placeholder="Local development database"></div>
+                  <div class="form-group"><label>Engine</label><select id="dbm-type"><option value="postgresql">PostgreSQL</option><option value="mysql">MySQL</option><option value="mariadb">MariaDB</option><option value="mongodb">MongoDB</option></select></div>
+                  <div class="form-group"><label>Host</label><input id="dbm-host" type="text" value="127.0.0.1"></div>
+                  <div class="form-group"><label>Port</label><input id="dbm-port" type="number" min="1" max="65535" value="5432"></div>
+                  <div class="form-group"><label>Username</label><input id="dbm-username" type="text" autocomplete="username"></div>
+                  <div class="form-group"><label>Password</label><input id="dbm-password" type="password" autocomplete="current-password" placeholder="Leave empty to keep the saved password"></div>
+                  <div class="form-group form-group-toggle"><label>Use TLS</label><label class="toggle-switch small"><input type="checkbox" id="dbm-ssl"><span class="toggle-slider"></span></label></div>
+                  <div class="form-group form-group-toggle"><label>Verify TLS certificate</label><label class="toggle-switch small"><input type="checkbox" id="dbm-reject-unauthorized" checked><span class="toggle-slider"></span></label></div>
+                </div>
+                <p class="form-help">Passwords stay in the encrypted system-backed secret vault and are never written to regular configuration or logs.</p>
+                <div class="dbm-editor-actions">
+                  <button class="btn btn-small" id="dbm-save">💾 Save</button>
+                  <button class="btn btn-small btn-danger hidden" id="dbm-remove">🗑 Remove</button>
+                  <span class="installed-version-spacer"></span>
+                  <button class="btn btn-small" id="dbm-test">Test connection</button>
+                  <button class="btn btn-small btn-primary" id="dbm-connect">Connect</button>
+                </div>
+              </div>
+            </details>
+            <div class="dbm-workspace hidden" id="dbm-workspace">
+              <div class="dbm-toolbar">
+                <span class="dbm-connection-breadcrumb" id="dbm-breadcrumb">Disconnected</span>
+                <label for="dbm-database">Database</label><select id="dbm-database"></select>
+                <button class="dbm-icon-btn" id="dbm-refresh-databases" title="Reconnect and refresh">↻</button>
+                <input id="dbm-new-database" type="text" placeholder="New database name">
+                <button class="btn btn-small" id="dbm-create-database">＋ Create</button>
+                <button class="btn btn-small btn-danger" id="dbm-drop-database">🗑 Drop</button>
+              </div>
+              <nav class="dbm-workbench-tabs" role="tablist">
+                <button class="active" data-dbm-pane="sql">SQL Editor</button>
+                <button data-dbm-pane="data">Data</button>
+                <button data-dbm-pane="properties">Properties</button>
+                <button data-dbm-pane="backups">Backups</button>
+              </nav>
+              <section class="dbm-workbench-pane active" id="dbm-pane-sql" data-pane="sql">
+                <div class="dbm-sql-tabs" id="dbm-sql-tabs"></div>
+                <div class="dbm-query-toolbar">
+                  <button class="btn btn-small btn-primary" id="dbm-run-query">▶ Execute <kbd>Ctrl+Enter</kbd></button>
+                  <button class="btn btn-small hidden" id="dbm-cancel-query">■ Cancel</button>
+                  <button class="btn btn-small" id="dbm-explain-query">Plan / Explain</button>
+                  <button class="btn btn-small" id="dbm-format-query">Format SQL</button>
+                  <button class="btn btn-small" id="dbm-query-history">History</button>
+                  <button class="btn btn-small" id="dbm-saved-queries">Saved</button>
+                  <button class="btn btn-small" id="dbm-save-query">☆ Save</button>
+                  <span class="installed-version-spacer"></span>
+                  <label class="dbm-option"><input id="dbm-read-only" type="checkbox" checked> Read-only</label>
+                  <label class="dbm-option"><input id="dbm-transaction" type="checkbox"> Transaction</label>
+                  <label for="dbm-query-timeout">Timeout</label><select id="dbm-query-timeout"><option value="5000">5 s</option><option value="30000" selected>30 s</option><option value="60000">60 s</option><option value="300000">5 min</option></select>
+                  <label for="dbm-query-limit">Result limit</label><select id="dbm-query-limit"><option>100</option><option>250</option><option>500</option><option>1000</option></select>
+                </div>
+                <textarea id="dbm-query" class="dbm-query" spellcheck="false" placeholder="SELECT * FROM your_table LIMIT 100;"></textarea>
+                <div class="dbm-query-status"><span id="dbm-query-message">Ready</span><span id="dbm-query-time"></span></div>
+                <div class="dbm-result-toolbar">
+                  <input id="dbm-result-filter" type="search" placeholder="Filter result rows…" autocomplete="off">
+                  <button class="btn btn-small" id="dbm-copy-result">Copy TSV</button>
+                  <button class="btn btn-small" id="dbm-export-result">Export CSV</button>
+                </div>
+                <div class="dbm-result" id="dbm-result"><div class="dbm-empty">Execute a query or double-click an object in the navigator.</div></div>
+              </section>
+              <section class="dbm-workbench-pane" id="dbm-pane-data" data-pane="data">
+                <div class="dbm-object-toolbar"><strong id="dbm-data-title">No object selected</strong><span class="installed-version-spacer"></span><label>Page size</label><select id="dbm-page-size"><option>100</option><option>250</option><option>500</option></select><button class="btn btn-small" id="dbm-data-prev">← Previous</button><span id="dbm-data-page">Rows 0–0</span><button class="btn btn-small" id="dbm-data-next">Next →</button><button class="btn btn-small" id="dbm-data-refresh">↻</button></div>
+                <div class="dbm-result" id="dbm-data-result"><div class="dbm-empty">Choose a table, view or collection in Database Navigator.</div></div>
+              </section>
+              <section class="dbm-workbench-pane" id="dbm-pane-properties" data-pane="properties">
+                <div class="dbm-properties" id="dbm-properties"><div class="dbm-empty">Choose an object to inspect columns, keys, indexes and DDL.</div></div>
+              </section>
+              <section class="dbm-workbench-pane" id="dbm-pane-backups" data-pane="backups">
+                <div class="dbm-query-head"><div><strong>Backups and restore</strong><p class="form-help">Checksummed native dumps stored in the KitsuneServ data directory</p></div><div class="dbm-backup-actions"><button class="btn btn-small" id="dbm-refresh-backups">↻</button><button class="btn btn-small btn-primary" id="dbm-create-backup">＋ Create backup</button></div></div>
+                <div class="dbm-backup-schedule"><label>Automatic every</label><input id="dbm-backup-interval" type="number" min="1" max="8760" value="24"><span>hours, keep</span><input id="dbm-backup-keep" type="number" min="1" max="1000" value="10"><button class="btn btn-small" id="dbm-save-backup-schedule">Save schedule</button></div>
+                <div class="dbm-backup-list" id="dbm-backup-list"><div class="dbm-empty">Create a backup or refresh the list.</div></div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- TERMINAL -->
       <section class="panel" id="panel-terminal">
         <div class="panel-header">
           <div class="panel-header-left"><h1>Terminal</h1><p class="panel-subtitle">Built-in shell with all server binaries in PATH</p></div>
           <div class="panel-header-right">
+            <button class="btn btn-toolbar" id="btn-terminal-clear" title="Clear active terminal">⌫ Clear</button>
+            <button class="btn btn-toolbar hidden" id="btn-terminal-bottom" title="Scroll to latest output">↓ Latest</button>
             <button class="btn btn-add" id="btn-new-terminal">+ New Terminal</button>
           </div>
         </div>
@@ -1452,6 +1903,26 @@
             <div class="terminal-empty-text">Click "+ New Terminal" to open a shell</div>
             <div class="terminal-empty-hint">All active server binaries (php, node, mysql, etc.) are automatically available in PATH</div>
           </div>
+        </div>
+      </section>
+
+      <!-- VERSION MANAGER -->
+      <section class="panel" id="panel-versions">
+        <div class="panel-header"><h1>🧰 Version Manager</h1><p class="panel-subtitle">Install, remove and switch every supported service version in one place</p></div>
+        <div class="panel-body">
+          <div class="version-manager-toolbar">
+            <input type="text" class="dashboard-search" id="version-manager-search" placeholder="🔍 Search services or versions..." autocomplete="off" spellcheck="false">
+            <select id="version-manager-category" aria-label="Filter version catalog by category"><option value="all">All categories</option></select>
+            <select id="version-manager-state" aria-label="Filter by install state"><option value="all">All states</option><option value="installed">Has installed versions</option><option value="missing">Nothing installed</option></select>
+            <button class="btn btn-toolbar" id="version-manager-cleanup" title="Remove every installed version not referenced by a profile">🧹 Remove unused</button>
+            <button class="btn btn-toolbar" id="version-manager-cache-export" title="Export verified installers for offline use">⇩ Offline cache</button>
+            <button class="btn btn-toolbar" id="version-manager-cache-import" title="Import an offline download cache">⇧ Import cache</button>
+            <button class="btn btn-toolbar" id="version-manager-cache-clear" title="Remove cached installer archives">⌫ Clear cache</button>
+            <button class="btn btn-toolbar" id="version-manager-refresh" title="Fetch the official Node.js, Python, PHP and Nginx catalogs">↻ Sync official catalogs</button>
+          </div>
+          <p class="section-desc version-manager-note">Recommended versions are selected by default. Preview and historical releases remain available for compatibility; use them only when your project requires them.</p>
+          <div class="version-manager-summary" id="version-manager-summary"></div>
+          <div class="version-manager-grid" id="version-manager-grid"></div>
         </div>
       </section>
 
@@ -1511,18 +1982,39 @@
             <div class="form-grid">
               <div class="form-group form-group-toggle"><label>Auto Start on Boot</label><label class="toggle-switch small"><input type="checkbox" id="general-autoStartOnBoot" data-section="general" data-key="autoStartOnBoot"><span class="toggle-slider"></span></label></div>
               <div class="form-group form-group-toggle"><label>Start Minimized</label><label class="toggle-switch small"><input type="checkbox" id="general-startMinimized" data-section="general" data-key="startMinimized"><span class="toggle-slider"></span></label></div>
-              <div class="form-group form-group-toggle"><label>Check for Updates</label><label class="toggle-switch small"><input type="checkbox" id="general-checkUpdates" data-section="general" data-key="checkUpdates"><span class="toggle-slider"></span></label></div>
               <div class="form-group"><label>Theme</label><select id="general-theme" data-section="general" data-key="theme"><option value="dark">Dark</option><option value="light">Light</option></select></div>
-              <div class="form-group"><label>Language</label><select id="general-language" data-section="general" data-key="language"><option value="en">English</option><option value="pl">Polski</option></select></div>
               <div class="form-group"><label>Log Level</label><select id="general-logLevel" data-section="general" data-key="logLevel"><option value="debug">Debug</option><option value="info">Info</option><option value="warning">Warning</option><option value="error">Error</option></select></div>
               <div class="form-group"><label>Stop Timeout (ms)</label><input type="number" id="general-stopTimeout" data-section="general" data-key="stopTimeout" min="1000" max="60000" step="1000"></div>
             </div>
           </div>
           <div class="config-section">
+            <h3 class="section-title">Shared Web Root</h3>
+            <p class="section-desc">Optionally force Apache, Nginx and Caddy to serve the same directory. Running web servers are restarted automatically and the change is rolled back if any server cannot start.</p>
+            <div class="form-grid">
+              <div class="form-group form-group-toggle full-width"><label>Force one global WWW directory</label><label class="toggle-switch small"><input type="checkbox" id="general-forceGlobalDocumentRoot"><span class="toggle-slider"></span></label></div>
+              <div class="form-group full-width"><label>Global Document Root</label><div class="input-with-btn"><input type="text" id="general-globalDocumentRoot" readonly><button class="btn btn-folder" id="btn-global-docroot" title="Choose global document root">📁 Choose…</button></div><small class="form-help" id="global-docroot-help">The directory is saved immediately. Enable the switch to enforce it for every web server.</small></div>
+            </div>
+          </div>
+          <div class="config-section">
             <h3 class="section-title">System PATH Management</h3>
-            <p class="section-desc">Add active server binaries to your Windows user PATH so you can use php, node, mysql, etc. from any terminal.</p>
+            <p class="section-desc" id="path-platform-description">Choose which active service versions are available from every terminal. A selected entry is replaced automatically whenever you switch its active version.</p>
+            <p class="section-desc">Application data: <code id="app-data-root">loading…</code></p>
             <div class="path-management">
-              <button class="btn btn-path-add" id="btn-path-toggle">📁 Add to System PATH</button>
+              <div class="path-toolbar">
+                <button class="btn btn-path-add" id="btn-path-add-all">＋ Add all</button>
+                <button class="btn btn-path-remove" id="btn-path-remove-all">− Remove all</button>
+                <span class="path-summary" id="path-summary">Loading PATH status…</span>
+              </div>
+              <div class="path-service-list" id="path-service-list"></div>
+              <p class="path-hint" id="path-platform-hint">Changes are applied immediately to your user PATH. The built-in terminal always includes every installed active runtime.</p>
+              <div class="python-launcher-status hidden" id="python-launcher-status">
+                <div><strong>🐍 KitsuneServ Python launcher</strong><span id="python-launcher-detail"></span><small>Installing Python from Version Manager installs the official manager automatically. Use <code>py</code>, <code>py --list</code> or e.g. <code>py -3.14 --version</code>; it follows the active version.</small></div>
+                <div class="python-manager-actions"><button class="btn btn-small hidden" id="btn-install-python-manager">Install official Python Manager</button></div>
+              </div>
+              <div class="python-alias-warning hidden" id="python-alias-warning">
+                <div><strong>⚠ Windows Store overrides <code>python</code></strong><span>The <code>py</code> launcher already works. To restore <code>python</code>, open: Apps → Advanced app settings → App execution aliases (Aplikacje → Zaawansowane ustawienia aplikacji → Aliasy wykonywania aplikacji), turn off <code>python.exe</code> and <code>python3.exe</code>, then reopen the terminal.</span></div>
+                <div class="python-alias-actions"><button class="btn btn-small" id="btn-python-alias-settings">Open Apps settings + copy search</button><button class="btn btn-small" id="btn-python-alias-recheck">Recheck</button></div>
+              </div>
               <div class="path-entries" id="path-entries"></div>
             </div>
           </div>
@@ -1532,6 +2024,30 @@
               <div class="form-group"><button class="btn btn-save" id="btn-config-export">📤 Export Config</button></div>
               <div class="form-group"><button class="btn btn-add" id="btn-config-import">📥 Import Config</button></div>
             </div>
+          </div>
+          <div class="config-section" id="update-section">
+            <div class="workspace-tool-head"><div><h3 class="section-title">Signed Updates</h3><p class="section-desc">Release manifests require a trusted Ed25519 signature and packages require the signed SHA-256 checksum.</p></div><button class="btn btn-small btn-primary" id="update-check">Check now</button></div>
+            <div class="update-status" id="update-status"><div class="workspace-empty compact">Loading update channel…</div></div>
+            <div class="update-actions"><button class="btn btn-small hidden" id="update-download">Download verified update</button><button class="btn btn-small btn-primary hidden" id="update-install">Install and restart</button></div>
+            <p class="form-help">Administrators configure the release channel with <code>KITSUNE_UPDATE_MANIFEST_URL</code> and <code>KITSUNE_UPDATE_PUBLIC_KEY</code>. Server mode downloads a verified package but leaves installation to the administrator.</p>
+          </div>
+          <div class="config-section" id="integration-section">
+            <div class="workspace-tool-head"><div><h3 class="section-title">External Integrations</h3><p class="section-desc">Credentials stay encrypted locally. A provider is marked verified only after its real endpoint or local tool passes a connection test.</p></div><button class="btn btn-small" id="integration-refresh">↻ Refresh</button></div>
+            <div class="integration-toolbar"><input type="text" class="dashboard-search" id="integration-search" placeholder="Search integrations…" autocomplete="off"><select id="integration-category"><option value="all">All categories</option></select></div>
+            <div class="integration-grid" id="integration-grid"><div class="workspace-empty compact">Loading integrations…</div></div>
+          </div>
+          <div class="config-section">
+            <div class="workspace-tool-head"><div><h3 class="section-title">Support Report</h3><p class="section-desc">Collect diagnostics, installed versions, recent log tails and project metadata while redacting credentials and personal filesystem paths.</p></div><button class="btn btn-small" id="support-generate">Generate report</button></div>
+            <div class="form-help" id="support-report-status">The report is saved with a SHA-256 checksum and also downloaded through the current interface.</div>
+          </div>
+          <div class="config-section" id="security-section">
+            <div class="workspace-tool-head"><div><h3 class="section-title">Remote Access Security</h3><p class="section-desc">HTTPS, TOTP, bearer tokens, IP allowlist and active web sessions</p></div><button class="btn btn-small" id="security-refresh">↻ Refresh</button></div>
+            <div class="security-status-grid" id="security-status-grid"><div class="workspace-empty compact">Loading security status…</div></div>
+            <div class="security-session-head"><strong>Active sessions</strong><button class="btn btn-small btn-danger" id="security-revoke-others">Revoke all other sessions</button></div>
+            <div class="security-session-list" id="security-session-list"><div class="workspace-empty compact">No web sessions in desktop mode.</div></div>
+            <div class="security-audit-head"><div><strong>Integrity-protected audit log</strong><span id="security-audit-status">Not verified yet</span></div><button class="btn btn-small" id="security-audit-verify">Verify chain</button></div>
+            <div class="security-audit-list" id="security-audit-list"><div class="workspace-empty compact">No audited operations yet.</div></div>
+            <p class="form-help">Server controls are configured with <code>KITSUNE_TLS_CERT</code>/<code>KITSUNE_TLS_KEY</code>, <code>KITSUNE_TOTP_SECRET</code>, <code>KITSUNE_API_TOKEN</code> and comma-separated <code>KITSUNE_ALLOWED_IPS</code>. Secrets are never returned to the browser.</p>
           </div>
         </div>
       </section>
@@ -1598,6 +2114,19 @@
           </div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- External Integration Editor -->
+  <div class="modal-overlay hidden" id="integration-modal">
+    <div class="modal integration-modal">
+      <div class="modal-header"><div><h3 id="integration-modal-title">Configure integration</h3><p class="integration-modal-description" id="integration-modal-description"></p></div><button class="modal-close" id="integration-modal-close">✕</button></div>
+      <div class="modal-body">
+        <input type="hidden" id="integration-modal-id">
+        <div class="integration-enabled-row"><div><strong>Enable integration</strong><span>Enabling does not send data or publish anything automatically.</span></div><label class="toggle-switch small"><input type="checkbox" id="integration-modal-enabled"><span class="toggle-slider"></span></label></div>
+        <div class="integration-fields" id="integration-modal-fields"></div>
+      </div>
+      <div class="modal-footer"><button class="btn btn-danger" id="integration-modal-remove">Remove configuration</button><span class="modal-footer-spacer"></span><button class="btn btn-discard" id="integration-modal-cancel">Cancel</button><button class="btn btn-save" id="integration-modal-save">Save integration</button></div>
     </div>
   </div>
 

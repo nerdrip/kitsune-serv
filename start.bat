@@ -1,4 +1,5 @@
 @echo off
 title KitsuneServ - Starting...
 cd /d "%~dp0"
-call npx electron .
+call npm start
+if errorlevel 1 exit /b %errorlevel%

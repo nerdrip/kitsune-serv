@@ -1,8 +1,12 @@
 node_modules/
+release-keys/
 dist/
 release/
+artifacts/
 out/
+.tmp/
 *.log
+config/*.bak
 .DS_Store
 Thumbs.db
 www/apps/
