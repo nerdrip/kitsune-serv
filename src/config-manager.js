@@ -1,7 +1,9 @@
 ﻿const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { SERVICE_IDS } = require('./path-utils');
+const { MANAGED_IDS } = require('./path-utils');
+
+const CURRENT_SCHEMA_VERSION = 2;
 
 // Support both Electron and standalone Node.js (server mode)
 let electronApp = null;
@@ -18,6 +20,8 @@ class ConfigManager {
     }
     this.configDir = path.join(this.appRoot, 'config');
     this.configPath = path.join(this.configDir, 'kitsuneserv.json');
+    this.migrationHistoryPath = path.join(this.configDir, 'migrations.json');
+    this.lastMigration = { migrated: false, from: CURRENT_SCHEMA_VERSION, to: CURRENT_SCHEMA_VERSION, steps: [] };
     this._ensureDir(this.configDir);
   }
 
@@ -203,6 +207,20 @@ class ConfigManager {
     };
   }
 
+  defaultComposerProfile(version = '2.10.2') {
+    return {
+      id: this._uid(), name: `Composer ${version}`, version,
+      autoStart: false, startAllGroup: false
+    };
+  }
+
+  defaultJavaProfile(version = '25.0.4.7') {
+    return {
+      id: this._uid(), name: `Eclipse Temurin JDK ${version}`, version,
+      autoStart: false, startAllGroup: false
+    };
+  }
+
   defaultDenoProfile(version = '2.9.4') {
     return {
       id: this._uid(), name: `Deno ${version}`, version,
@@ -252,10 +270,13 @@ class ConfigManager {
     const memcached = this.defaultMemcachedProfile();
     const python = this.defaultPythonProfile();
     const deno = this.defaultDenoProfile();
+    const composer = this.defaultComposerProfile();
+    const java = this.defaultJavaProfile();
     const caddy = this.defaultCaddyProfile();
     const minio = this.defaultMinioProfile();
 
     return {
+      schemaVersion: CURRENT_SCHEMA_VERSION,
       apache:      { enabled: true, activeProfileId: apache.id, profiles: [apache] },
       nginx:       { enabled: true, activeProfileId: nginx.id, profiles: [nginx] },
       caddy:       { enabled: true, activeProfileId: caddy.id, profiles: [caddy] },
@@ -272,12 +293,15 @@ class ConfigManager {
       minio:       { enabled: true, activeProfileId: minio.id, profiles: [minio] },
       python:      { enabled: true, activeProfileId: python.id, profiles: [python] },
       deno:        { enabled: true, activeProfileId: deno.id, profiles: [deno] },
-      databaseManager: { connections: [] },
+      composer:    { enabled: true, activeProfileId: composer.id, profiles: [composer] },
+      java:        { enabled: true, activeProfileId: java.id, profiles: [java] },
+      databaseManager: { connections: [], savedQueries: [], queryHistory: [] },
       general: {
         autoStartOnBoot: false, startMinimized: false,
         theme: 'dark', language: 'en', checkUpdates: true, logLevel: 'info',
         stopTimeout: 5000, pathServices: [], pathSelectionInitialized: false,
-        forceGlobalDocumentRoot: false, globalDocumentRoot: './www', offlineCache: true
+        forceGlobalDocumentRoot: false, globalDocumentRoot: './www', offlineCache: true,
+        crashRecovery: true, projectPreflight: true
       }
     };
   }
@@ -298,10 +322,14 @@ class ConfigManager {
         if ((config.httpServer && !config.httpServer.profiles) || (config.database && !config.postgresql) || (config.httpServer && config.httpServer.profiles)) {
           return this._migrateOldConfig(config);
         }
-        const normalized = this._mergeWithDefaults(config);
-        if (candidate.endsWith('.bak')) this.saveConfig(normalized);
+        const migration = this._migrateVersionedConfig(config);
+        const normalized = this._mergeWithDefaults(migration.config);
+        this.lastMigration = migration.summary;
+        if (migration.summary.migrated) this._recordMigration(migration.summary);
+        if (candidate.endsWith('.bak') || migration.summary.migrated) this.saveConfig(normalized);
         return normalized;
-      } catch {
+      } catch (error) {
+        if (error?.code === 'UNSUPPORTED_CONFIG_SCHEMA') throw error;
         // Try the backup before falling back to a fresh configuration.
       }
     }
@@ -317,11 +345,12 @@ class ConfigManager {
       postgresql: 'defaultPostgresqlProfile', mysql: 'defaultMysqlProfile', mariadb: 'defaultMariadbProfile', mongodb: 'defaultMongodbProfile',
       php: 'defaultPhpProfile', node: 'defaultNodeProfile', go: 'defaultGoProfile', bun: 'defaultBunProfile',
       redis: 'defaultRedisProfile', memcached: 'defaultMemcachedProfile', minio: 'defaultMinioProfile',
-      python: 'defaultPythonProfile', deno: 'defaultDenoProfile'
+      python: 'defaultPythonProfile', deno: 'defaultDenoProfile',
+      composer: 'defaultComposerProfile', java: 'defaultJavaProfile'
     };
 
-    const merged = { ...config };
-    for (const section of SERVICE_IDS) {
+    const merged = { ...config, schemaVersion: CURRENT_SCHEMA_VERSION };
+    for (const section of MANAGED_IDS) {
       const source = config[section];
       if (!source || typeof source !== 'object' || !Array.isArray(source.profiles) || source.profiles.length === 0) {
         merged[section] = defaults[section];
@@ -349,9 +378,66 @@ class ConfigManager {
     merged.databaseManager = {
       ...defaults.databaseManager,
       ...(config.databaseManager && typeof config.databaseManager === 'object' ? config.databaseManager : {}),
-      connections: Array.isArray(config.databaseManager?.connections) ? config.databaseManager.connections : []
+      connections: Array.isArray(config.databaseManager?.connections) ? config.databaseManager.connections : [],
+      savedQueries: Array.isArray(config.databaseManager?.savedQueries) ? config.databaseManager.savedQueries.slice(0, 200) : [],
+      queryHistory: Array.isArray(config.databaseManager?.queryHistory) ? config.databaseManager.queryHistory.slice(0, 100) : []
     };
     return merged;
+  }
+
+  _migrateVersionedConfig(config) {
+    const next = structuredClone(config);
+    const detected = Number.isInteger(Number(next.schemaVersion)) ? Number(next.schemaVersion) : 1;
+    if (detected > CURRENT_SCHEMA_VERSION) {
+      const error = new Error(`Configuration schema ${detected} is newer than supported schema ${CURRENT_SCHEMA_VERSION}`);
+      error.code = 'UNSUPPORTED_CONFIG_SCHEMA';
+      throw error;
+    }
+    const steps = [];
+    let version = detected;
+    if (version < 2) {
+      next.general = next.general && typeof next.general === 'object' ? next.general : {};
+      if (!Object.hasOwn(next.general, 'crashRecovery')) next.general.crashRecovery = true;
+      if (!Object.hasOwn(next.general, 'projectPreflight')) next.general.projectPreflight = true;
+      steps.push('Added crash recovery and project preflight settings');
+      version = 2;
+    }
+    next.schemaVersion = CURRENT_SCHEMA_VERSION;
+    return {
+      config: next,
+      summary: {
+        migrated: detected !== CURRENT_SCHEMA_VERSION,
+        from: detected,
+        to: CURRENT_SCHEMA_VERSION,
+        steps,
+        migratedAt: new Date().toISOString()
+      }
+    };
+  }
+
+  _recordMigration(summary) {
+    try {
+      let history = [];
+      try {
+        const parsed = JSON.parse(fs.readFileSync(this.migrationHistoryPath, 'utf8'));
+        if (Array.isArray(parsed)) history = parsed;
+      } catch {}
+      history.push(summary);
+      history = history.slice(-50);
+      const temp = `${this.migrationHistoryPath}.${process.pid}.tmp`;
+      fs.writeFileSync(temp, JSON.stringify(history, null, 2), { encoding: 'utf8', mode: 0o600 });
+      try {
+        fs.renameSync(temp, this.migrationHistoryPath);
+      } catch (error) {
+        if (!['EEXIST', 'EPERM'].includes(error.code)) throw error;
+        fs.copyFileSync(temp, this.migrationHistoryPath);
+        fs.unlinkSync(temp);
+      }
+    } catch {}
+  }
+
+  getMigrationInfo() {
+    return structuredClone(this.lastMigration);
   }
 
   _migrateOldConfig(old) {
@@ -464,5 +550,7 @@ class ConfigManager {
     return this.saveConfig(defaults);
   }
 }
+
+ConfigManager.CURRENT_SCHEMA_VERSION = CURRENT_SCHEMA_VERSION;
 
 module.exports = ConfigManager;

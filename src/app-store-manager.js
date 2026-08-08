@@ -706,6 +706,15 @@ class AppStoreManager {
     return null;
   }
 
+  _composerPhar(config, phpDir) {
+    const composerProfile = this.configManager.getActiveProfile(config, 'composer');
+    if (composerProfile && this.downloadManager.isInstalled('composer', composerProfile.version)) {
+      const managed = path.join(this.downloadManager.getInstallPath('composer', composerProfile.version), 'composer.phar');
+      if (fs.existsSync(managed)) return managed;
+    }
+    return path.join(phpDir, 'composer.phar');
+  }
+
   async _runComposerInstall(appDir) {
     const config = this.configManager.getConfig();
     const phpProfile = this.configManager.getActiveProfile(config, 'php');
@@ -713,7 +722,7 @@ class AppStoreManager {
 
     const phpDir = path.join(this.downloadManager.dataDir, 'php', phpProfile.version);
     const phpExe = path.join(phpDir, process.platform === 'win32' ? 'php.exe' : 'bin/php');
-    const composerPhar = path.join(phpDir, 'composer.phar');
+    const composerPhar = this._composerPhar(config, phpDir);
     if (!fs.existsSync(phpExe) || !fs.existsSync(composerPhar)) return;
 
     return new Promise((resolve) => {
@@ -966,8 +975,8 @@ MAIL_PASSWORD=null
     const phpExe = path.join(phpDir, process.platform === 'win32' ? 'php.exe' : 'bin/php');
     if (!fs.existsSync(phpExe)) return { success: false, error: `PHP ${phpProfile.version} is not installed` };
 
-    const composerPhar = path.join(phpDir, 'composer.phar');
-    if (!fs.existsSync(composerPhar)) return { success: false, error: 'Composer is not installed. Install Composer from the PHP panel first.' };
+    const composerPhar = this._composerPhar(config, phpDir);
+    if (!fs.existsSync(composerPhar)) return { success: false, error: 'Composer is not installed. Install it from Version Manager or the PHP panel first.' };
 
     if (fs.existsSync(appDir)) fs.rmSync(appDir, { recursive: true, force: true });
 

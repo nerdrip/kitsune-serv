@@ -11,6 +11,7 @@ class DbViewer {
     this.configManager = configManager;
     this.serviceManager = serviceManager;
     this.secretStore = secretStore;
+    this.activeQueries = new Map();
   }
 
   _assertSection(section) {
@@ -227,6 +228,160 @@ class DbViewer {
     });
   }
 
+  async listObjectsFor(input, database) {
+    const connection = this._resolveConnection(input);
+    return this._withNativeConnection(connection, database, async context => {
+      let objects = [];
+      if (context.type === 'postgresql') {
+        const result = await context.client.query(`
+          SELECT n.nspname AS "schemaName", c.relname AS name,
+            CASE c.relkind WHEN 'r' THEN 'table' WHEN 'p' THEN 'partitioned table'
+              WHEN 'v' THEN 'view' WHEN 'm' THEN 'materialized view' WHEN 'f' THEN 'foreign table' ELSE 'object' END AS type,
+            GREATEST(c.reltuples, 0)::bigint AS "estimatedRows",
+            CASE WHEN c.relkind IN ('r','p','m') THEN pg_total_relation_size(c.oid) ELSE 0 END::bigint AS bytes
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE c.relkind IN ('r','p','v','m','f')
+            AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+            AND n.nspname NOT LIKE 'pg_toast%'
+          ORDER BY n.nspname, c.relname`);
+        objects = result.rows;
+      } else if (context.type === 'mysql' || context.type === 'mariadb') {
+        const [rows] = await context.client.execute(`
+          SELECT TABLE_SCHEMA AS schemaName, TABLE_NAME AS name,
+            CASE WHEN TABLE_TYPE = 'VIEW' THEN 'view' ELSE 'table' END AS type,
+            COALESCE(TABLE_ROWS, 0) AS estimatedRows,
+            COALESCE(DATA_LENGTH, 0) + COALESCE(INDEX_LENGTH, 0) AS bytes
+          FROM information_schema.TABLES
+          WHERE TABLE_SCHEMA = ?
+          ORDER BY TABLE_NAME`, [database]);
+        objects = rows;
+      } else {
+        const collections = await context.db.listCollections({}, { nameOnly: false }).toArray();
+        objects = collections.map(item => ({
+          schemaName: database,
+          name: item.name,
+          type: item.type === 'view' ? 'view' : 'collection',
+          estimatedRows: null,
+          bytes: null
+        }));
+      }
+      const schemas = new Map();
+      for (const object of objects) {
+        const schemaName = String(object.schemaName || database || 'default');
+        if (!schemas.has(schemaName)) schemas.set(schemaName, { name: schemaName, objects: [] });
+        schemas.get(schemaName).objects.push({
+          name: String(object.name),
+          type: String(object.type || 'table'),
+          estimatedRows: object.estimatedRows == null ? null : Number(object.estimatedRows),
+          bytes: object.bytes == null ? null : Number(object.bytes)
+        });
+      }
+      return { database, schemas: [...schemas.values()] };
+    });
+  }
+
+  async describeObjectFor(input, database, schema, objectName) {
+    const connection = this._resolveConnection(input);
+    const safeSchema = this._assertDatabaseName(schema || (connection.type === 'postgresql' ? 'public' : database));
+    const safeObject = this._assertDatabaseName(objectName);
+    return this._withNativeConnection(connection, database, async context => {
+      if (context.type === 'postgresql') {
+        const [columns, indexes, constraints] = await Promise.all([
+          context.client.query(`
+            SELECT column_name AS name,
+              CASE WHEN data_type = 'USER-DEFINED' THEN udt_name ELSE data_type END AS "dataType",
+              is_nullable = 'YES' AS nullable, column_default AS "defaultValue",
+              character_maximum_length AS "maxLength", numeric_precision AS precision,
+              ordinal_position AS position
+            FROM information_schema.columns
+            WHERE table_schema = $1 AND table_name = $2
+            ORDER BY ordinal_position`, [safeSchema, safeObject]),
+          context.client.query(`SELECT indexname AS name, indexdef AS definition FROM pg_indexes WHERE schemaname = $1 AND tablename = $2 ORDER BY indexname`, [safeSchema, safeObject]),
+          context.client.query(`
+            SELECT con.conname AS name,
+              CASE con.contype WHEN 'p' THEN 'PRIMARY KEY' WHEN 'f' THEN 'FOREIGN KEY'
+                WHEN 'u' THEN 'UNIQUE' WHEN 'c' THEN 'CHECK' ELSE con.contype::text END AS type,
+              pg_get_constraintdef(con.oid, true) AS definition
+            FROM pg_constraint con
+            JOIN pg_class rel ON rel.oid = con.conrelid
+            JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+            WHERE nsp.nspname = $1 AND rel.relname = $2
+            ORDER BY con.conname`, [safeSchema, safeObject])
+        ]);
+        return { database, schema: safeSchema, name: safeObject, type: 'object', columns: columns.rows, indexes: indexes.rows, constraints: constraints.rows };
+      }
+      if (context.type === 'mysql' || context.type === 'mariadb') {
+        const [columnsResult, indexesResult, ddlResult] = await Promise.all([
+          context.client.execute(`
+            SELECT COLUMN_NAME AS name, COLUMN_TYPE AS dataType, IS_NULLABLE = 'YES' AS nullable,
+              COLUMN_DEFAULT AS defaultValue, COLUMN_KEY AS columnKey, EXTRA AS extra,
+              ORDINAL_POSITION AS position
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+            ORDER BY ORDINAL_POSITION`, [database, safeObject]),
+          context.client.execute(`
+            SELECT INDEX_NAME AS name, NON_UNIQUE = 0 AS uniqueIndex,
+              GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ', ') AS columns,
+              INDEX_TYPE AS indexType
+            FROM information_schema.STATISTICS
+            WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+            GROUP BY INDEX_NAME, NON_UNIQUE, INDEX_TYPE
+            ORDER BY INDEX_NAME`, [database, safeObject]),
+          context.client.query(`SHOW CREATE TABLE \`${safeObject.replace(/`/g, '``')}\``).catch(() => [[]])
+        ]);
+        const ddlRow = ddlResult[0]?.[0] || {};
+        return {
+          database, schema: database, name: safeObject, type: 'object',
+          columns: columnsResult[0], indexes: indexesResult[0], constraints: [],
+          ddl: ddlRow['Create Table'] || ddlRow['Create View'] || ''
+        };
+      }
+      const collection = context.db.collection(safeObject);
+      const [sample, indexes] = await Promise.all([
+        collection.findOne({}),
+        collection.indexes().catch(() => [])
+      ]);
+      let stats = {};
+      try { stats = await context.db.command({ collStats: safeObject, scale: 1 }); } catch {}
+      const columns = Object.entries(sample || {}).map(([name, value], position) => ({
+        name,
+        dataType: value === null ? 'null' : Array.isArray(value) ? 'array' : value instanceof Date ? 'date' : typeof value,
+        nullable: true,
+        defaultValue: null,
+        position: position + 1
+      }));
+      return {
+        database, schema: database, name: safeObject, type: 'collection', columns,
+        indexes: indexes.map(index => ({ name: index.name, columns: Object.entries(index.key || {}).map(([key, direction]) => `${key} ${direction}`).join(', '), uniqueIndex: Boolean(index.unique), indexType: 'BSON' })),
+        constraints: [],
+        stats: { count: Number(stats.count || 0), size: Number(stats.size || 0), storageSize: Number(stats.storageSize || 0), totalIndexSize: Number(stats.totalIndexSize || 0) },
+        sample: sample ? JSON.stringify(sample, null, 2) : ''
+      };
+    });
+  }
+
+  async tableDataFor(input, database, table, limit = 100, offset = 0, schema = '') {
+    const connection = this._resolveConnection(input);
+    const safeTable = this._assertDatabaseName(table);
+    const safeLimit = Math.max(1, Math.min(1000, parseInt(limit) || 100));
+    const safeOffset = Math.max(0, parseInt(offset) || 0);
+    return this._withNativeConnection(connection, database, async context => {
+      let result;
+      if (context.type === 'postgresql') {
+        const safeSchema = this._assertDatabaseName(schema || 'public');
+        const rows = await context.client.query(`SELECT * FROM "${safeSchema.replace(/"/g, '""')}"."${safeTable.replace(/"/g, '""')}" LIMIT ${safeLimit} OFFSET ${safeOffset}`);
+        result = this._objectRows(rows.rows);
+      } else if (context.type === 'mysql' || context.type === 'mariadb') {
+        const [rows] = await context.client.query(`SELECT * FROM \`${safeTable.replace(/`/g, '``')}\` LIMIT ${safeLimit} OFFSET ${safeOffset}`);
+        result = this._objectRows(rows);
+      } else {
+        result = this._objectRows(await context.db.collection(safeTable).find({}).skip(safeOffset).limit(safeLimit).toArray());
+      }
+      return { ...result, limit: safeLimit, offset: safeOffset, hasMore: result.rows.length === safeLimit };
+    });
+  }
+
   async executeQueryFor(input, database, query) {
     if (!query?.trim()) throw new Error('Empty query');
     if (query.length > 1024 * 1024) throw new Error('Query is too large');
@@ -246,6 +401,193 @@ class DbViewer {
       }
       return this._executeMongoOperation(context.db, query);
     });
+  }
+
+  _sqlWithoutLiterals(query) {
+    let output = '';
+    let quote = '';
+    let lineComment = false;
+    let blockComment = false;
+    for (let index = 0; index < query.length; index += 1) {
+      const character = query[index];
+      const next = query[index + 1];
+      if (lineComment) {
+        if (character === '\n' || character === '\r') { lineComment = false; output += ' '; }
+        continue;
+      }
+      if (blockComment) {
+        if (character === '*' && next === '/') { blockComment = false; index += 1; }
+        continue;
+      }
+      if (!quote && character === '-' && next === '-') { lineComment = true; index += 1; continue; }
+      if (!quote && character === '/' && next === '*') { blockComment = true; index += 1; continue; }
+      if (!quote && ['\'', '"', '`'].includes(character)) { quote = character; output += ' '; continue; }
+      if (quote) {
+        if (character === quote && next === quote) { index += 1; continue; }
+        if (character === quote && query[index - 1] !== '\\') quote = '';
+        continue;
+      }
+      output += character;
+    }
+    return output.replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  _assertReadOnlyQuery(type, query) {
+    if (type === 'mongodb') {
+      let operation;
+      try { operation = JSON.parse(query); } catch { throw new Error('Read-only MongoDB operation must be valid JSON'); }
+      const action = String(operation.operation || (operation.command ? 'command' : 'find'));
+      if (!['find', 'aggregate', 'countDocuments'].includes(action)) throw new Error(`Read-only mode blocks MongoDB operation: ${action}`);
+      return;
+    }
+    const sql = this._sqlWithoutLiterals(query);
+    const first = sql.match(/^[a-z]+/)?.[0] || '';
+    if (!['select', 'with', 'show', 'describe', 'desc', 'explain', 'values'].includes(first)) throw new Error(`Read-only mode blocks SQL statement: ${first || 'unknown'}`);
+    if (/\b(insert|update|delete|merge|replace|upsert|create|alter|drop|truncate|grant|revoke|call|execute|copy|vacuum|reindex|cluster|refresh|lock|set)\b/.test(sql)) {
+      throw new Error('Read-only mode blocks a potentially mutating SQL statement');
+    }
+  }
+
+  _databaseManagerData() {
+    const config = this.configManager.getConfig();
+    config.databaseManager = config.databaseManager || { connections: [], savedQueries: [], queryHistory: [] };
+    config.databaseManager.savedQueries = Array.isArray(config.databaseManager.savedQueries) ? config.databaseManager.savedQueries : [];
+    config.databaseManager.queryHistory = Array.isArray(config.databaseManager.queryHistory) ? config.databaseManager.queryHistory : [];
+    return config;
+  }
+
+  _saveDatabaseManager(config) {
+    const result = this.configManager.saveConfig(config);
+    if (!result.success) throw new Error(result.error || 'Could not save Database Manager state');
+  }
+
+  _recordWorkbenchHistory(entry) {
+    try {
+      const config = this._databaseManagerData();
+      const history = config.databaseManager.queryHistory;
+      config.databaseManager.queryHistory = [entry, ...history.filter(item => item.query !== entry.query || item.database !== entry.database)].slice(0, 100);
+      this._saveDatabaseManager(config);
+    } catch {}
+  }
+
+  queryHistory(limit = 100) {
+    return structuredClone(this._databaseManagerData().databaseManager.queryHistory.slice(0, Math.max(1, Math.min(100, Number(limit) || 100))));
+  }
+
+  clearQueryHistory() {
+    const config = this._databaseManagerData();
+    config.databaseManager.queryHistory = [];
+    this._saveDatabaseManager(config);
+    return { success: true };
+  }
+
+  listSavedQueries() { return structuredClone(this._databaseManagerData().databaseManager.savedQueries); }
+
+  saveQuery(input = {}) {
+    const query = String(input.query || '').trim();
+    if (!query || query.length > 1024 * 1024) throw new Error('Saved query is empty or too large');
+    const config = this._databaseManagerData();
+    const id = typeof input.id === 'string' && /^[a-f0-9-]{16,64}$/i.test(input.id) ? input.id : crypto.randomUUID();
+    const previous = config.databaseManager.savedQueries.find(item => item.id === id);
+    const saved = {
+      id,
+      name: String(input.name || previous?.name || 'Untitled query').trim().slice(0, 120) || 'Untitled query',
+      query,
+      type: ['postgresql', 'mysql', 'mariadb', 'mongodb'].includes(input.type) ? input.type : '',
+      database: String(input.database || '').slice(0, 128),
+      tags: [...new Set((Array.isArray(input.tags) ? input.tags : []).map(value => String(value).trim()).filter(Boolean))].slice(0, 20),
+      createdAt: previous?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    const index = config.databaseManager.savedQueries.findIndex(item => item.id === id);
+    if (index >= 0) config.databaseManager.savedQueries[index] = saved;
+    else config.databaseManager.savedQueries.unshift(saved);
+    config.databaseManager.savedQueries = config.databaseManager.savedQueries.slice(0, 200);
+    this._saveDatabaseManager(config);
+    return structuredClone(saved);
+  }
+
+  removeSavedQuery(id) {
+    const config = this._databaseManagerData();
+    const before = config.databaseManager.savedQueries.length;
+    config.databaseManager.savedQueries = config.databaseManager.savedQueries.filter(item => item.id !== id);
+    this._saveDatabaseManager(config);
+    return { success: true, removed: before !== config.databaseManager.savedQueries.length };
+  }
+
+  async executeWorkbench(input, database, query, options = {}) {
+    if (!query?.trim()) throw new Error('Empty query');
+    if (query.length > 1024 * 1024) throw new Error('Query is too large');
+    const connection = this._resolveConnection(input);
+    const readOnly = options.readOnly !== false;
+    const transaction = Boolean(options.transaction) && connection.type !== 'mongodb';
+    const explain = Boolean(options.explain);
+    const timeoutMs = Math.max(1000, Math.min(5 * 60 * 1000, Number(options.timeoutMs) || 30000));
+    const maxRows = Math.max(1, Math.min(10000, Number(options.maxRows) || 1000));
+    const queryId = typeof options.queryId === 'string' && /^[A-Za-z0-9-]{8,80}$/.test(options.queryId) ? options.queryId : crypto.randomUUID();
+    if (readOnly || explain) this._assertReadOnlyQuery(connection.type, query);
+    const started = Date.now();
+    try {
+      let result = await this._withNativeConnection(connection, database, async context => {
+        const cancel = () => {
+          try {
+            if (context.type === 'postgresql') context.client.end();
+            else if (context.type === 'mysql' || context.type === 'mariadb') context.client.destroy();
+            else context.client.close();
+          } catch {}
+        };
+        this.activeQueries.set(queryId, { queryId, connection: connection.name, database, startedAt: new Date(started).toISOString(), cancel });
+        try {
+          if (context.type === 'postgresql') {
+            if (transaction) await context.client.query(readOnly ? 'BEGIN READ ONLY' : 'BEGIN');
+            await context.client.query(`SET statement_timeout TO ${timeoutMs}`);
+            const statement = explain ? `EXPLAIN (FORMAT JSON) ${query}` : query;
+            try {
+              const response = await context.client.query(statement);
+              if (transaction) await context.client.query('COMMIT');
+              const finalResult = Array.isArray(response) ? response[response.length - 1] : response;
+              return finalResult?.rows?.length
+                ? this._objectRows(finalResult.rows)
+                : { columns: [], rows: [], message: `Query executed successfully${Number.isInteger(finalResult?.rowCount) ? ` · ${finalResult.rowCount} affected` : ''}` };
+            } catch (error) { if (transaction) await context.client.query('ROLLBACK').catch(() => {}); throw error; }
+          }
+          if (context.type === 'mysql' || context.type === 'mariadb') {
+            await context.client.query(`SET SESSION MAX_EXECUTION_TIME=${timeoutMs}`).catch(() => {});
+            if (transaction) await context.client.beginTransaction();
+            const statement = explain ? `EXPLAIN FORMAT=JSON ${query}` : query;
+            try {
+              const [rows] = await context.client.query(statement);
+              if (transaction) await context.client.commit();
+              return Array.isArray(rows) ? this._objectRows(rows) : { columns: [], rows: [], message: `Query executed successfully · ${Number(rows?.affectedRows || 0)} affected` };
+            } catch (error) { if (transaction) await context.client.rollback().catch(() => {}); throw error; }
+          }
+          if (explain) throw new Error('Explain is currently available for PostgreSQL, MySQL and MariaDB queries');
+          return this._executeMongoOperation(context.db, query);
+        } finally { this.activeQueries.delete(queryId); }
+      });
+      const totalRows = result.rows?.length || 0;
+      if (totalRows > maxRows) result = { ...result, rows: result.rows.slice(0, maxRows), truncated: true, totalRows };
+      const durationMs = Date.now() - started;
+      const metadata = { queryId, durationMs, readOnly, transaction, explain, maxRows };
+      this._recordWorkbenchHistory({ id: crypto.randomUUID(), query, database, type: connection.type, connection: connection.name, success: true, durationMs, readOnly, at: new Date().toISOString() });
+      return { ...result, ...metadata };
+    } catch (error) {
+      this.activeQueries.delete(queryId);
+      this._recordWorkbenchHistory({ id: crypto.randomUUID(), query, database, type: connection.type, connection: connection.name, success: false, durationMs: Date.now() - started, readOnly, error: error.message.slice(0, 500), at: new Date().toISOString() });
+      throw error;
+    }
+  }
+
+  cancelQuery(queryId) {
+    const query = this.activeQueries.get(queryId);
+    if (!query) return { success: false, error: 'Active query not found' };
+    query.cancel();
+    this.activeQueries.delete(queryId);
+    return { success: true };
+  }
+
+  listActiveQueries() {
+    return [...this.activeQueries.values()].map(({ cancel: _cancel, ...query }) => ({ ...query, elapsedMs: Date.now() - Date.parse(query.startedAt) }));
   }
 
   async _executeMongoOperation(database, query) {

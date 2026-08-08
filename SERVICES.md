@@ -1,6 +1,6 @@
 # Usługi i wersje w KitsuneServ
 
-KitsuneServ 1.0.0-beta13 zarządza 16 usługami. Instalowanie i usuwanie wydań odbywa się wyłącznie w panelu **Version Manager**. Można tam wyszukać usługę lub numer wersji, zsynchronizować katalogi, zobaczyć wszystkie wydania na dysku, śledzić postęp instalacji, przełączyć aktywny profil i zbiorczo usunąć nieużywane wydania. Panele usług pozwalają wybierać tylko wersje już zainstalowane.
+KitsuneServ 3.0.0 zarządza 16 usługami oraz dwoma wersjonowanymi narzędziami deweloperskimi: Composerem i Eclipse Temurin JDK. Instalowanie i usuwanie wydań odbywa się wyłącznie w panelu **Version Manager**. Można tam wyszukać usługę albo konkretną wersję, zsynchronizować katalogi, zobaczyć wszystkie wydania na dysku, śledzić postęp instalacji, przełączyć aktywny profil i zbiorczo usunąć nieużywane wydania. Panele usług pozwalają wybierać tylko wersje już zainstalowane. Warstwa Kitsune Hub 3.0.0 synchronizuje definicje projektów, Test Labów i API Flow między sparowanymi węzłami, ale nie zmienia katalogu obsługiwanych runtime'ów.
 
 ## Pełna lista
 
@@ -17,13 +17,15 @@ KitsuneServ 1.0.0-beta13 zarządza 16 usługami. Instalowanie i usuwanie wydań 
 | Język | Node.js | Tak; pełny indeks x64, rekomendowane LTS | Oficjalny indeks Node.js i SHASUMS256 |
 | Język | Go | Tak; pełny indeks archiwów amd64 | Oficjalne API go.dev z SHA-256 |
 | Język | Bun | Tak | Do 100 ostatnich wydań GitHub i SHASUMS256 |
-| Język | Python | Tak; ostatnie oficjalne wersje embeddable x64 | Oficjalny indeks Python z SHA-256 |
+| Język | Python | Tak; pełny prywatny runtime Windows z pip | Oficjalny Python Install Manager i podpisany indeks python.org |
 | Język | Deno | Tak | Do 100 ostatnich wydań GitHub i SHA-256 |
+| Narzędzie | Composer | Tak; aktualna linia stabilna i 2.2 LTS | Oficjalny katalog getcomposer.org i SHA-256 |
+| Narzędzie | Eclipse Temurin JDK | Tak; bieżące JDK oraz linie LTS | Oficjalne API Adoptium i SHA-256 |
 | Cache | Redis | Tak; natywne wydania społecznościowe dla Windows | Do 100 wydań redis-windows |
 | Cache | Memcached | Tak | Społecznościowe wydania jefyt/memcached-windows |
 | Object storage | MinIO | Tak; kanał `latest` | Oficjalne binarium dl.min.io |
 
-Katalog lokalny zapewnia wersje startowe także bez synchronizacji. Przycisk **Sync official catalogs** pobiera aktualną listę dla Node.js, Python, PHP, Nginx, Go, MariaDB, Bun, Deno, Caddy, Redis i Memcached. Katalog zachowuje także starsze wersje wbudowane, więc można utrzymywać kilka projektów wymagających różnych środowisk.
+Katalog lokalny zapewnia wersje startowe także bez synchronizacji. Przycisk **Sync official catalogs** pobiera aktualną listę także dla Composera i Eclipse Temurin JDK. Katalog zachowuje starsze wersje wbudowane, więc można utrzymywać kilka projektów wymagających różnych środowisk.
 
 ## Typowy sposób użycia
 
@@ -41,13 +43,14 @@ Instalacje archiwów używają znacznika operacji w toku. Po przerwaniu procesu 
 
 ## Selektywny PATH
 
-- Każda z 16 usług ma osobne pole wyboru; można dodawać i usuwać pojedyncze pozycje oraz użyć **Add all** / **Remove all**.
+- Każda z 16 usług oraz Composer i Java mają osobne pole wyboru; można dodawać i usuwać pojedyncze pozycje oraz użyć **Add all** / **Remove all**.
 - Wybranie jeszcze niezainstalowanej usługi zapisuje ją jako oczekującą. Jej katalog pojawi się w `PATH` automatycznie po instalacji.
 - Zmiana aktywnego profilu lub wersji usuwa katalog poprzedniej wersji i od razu wstawia katalog nowej, bez naruszania pozostałych wpisów użytkownika.
 - Obsługiwane są również rzeczywiste układy archiwów, m.in. `Apache24\bin` i `pgsql\bin`.
 - Zmiana jest zapisywana w użytkowym `PATH` Windows i rozgłaszana przez `WM_SETTINGCHANGE`; nowe terminale widzą ją bez restartu systemu.
 - Na Linuxie wybór trafia do zarządzanego bloku w `.bashrc`/`.zshrc` (lub pliku z `KITSUNE_SHELL_RC`); obce wpisy pozostają nietknięte.
 - Terminal wbudowany zawsze otrzymuje wszystkie zainstalowane aktywne binaria, niezależnie od wyboru dla globalnego `PATH`.
+- Composer automatycznie dołącza aktywne PHP. Zarządzana Java ustawia również `JAVA_HOME`; po jej odłączeniu wcześniejsza systemowa wartość jest przywracana.
 - Zarządzane wydania Python są rejestrowane w standardzie PEP 514. Oficjalny Python Install Manager widzi je jako środowiska `KitsuneServ/<wersja>`; `py`, `py --list`, `py -3.14` i `py -V:KitsuneServ/3.14.3` działają na nich bez ponownej instalacji Pythona.
 - Instalacja pierwszego Pythona w **Version Managerze** automatycznie instaluje oficjalny Python Install Manager z `python.org`; bez instalowania Pythona system pozostaje niezmieniony. Usunięcie ostatniego Pythona usuwa również manager zainstalowany wcześniej przez KitsuneServ i czyści rejestracje PEP 514 (manager zastany wcześniej w systemie nie jest usuwany). Panel **General → PATH Management** pozwala ponowić instalację ręcznie. Bez sieci pozostaje działający launcher zgodności.
 - Jeśli systemowe aliasy Microsoft Store przejmują komendy `python`/`python3`, aplikacja pokazuje ostrzeżenie, otwiera obsługiwaną stronę **Aplikacje**, kopiuje frazę `Aliasy wykonywania aplikacji` i podaje ścieżkę **Zaawansowane ustawienia aplikacji → Aliasy wykonywania aplikacji**. Po wyłączeniu `python.exe` i `python3.exe` należy otworzyć nowy terminal.
@@ -67,4 +70,4 @@ Przepływ został sprawdzony na prawdziwych binariach Windows: Nginx 1.27.4 + PH
 
 Interfejs desktopowy jest budowany i uruchomieniowo sprawdzany jako Windows x64 oraz Linux x64 (AppImage, DEB i RPM). Tryb webowy jest testowany natywnie na Windowsie i w obrazie Debian/Linux; korzysta z tych samych managerów i renderera.
 
-Dostępność konkretnych binariów zależy od platformy i publikacji upstreamu. Windows ma kompletne archiwa startowe wszystkich 16 usług. Linux ma przenośne wydania Node.js, PostgreSQL, MySQL, MariaDB, MongoDB, Go, Bun, Deno, Caddy i MinIO. Apache, Nginx, PHP, Python, Redis i Memcached nie publikują w używanych oficjalnych kanałach równoważnych, samowystarczalnych archiwów Linux dla każdej wersji, dlatego Version Manager pokazuje tam tylko faktycznie dostępne wydania zamiast oferować niedziałającą instalację. Zarządzanie usługą po dostarczeniu zgodnego układu binariów jest zaimplementowane po obu stronach.
+Dostępność konkretnych binariów zależy od platformy i publikacji upstreamu. Windows ma kompletne archiwa startowe usług i narzędzi. Linux ma przenośne wydania Node.js, PostgreSQL, MySQL, MariaDB, MongoDB, Go, Bun, Deno, Caddy, MinIO, Composer i Eclipse Temurin JDK. Apache, Nginx, PHP, Python, Redis i Memcached nie publikują w używanych kanałach równoważnych, samowystarczalnych archiwów Linux dla każdej wersji, dlatego Version Manager pokazuje tam tylko faktycznie dostępne wydania.

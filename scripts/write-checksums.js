@@ -6,6 +6,7 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 const artifacts = path.join(root, 'artifacts');
+const packageInfo = require(path.join(root, 'package.json'));
 const extensions = new Set(['.exe', '.zip', '.gz', '.AppImage', '.deb', '.rpm']);
 
 function walk(directory) {
@@ -22,6 +23,7 @@ function walk(directory) {
 
 const files = walk(artifacts)
   .filter(file => extensions.has(path.extname(file)) || file.endsWith('.tar.gz') || ['SBOM.cdx.json', 'release-manifest.json'].includes(path.basename(file)))
+  .filter(file => ['SBOM.cdx.json', 'release-manifest.json'].includes(path.basename(file)) || path.basename(file).includes(`-${packageInfo.version}-`) || path.basename(file).includes(`-${packageInfo.version}.`))
   .sort((a, b) => a.localeCompare(b));
 const lines = files.map(file => {
   const hash = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');

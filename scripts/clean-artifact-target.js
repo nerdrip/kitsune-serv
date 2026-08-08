@@ -3,10 +3,10 @@
 const fs = require('fs');
 const path = require('path');
 
-const allowed = new Set(['windows', 'linux', 'server']);
+const allowed = new Set(['windows', 'linux', 'server', 'plesk']);
 const targetName = process.argv[2];
 if (!allowed.has(targetName)) {
-  console.error('Usage: node scripts/clean-artifact-target.js <windows|linux|server>');
+  console.error('Usage: node scripts/clean-artifact-target.js <windows|linux|server|plesk>');
   process.exit(1);
 }
 

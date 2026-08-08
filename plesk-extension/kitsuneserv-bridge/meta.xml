@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module>
+  <id>kitsuneserv-bridge</id>
+  <name>KitsuneServ Bridge</name>
+  <description>Connect Plesk accounts, domains and servers to Kitsune Hub with signed SSO and device synchronization.</description>
+  <category>developer</category>
+  <category>server_tool</category>
+  <category>auth</category>
+  <version>3.0.0</version>
+  <release>1</release>
+  <vendor>KitsuneServ contributors</vendor>
+  <url>https://github.com/nerdrip/kitsune-serv</url>
+  <help_url>https://github.com/nerdrip/kitsune-serv#kitsune-hub</help_url>
+  <support_url>https://github.com/nerdrip/kitsune-serv/issues</support_url>
+  <plesk_min_version>18.0.30</plesk_min_version>
+</module>

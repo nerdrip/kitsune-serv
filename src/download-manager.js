@@ -21,6 +21,8 @@ const SERVICE_INFO = Object.freeze({
   bun: { name: 'Bun', icon: '🥟', category: 'Languages', description: 'Fast JavaScript runtime and toolkit.' },
   python: { name: 'Python', icon: '🐍', category: 'Languages', description: 'Python runtime; official Windows builds can be synchronized.' },
   deno: { name: 'Deno', icon: '🦕', category: 'Languages', description: 'Secure JavaScript and TypeScript runtime.' },
+  composer: { name: 'Composer', icon: '🎼', category: 'Developer tools', description: 'PHP dependency manager with verified official releases.' },
+  java: { name: 'Eclipse Temurin JDK', icon: '☕', category: 'Developer tools', description: 'Portable OpenJDK toolchain with managed PATH and JAVA_HOME.' },
   redis: { name: 'Redis', icon: '🔴', category: 'Cache & storage', description: 'In-memory data store and cache.' },
   memcached: { name: 'Memcached', icon: '🧠', category: 'Cache & storage', description: 'Distributed in-memory cache.' },
   minio: { name: 'MinIO', icon: '🪣', category: 'Cache & storage', description: 'S3-compatible object storage.' }
@@ -110,7 +112,8 @@ class DownloadManager {
         }));
       // Prefer the production-oriented channel when the upstream catalog exposes it.
       // For Node.js that means LTS; for Nginx it means the stable branch.
-      const recommended = versions.find(item => item.lts && !item.prerelease)
+      const recommended = (id === 'composer' && versions.find(item => !item.prerelease && !item.lts))
+        || versions.find(item => item.lts && !item.prerelease)
         || (id === 'nginx' && versions.find(item => item.channel === 'stable'))
         || versions.find(item => !item.prerelease)
         || versions[0];
@@ -151,6 +154,8 @@ class DownloadManager {
       ['PHP', () => this._refreshPhpCatalog()],
       ['Nginx', () => this._refreshNginxCatalog()],
       ['Go', () => this._refreshGoCatalog()],
+      ['Composer', () => this._refreshComposerCatalog()],
+      ['Eclipse Temurin', () => this._refreshJavaCatalog()],
       ['MariaDB', () => this._refreshMariaDbCatalog()],
       ['Bun', () => this._refreshGitHubCatalog({
         service: 'bun', repo: 'oven-sh/bun',
@@ -287,6 +292,70 @@ class DownloadManager {
     }
     this.downloadUrls.go = { ...(this.downloadUrls.go || {}), ...entries };
     this.versionMetadata.go = { ...(this.versionMetadata.go || {}), ...metadata };
+    return Object.keys(entries).length;
+  }
+
+  async _refreshComposerCatalog() {
+    const payload = await this._fetchJson('https://getcomposer.org/versions');
+    const releases = Array.isArray(payload?.stable) ? payload.stable : [];
+    const entries = {};
+    const metadata = {};
+    for (const release of releases) {
+      const version = String(release?.version || '');
+      const releasePath = String(release?.path || '');
+      if (!/^[0-9]+(?:\.[0-9]+){1,3}$/.test(version) || !releasePath.startsWith('/download/')) continue;
+      const url = `https://getcomposer.org${releasePath}`;
+      let sha256 = null;
+      try {
+        const checksum = await this._fetchText(`${url}.sha256sum`, 4096);
+        sha256 = checksum.match(/^[a-fA-F0-9]{64}/)?.[0] || null;
+      } catch {}
+      if (!sha256) continue;
+      entries[version] = {
+        [this._platform]: { url, sha256 }
+      };
+      metadata[version] = {
+        lts: release.lts ? 'LTS' : false,
+        prerelease: false,
+        maintenance: release.maintenance || ''
+      };
+    }
+    this.downloadUrls.composer = { ...(this.downloadUrls.composer || {}), ...entries };
+    this.versionMetadata.composer = { ...(this.versionMetadata.composer || {}), ...metadata };
+    return Object.keys(entries).length;
+  }
+
+  async _refreshJavaCatalog() {
+    const info = await this._fetchJson('https://api.adoptium.net/v3/info/available_releases');
+    const ltsFeatures = new Set((Array.isArray(info?.available_lts_releases) ? info.available_lts_releases : []).map(Number));
+    const features = [...new Set([
+      ...(Array.isArray(info?.available_lts_releases) ? info.available_lts_releases : []),
+      info?.most_recent_feature_release
+    ].filter(value => Number.isInteger(Number(value))).map(Number))];
+    const os = this._platform === 'win' ? 'windows' : 'linux';
+    const responses = await Promise.allSettled(features.map(feature => this._fetchJson(
+      `https://api.adoptium.net/v3/assets/latest/${feature}/hotspot?architecture=x64&image_type=jdk&os=${os}&vendor=eclipse`
+    )));
+    const entries = {};
+    const metadata = {};
+    for (const response of responses) {
+      if (response.status !== 'fulfilled') continue;
+      const release = Array.isArray(response.value) ? response.value[0] : null;
+      const archive = release?.binary?.package;
+      const rawVersion = String(release?.version?.openjdk_version || '').split('-')[0];
+      const version = rawVersion.replace(/\+/g, '.');
+      if (!archive?.link || !archive?.checksum || !archive?.name || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(version)) continue;
+      entries[version] = {
+        [this._platform]: { url: archive.link, sha256: archive.checksum, fileName: archive.name }
+      };
+      metadata[version] = {
+        lts: ltsFeatures.has(Number(release?.version?.major || rawVersion.split('.')[0])) ? 'LTS' : false,
+        prerelease: false,
+        date: release?.binary?.updated_at || ''
+      };
+    }
+    this.downloadUrls.java = { ...(this.downloadUrls.java || {}), ...entries };
+    this.versionMetadata.java = { ...(this.versionMetadata.java || {}), ...metadata };
     return Object.keys(entries).length;
   }
 
@@ -536,7 +605,7 @@ class DownloadManager {
     }
 
     // Derive temp file extension from actual URL
-    const ext = this._urlExtension(url);
+    const ext = this._urlExtension(entry.fileName || url);
     const zipPath = path.join(this.tempDir, `${service}-${version}${ext}`);
 
     this.activeDownloads.set(key, true);
@@ -620,6 +689,7 @@ class DownloadManager {
 
       // Clean up temp zip
       try { await this._removeWithRetry(zipPath); } catch {}
+      await this._finalizeManagedTool(service, installPath);
       fs.writeFileSync(path.join(installPath, '.kitsuneserv-installed.json'), JSON.stringify({
         service, version, installedAt: new Date().toISOString()
       }), 'utf8');
@@ -812,14 +882,31 @@ class DownloadManager {
   }
 
   // Derive archive extension from URL (.zip, .tar.gz, .tar.xz, .tgz, .exe, etc.)
-  _urlExtension(url) {
-    const pathname = new URL(url).pathname;
+  _urlExtension(urlOrName) {
+    let pathname = String(urlOrName || '');
+    try { pathname = new URL(pathname).pathname; } catch {}
     if (pathname.endsWith('.tar.gz'))  return '.tar.gz';
     if (pathname.endsWith('.tar.xz'))  return '.tar.xz';
     if (pathname.endsWith('.tgz'))     return '.tgz';
     if (pathname.endsWith('.zip'))     return '.zip';
     if (pathname.endsWith('.exe'))     return '.exe';
     return '';
+  }
+
+  async _finalizeManagedTool(service, installPath) {
+    if (service !== 'composer') return;
+    const phar = path.join(installPath, 'composer.phar');
+    if (!fs.existsSync(phar)) throw new Error('The Composer archive does not contain composer.phar');
+    if (this._platform === 'win') {
+      const launcher = '@echo off\r\nphp "%~dp0composer.phar" %*\r\nexit /b %ERRORLEVEL%\r\n';
+      fs.writeFileSync(path.join(installPath, 'composer.cmd'), launcher, 'utf8');
+      fs.writeFileSync(path.join(installPath, 'composer.bat'), launcher, 'utf8');
+    } else {
+      const launcher = '#!/bin/sh\nexec php "$(dirname "$0")/composer.phar" "$@"\n';
+      const target = path.join(installPath, 'composer');
+      fs.writeFileSync(target, launcher, { encoding: 'utf8', mode: 0o755 });
+      fs.chmodSync(target, 0o755);
+    }
   }
 
   // Recursively chmod +x common binary locations after extraction (Linux only)

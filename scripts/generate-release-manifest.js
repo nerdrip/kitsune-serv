@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { canonicalManifest } = require('../src/update-manager');
+const { classifyReleaseArtifact } = require('./release-artifact-metadata');
 
 const root = path.resolve(__dirname, '..');
 const artifacts = path.join(root, 'artifacts');
@@ -26,10 +27,14 @@ function walk(directory) {
   });
 }
 
-const packages = walk(artifacts).sort().map(file => {
+function belongsToCurrentRelease(file) {
+  const name = path.basename(file);
+  return name.includes(`-${packageInfo.version}-`) || name.includes(`-${packageInfo.version}.`);
+}
+
+const packages = walk(artifacts).filter(belongsToCurrentRelease).sort().map(file => {
   const relative = path.relative(artifacts, file).replace(/\\/g, '/');
-  const platform = relative.startsWith('windows/') ? 'win32' : relative.startsWith('linux/') ? 'linux' : '';
-  const arch = /(?:^|[-_.])arm64(?:[-_.]|$)/i.test(relative) ? 'arm64' : /(?:^|[-_.])(x64|amd64)(?:[-_.]|$)/i.test(relative) ? 'x64' : '';
+  const { platform, arch } = classifyReleaseArtifact(relative);
   const manifest = {
     version: packageInfo.version,
     url: baseUrl ? `${baseUrl}/${relative.split('/').map(encodeURIComponent).join('/')}` : relative,

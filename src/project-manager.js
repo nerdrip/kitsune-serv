@@ -48,6 +48,26 @@ function validDomain(value) {
     && /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(value);
 }
 
+function uniqueStrings(value, limit = 20, maxLength = 40) {
+  return [...new Set((Array.isArray(value) ? value : [])
+    .map(item => String(item || '').trim())
+    .filter(item => item && item.length <= maxLength))]
+    .slice(0, limit);
+}
+
+function normalizeSource(value) {
+  if (!value || typeof value !== 'object') return null;
+  const allowedTypes = new Set(['detected', 'compose', 'devcontainer', 'git', 'manual']);
+  const result = {
+    type: allowedTypes.has(value.type) ? value.type : 'detected',
+    file: typeof value.file === 'string' ? value.file.slice(0, 1024) : '',
+    evidence: uniqueStrings(value.evidence, 50, 200)
+  };
+  if (typeof value.repository === 'string') result.repository = value.repository.slice(0, 2048);
+  if (typeof value.detectedAt === 'string' && !Number.isNaN(Date.parse(value.detectedAt))) result.detectedAt = value.detectedAt;
+  return result;
+}
+
 class ProjectManager {
   constructor(appRoot, configManager, downloadManager, serviceManager, activityManager, domainManager = null) {
     this.appRoot = path.resolve(appRoot);
@@ -56,12 +76,21 @@ class ProjectManager {
     this.serviceManager = serviceManager;
     this.activityManager = activityManager;
     this.domainManager = domainManager;
+    this.diagnosticsManager = null;
+    this.secretStore = null;
+    this.hookRunner = null;
     this.templateProvider = null;
     this.registryPath = path.join(this.appRoot, 'config', 'projects.json');
+    this.statePath = path.join(this.appRoot, 'config', 'project-state.json');
     this.workspaceRoot = path.join(this.appRoot, 'projects', 'workspaces');
-    this.projectStates = new Map();
+    const stateRegistry = this._loadStateRegistry();
+    this.projectStates = stateRegistry.states;
+    this.previousSessionClean = stateRegistry.cleanShutdown;
+    this.sessionId = crypto.randomUUID();
+    this.recoveryReport = null;
     this.serviceOwners = new Map();
     fs.mkdirSync(this.workspaceRoot, { recursive: true });
+    this._persistStateRegistry(false);
   }
 
   templates() {
@@ -71,6 +100,145 @@ class ProjectManager {
 
   setTemplateProvider(provider) {
     this.templateProvider = typeof provider === 'function' ? provider : null;
+  }
+
+  setDiagnosticsManager(manager) {
+    this.diagnosticsManager = manager || null;
+  }
+
+  setSecretStore(store) {
+    this.secretStore = store || null;
+  }
+
+  setHookRunner(runner) {
+    this.hookRunner = typeof runner === 'function' ? runner : null;
+  }
+
+  _loadStateRegistry() {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(this.statePath, 'utf8'));
+      const states = new Map();
+      for (const item of Array.isArray(parsed.states) ? parsed.states : []) {
+        if (!item || typeof item.projectId !== 'string' || !item.state || typeof item.state !== 'object') continue;
+        states.set(item.projectId, item.state);
+      }
+      return { cleanShutdown: parsed.cleanShutdown === true, states };
+    } catch {
+      return { cleanShutdown: true, states: new Map() };
+    }
+  }
+
+  _persistStateRegistry(cleanShutdown = false) {
+    const dir = path.dirname(this.statePath);
+    fs.mkdirSync(dir, { recursive: true });
+    const payload = {
+      schemaVersion: 1,
+      sessionId: this.sessionId,
+      cleanShutdown: Boolean(cleanShutdown),
+      updatedAt: new Date().toISOString(),
+      states: [...this.projectStates.entries()].map(([projectId, state]) => ({ projectId, state }))
+    };
+    const temp = `${this.statePath}.${process.pid}.tmp`;
+    fs.writeFileSync(temp, JSON.stringify(payload, null, 2), { encoding: 'utf8', mode: 0o600 });
+    try {
+      fs.renameSync(temp, this.statePath);
+    } catch (error) {
+      if (!['EEXIST', 'EPERM'].includes(error.code)) throw error;
+      fs.copyFileSync(temp, this.statePath);
+      fs.unlinkSync(temp);
+    }
+  }
+
+  _setProjectState(projectId, state) {
+    this.projectStates.set(projectId, { ...state, updatedAt: new Date().toISOString() });
+    this._persistStateRegistry(false);
+  }
+
+  async recover(options = {}) {
+    const enabled = options.enabled !== false;
+    const safeMode = Boolean(options.safeMode);
+    const interrupted = [];
+    const restored = [];
+    const stoppedServices = [];
+    const warnings = [];
+    const stoppedSet = new Set();
+    this.serviceOwners.clear();
+    for (const [projectId, state] of this.projectStates.entries()) {
+      if (!['starting', 'running', 'stopping', 'recovery-pending'].includes(state?.status)) continue;
+      interrupted.push(projectId);
+      if (enabled && !safeMode) {
+        for (const service of [...(state.services || [])].reverse()) {
+          if (stoppedSet.has(service) || !this.serviceManager.getServiceStatus(service).running) continue;
+          try {
+            const result = await this.serviceManager.stopService(service, { keepPhp: false });
+            if (result?.success !== false) { stoppedSet.add(service); stoppedServices.push(service); }
+            else warnings.push(result?.error || `Could not stop interrupted service ${service}`);
+          } catch (error) { warnings.push(error.message); }
+        }
+      }
+      if (enabled && !safeMode && state.webRestore) {
+        try {
+          const result = await this._restoreWebProfile(state.webRestore);
+          if (result?.success) restored.push(projectId);
+          else warnings.push(result?.error || `Could not restore web configuration for ${projectId}`);
+        } catch (error) {
+          warnings.push(error.message);
+        }
+      }
+      this.projectStates.set(projectId, {
+        status: 'interrupted',
+        services: [],
+        error: safeMode
+          ? 'The previous session did not finish cleanly. Recovery changes were skipped in safe mode.'
+          : 'The previous session ended before the project was stopped cleanly.',
+        interruptedAt: new Date().toISOString(),
+        recoveredWebConfiguration: restored.includes(projectId),
+        updatedAt: new Date().toISOString()
+      });
+    }
+    this.recoveryReport = {
+      success: warnings.length === 0,
+      previousSessionClean: this.previousSessionClean,
+      interrupted,
+      restored,
+      stoppedServices,
+      warnings,
+      safeMode,
+      generatedAt: new Date().toISOString()
+    };
+    this._persistStateRegistry(false);
+    return clone(this.recoveryReport);
+  }
+
+  getRecoveryReport() {
+    return clone(this.recoveryReport || {
+      success: true,
+      previousSessionClean: this.previousSessionClean,
+      interrupted: [],
+      restored: [],
+      stoppedServices: [],
+      warnings: [],
+      safeMode: false
+    });
+  }
+
+  async stopAll() {
+    const results = [];
+    for (const [projectId, state] of [...this.projectStates.entries()]) {
+      if (!['starting', 'running', 'stopping'].includes(state?.status)) continue;
+      try { results.push({ projectId, ...(await this.stop(projectId)) }); }
+      catch (error) { results.push({ projectId, success: false, error: error.message }); }
+    }
+    return { success: results.every(item => item.success !== false), results };
+  }
+
+  markCleanShutdown() {
+    for (const [projectId, state] of this.projectStates.entries()) {
+      if (!['starting', 'running', 'stopping'].includes(state?.status)) continue;
+      this.projectStates.set(projectId, { status: 'stopped', services: [], stoppedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    }
+    this._persistStateRegistry(true);
+    return { success: true };
   }
 
   _read() {
@@ -86,7 +254,7 @@ class ProjectManager {
     const dir = path.dirname(this.registryPath);
     fs.mkdirSync(dir, { recursive: true });
     const temp = `${this.registryPath}.${process.pid}.tmp`;
-    const payload = { schemaVersion: 1, updatedAt: new Date().toISOString(), projects };
+    const payload = { schemaVersion: 2, updatedAt: new Date().toISOString(), projects };
     fs.writeFileSync(temp, JSON.stringify(payload, null, 2), { encoding: 'utf8', mode: 0o600 });
     try {
       fs.renameSync(temp, this.registryPath);
@@ -122,6 +290,28 @@ class ProjectManager {
     for (const [key, value] of Object.entries(input.commands || template.commands || {})) {
       if (/^[a-z][a-z0-9_-]{0,40}$/i.test(key) && typeof value === 'string' && value.length <= 2000) commands[key] = value;
     }
+    const environmentProfiles = {};
+    const rawProfiles = input.environmentProfiles && typeof input.environmentProfiles === 'object' ? input.environmentProfiles : {};
+    for (const [profileName, profile] of Object.entries(rawProfiles).slice(0, 20)) {
+      if (!/^[a-z][a-z0-9_-]{0,30}$/i.test(profileName) || !profile || typeof profile !== 'object') continue;
+      const profileEnv = {};
+      for (const [key, value] of Object.entries(profile.env || {}).slice(0, 200)) {
+        if (/^[A-Za-z_][A-Za-z0-9_]{0,99}$/.test(key)) profileEnv[key] = String(value).slice(0, 8192);
+      }
+      environmentProfiles[profileName] = { env: profileEnv, description: String(profile.description || '').slice(0, 300) };
+    }
+    if (!Object.keys(environmentProfiles).length) environmentProfiles.development = { env: {}, description: 'Local development' };
+    const activeEnvironment = Object.hasOwn(environmentProfiles, input.activeEnvironment) ? input.activeEnvironment : Object.keys(environmentProfiles)[0];
+    const hooks = {};
+    for (const name of ['beforeStart', 'afterStart', 'beforeStop', 'afterStop']) {
+      const commandName = String(input.hooks?.[name] || '');
+      if (commandName && Object.hasOwn(commands, commandName)) hooks[name] = commandName;
+    }
+    const tags = uniqueStrings(input.tags, 20, 40);
+    const resourceLimits = {
+      memoryMB: Math.max(0, Math.min(131072, Number(input.resourceLimits?.memoryMB) || 0)),
+      idleMinutes: Math.max(0, Math.min(10080, Number(input.resourceLimits?.idleMinutes) || 0))
+    };
     return {
       id: typeof input.id === 'string' && /^[a-f0-9-]{16,64}$/i.test(input.id) ? input.id : crypto.randomUUID(),
       name,
@@ -136,6 +326,13 @@ class ProjectManager {
       runtimeVersions,
       env,
       commands,
+      environmentProfiles,
+      activeEnvironment,
+      hooks,
+      tags,
+      color: /^#[0-9a-f]{6}$/i.test(input.color || '') ? input.color : '#e94560',
+      resourceLimits,
+      source: normalizeSource(input.source),
       databaseConnectionId: typeof input.databaseConnectionId === 'string' ? input.databaseConnectionId : '',
       autoOpen: input.autoOpen !== false,
       createdAt: input.createdAt || new Date().toISOString(),
@@ -169,7 +366,27 @@ class ProjectManager {
       lines.push('commands:');
       for (const [name, command] of commands) lines.push(`  ${name}: ${JSON.stringify(command)}`);
     }
+    lines.push(`environment: ${JSON.stringify(project.activeEnvironment || 'development')}`);
+    if (project.tags?.length) lines.push(`tags: ${JSON.stringify(project.tags)}`);
+    const hooks = Object.entries(project.hooks || {});
+    if (hooks.length) {
+      lines.push('hooks:');
+      for (const [name, command] of hooks) lines.push(`  ${name}: ${JSON.stringify(command)}`);
+    }
     return `${lines.join('\n')}\n`;
+  }
+
+  _writeLock(project) {
+    const payload = {
+      schemaVersion: 1,
+      kind: 'KitsuneServLock',
+      projectId: project.id,
+      services: project.services,
+      runtimeVersions: project.runtimeVersions,
+      environment: project.activeEnvironment,
+      generatedAt: new Date().toISOString()
+    };
+    fs.writeFileSync(path.join(project.root, 'kitsune.lock'), `${JSON.stringify(payload, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
   }
 
   _scaffold(project) {
@@ -197,6 +414,7 @@ class ProjectManager {
     if (project.templateId === 'static' || project.templateId === 'blank') {
       this._writeIfMissing(path.join(publicRoot, 'index.html'), `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${project.name.replace(/[<>&"']/g, '')}</title></head><body><h1>KitsuneServ: ${project.name.replace(/[<>&"']/g, '')}</h1></body></html>\n`);
     }
+    this._writeLock(project);
   }
 
   list() {
@@ -212,6 +430,11 @@ class ProjectManager {
     const project = this._read().find(item => item.id === id || item.slug === id);
     if (!project) throw new Error('Project not found');
     return { ...project, documentRoot: path.resolve(project.root, project.publicDir), state: this.projectStates.get(project.id) || { status: 'stopped', services: [] } };
+  }
+
+  syncDomains(options = {}) {
+    if (!this.domainManager) return { success: false, skipped: true, error: 'Local domain management is unavailable' };
+    return this.domainManager.apply(this.list(), options);
   }
 
   create(input = {}) {
@@ -237,6 +460,7 @@ class ProjectManager {
     if (projects.some((item, itemIndex) => itemIndex !== index && item.slug === next.slug)) throw new Error('A project with this name already exists');
     projects[index] = next;
     this._write(projects);
+    if (fs.existsSync(next.root)) this._writeLock(next);
     return this.get(next.id);
   }
 
@@ -246,8 +470,12 @@ class ProjectManager {
     if (index < 0) return { success: false, error: 'Project not found' };
     const project = projects[index];
     if (this.projectStates.get(project.id)?.status === 'running') return { success: false, error: 'Stop the project before removing it' };
+    const secretKeys = this.listSecretKeys(project.id);
     projects.splice(index, 1);
     this._write(projects);
+    this.projectStates.delete(project.id);
+    this._persistStateRegistry(false);
+    if (this.secretStore) for (const key of secretKeys) this.secretStore.remove(this._projectSecretKey(project.id, key));
     let filesRemoved = false;
     if (options.deleteFiles) {
       if (!isPathInside(this.workspaceRoot, project.root) || path.resolve(project.root) === path.resolve(this.workspaceRoot)) {
@@ -281,18 +509,30 @@ class ProjectManager {
   async start(id) {
     const project = this.get(id);
     if (this.projectStates.get(project.id)?.status === 'running') return { success: true, alreadyRunning: true, project };
+    if (this.configManager.getConfig().general?.projectPreflight !== false && this.diagnosticsManager?.preflight) {
+      const preflight = await this.diagnosticsManager.preflight(project);
+      if (!preflight.ready) {
+        return {
+          success: false,
+          errorCode: 'PROJECT_PREFLIGHT_FAILED',
+          error: `Project preflight failed: ${preflight.counts.error} blocking issue(s)`,
+          preflight
+        };
+      }
+    }
     const requestedWeb = project.services.find(service => WEB_SERVICES.includes(service));
     if (requestedWeb) {
       const conflict = this.list().find(other => other.id !== project.id && ['starting', 'running'].includes(other.state?.status) && other.services.includes(requestedWeb));
       if (conflict) return { success: false, error: `${requestedWeb} is already assigned to running project ${conflict.name}. Stop it or use another web server.` };
     }
     return this.activityManager.run('project:start', `Start ${project.name}`, { projectId: project.id }, async activity => {
-      this.projectStates.set(project.id, { status: 'starting', services: [] });
+      this._setProjectState(project.id, { status: 'starting', services: [] });
       const newlyStarted = [];
       const attached = [];
       const switchedVersions = [];
       let webRestore = null;
       try {
+        await this._runHook(project, 'beforeStart', activity);
         const config = this.configManager.getConfig();
         const web = project.services.find(service => WEB_SERVICES.includes(service));
         if (web) {
@@ -314,7 +554,7 @@ class ProjectManager {
             sslCertificate: webProfile.sslCertificate,
             sslCertificateKey: webProfile.sslCertificateKey
           };
-          this.projectStates.set(project.id, { status: 'starting', services: [], webRestore });
+          this._setProjectState(project.id, { status: 'starting', services: [], webRestore });
           webProfile.serverName = project.domain;
           if (project.https) {
             const certificate = this.domainManager?.certificateStatus(project.domain);
@@ -368,7 +608,8 @@ class ProjectManager {
           attached.push(service);
         }
         const state = { status: 'running', services: attached, startedAt: new Date().toISOString(), url: this.getUrl(project.id), webRestore };
-        this.projectStates.set(project.id, state);
+        await this._runHook(project, 'afterStart', activity);
+        this._setProjectState(project.id, state);
         activity.update({ stage: 'ready', progress: 95, message: `${project.name} is ready` });
         return { success: true, project: this.get(project.id), started: newlyStarted, attached, url: state.url };
       } catch (error) {
@@ -378,7 +619,7 @@ class ProjectManager {
           try { await this.serviceManager.switchVersion(previous.service, previous.version); } catch {}
         }
         await this._restoreWebProfile(webRestore);
-        this.projectStates.set(project.id, { status: 'failed', services: [], error: error.message });
+        this._setProjectState(project.id, { status: 'failed', services: [], error: error.message });
         throw error;
       }
     });
@@ -389,8 +630,10 @@ class ProjectManager {
     const state = this.projectStates.get(project.id);
     if (!state || state.status === 'stopped') return { success: true, alreadyStopped: true };
     return this.activityManager.run('project:stop', `Stop ${project.name}`, { projectId: project.id }, async activity => {
-      this.projectStates.set(project.id, { ...state, status: 'stopping' });
+      this._setProjectState(project.id, { ...state, status: 'stopping' });
       const stopped = [];
+      const hookWarnings = [];
+      try { await this._runHook(project, 'beforeStop', activity); } catch (error) { hookWarnings.push(error.message); }
       const services = this._orderedServices(project, true);
       for (let index = 0; index < services.length; index += 1) {
         const service = services[index];
@@ -402,8 +645,9 @@ class ProjectManager {
         }
       }
       await this._restoreWebProfile(state.webRestore);
-      this.projectStates.set(project.id, { status: 'stopped', services: [], stoppedAt: new Date().toISOString() });
-      return { success: true, stopped };
+      try { await this._runHook(project, 'afterStop', activity); } catch (error) { hookWarnings.push(error.message); }
+      this._setProjectState(project.id, { status: 'stopped', services: [], stoppedAt: new Date().toISOString() });
+      return { success: true, stopped, hookWarnings };
     });
   }
 
@@ -441,15 +685,62 @@ class ProjectManager {
     return profile?.port ? `http://127.0.0.1:${profile.port}` : '';
   }
 
+  async _runHook(project, hookName, activity) {
+    const commandName = project.hooks?.[hookName];
+    if (!commandName || !this.hookRunner) return { success: true, skipped: true };
+    activity?.update({ stage: `hook:${hookName}`, message: `Running ${hookName}: ${commandName}` });
+    const result = await this.hookRunner(project.id, commandName, { hookName });
+    if (result?.success === false) throw new Error(`${hookName} hook failed: ${result.error || commandName}`);
+    return result || { success: true };
+  }
+
+  _projectSecretKey(projectId, name) {
+    return `project:${projectId}:env:${name}`;
+  }
+
+  listSecretKeys(id) {
+    const project = this.get(id);
+    if (!this.secretStore) return [];
+    const prefix = this._projectSecretKey(project.id, '');
+    return this.secretStore.keys(prefix).map(key => key.slice(prefix.length)).filter(Boolean).sort();
+  }
+
+  setSecrets(id, secrets = {}) {
+    const project = this.get(id);
+    if (!this.secretStore) return { success: false, error: 'Secret store is not available' };
+    for (const [key, value] of Object.entries(secrets)) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]{0,99}$/.test(key)) return { success: false, error: `Invalid environment key: ${key}` };
+      if (value === null) this.secretStore.remove(this._projectSecretKey(project.id, key));
+      else if (typeof value === 'string' && value.length <= 16384) this.secretStore.set(this._projectSecretKey(project.id, key), value);
+      else return { success: false, error: `Invalid secret value for ${key}` };
+    }
+    return { success: true, keys: this.listSecretKeys(project.id) };
+  }
+
+  resolveEnvironment(id, options = {}) {
+    const project = typeof id === 'object' ? id : this.get(id);
+    const profile = project.environmentProfiles?.[project.activeEnvironment] || { env: {} };
+    const result = { ...(project.env || {}), ...(profile.env || {}) };
+    if (options.includeSecrets && this.secretStore) {
+      const keys = new Set([...Object.keys(result), ...this.listSecretKeys(project.id)]);
+      for (const key of keys) {
+        const secret = this.secretStore.get(this._projectSecretKey(project.id, key));
+        if (secret) result[key] = secret;
+      }
+    }
+    return result;
+  }
+
   exportManifest(id) {
     const project = this.get(id);
     const { state, documentRoot, ...manifest } = project;
     for (const key of Object.keys(manifest.env || {})) if (SECRET_ENV.test(key)) manifest.env[key] = '';
-    return { schemaVersion: 1, kind: 'KitsuneServProject', project: manifest };
+    manifest.secretKeys = this.listSecretKeys(project.id);
+    return { schemaVersion: 2, kind: 'KitsuneServProject', project: manifest };
   }
 
   importManifest(payload, options = {}) {
-    if (!payload || payload.kind !== 'KitsuneServProject' || payload.schemaVersion !== 1 || !payload.project) {
+    if (!payload || payload.kind !== 'KitsuneServProject' || ![1, 2].includes(payload.schemaVersion) || !payload.project) {
       throw new Error('Unsupported KitsuneServ project manifest');
     }
     const project = { ...payload.project, id: undefined, root: options.root || payload.project.root, createDirectory: options.createDirectory };

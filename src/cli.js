@@ -12,6 +12,8 @@ const ActivityManager = require('./activity-manager');
 const DomainManager = require('./domain-manager');
 const ProjectManager = require('./project-manager');
 const DiagnosticsManager = require('./diagnostics-manager');
+const SecretStore = require('./secret-store');
+const CommandManager = require('./command-manager');
 
 function parseYamlScalar(value) {
   const trimmed = String(value || '').trim();
@@ -59,8 +61,12 @@ function createRuntime() {
   const activities = new ActivityManager(dataRoot);
   const domains = new DomainManager(dataRoot);
   const projects = new ProjectManager(dataRoot, config, downloads, services, activities, domains);
+  const secrets = new SecretStore(dataRoot);
+  const commands = new CommandManager(projects, pathManager, activities, { allowDesktopIntegration: false });
+  projects.setSecretStore(secrets);
+  projects.setHookRunner((projectId, commandName, options) => commands.runAndWait(projectId, commandName, options));
   const diagnostics = new DiagnosticsManager(dataRoot, config, downloads, services, pathManager);
-  return { dataRoot, defaultsRoot, config, downloads, services, pathManager, activities, domains, projects, diagnostics };
+  return { dataRoot, defaultsRoot, config, downloads, services, pathManager, activities, domains, projects, diagnostics, secrets, commands };
 }
 
 function usage() {
@@ -90,6 +96,10 @@ function print(value, json = false) {
   else process.stdout.write(`${value}\n`);
 }
 
+function synchronizeCreatedProject(runtime, project) {
+  return { ...project, hostsSync: runtime.projects.syncDomains({ elevate: process.platform === 'win32' }) };
+}
+
 async function resolveCurrentProject(runtime, requestedId, invocationRoot = process.cwd()) {
   if (requestedId) return runtime.projects.get(requestedId);
   const cwd = path.resolve(invocationRoot);
@@ -98,7 +108,7 @@ async function resolveCurrentProject(runtime, requestedId, invocationRoot = proc
   const manifestPath = path.join(cwd, 'kitsune.yml');
   if (!fs.existsSync(manifestPath)) throw new Error('No registered project or kitsune.yml found in the current directory');
   const manifest = parseProjectManifest(fs.readFileSync(manifestPath, 'utf8'));
-  return runtime.projects.create({ ...manifest, root: cwd, createDirectory: false });
+  return synchronizeCreatedProject(runtime, runtime.projects.create({ ...manifest, root: cwd, createDirectory: false }));
 }
 
 async function main(argv = process.argv.slice(2)) {
@@ -127,7 +137,7 @@ async function main(argv = process.argv.slice(2)) {
     if (subcommand === 'list') { print(runtime.projects.list(), true); return 0; }
     if (subcommand === 'create') {
       if (!rest[0]) throw new Error('Project name is required');
-      print(runtime.projects.create({ name: rest[0], templateId: rest[1] || 'blank' }), true); return 0;
+      print(synchronizeCreatedProject(runtime, runtime.projects.create({ name: rest[0], templateId: rest[1] || 'blank' })), true); return 0;
     }
     if (subcommand === 'export') {
       if (!rest[0]) throw new Error('Project id is required');
@@ -139,7 +149,7 @@ async function main(argv = process.argv.slice(2)) {
     if (subcommand === 'import') {
       if (!rest[0]) throw new Error('Manifest file is required');
       const payload = JSON.parse(fs.readFileSync(path.resolve(invocationRoot, rest[0]), 'utf8'));
-      print(runtime.projects.importManifest(payload, { createDirectory: true }), true); return 0;
+      print(synchronizeCreatedProject(runtime, runtime.projects.importManifest(payload, { createDirectory: true })), true); return 0;
     }
     throw new Error('Unknown project command');
   }
@@ -163,9 +173,17 @@ async function main(argv = process.argv.slice(2)) {
   }
   if (command === 'install') {
     if (!subcommand || !rest[0]) throw new Error('Service and version are required');
-    const result = await runtime.downloads.download(subcommand, rest[0], progress => {
-      if (progress?.percent != null) process.stderr.write(`\r${subcommand} ${rest[0]}: ${Math.round(progress.percent)}%`);
-    });
+    const progress = payload => {
+      if (payload?.percent != null) process.stderr.write(`\r${subcommand} ${rest[0]}: ${Math.round(payload.percent)}%`);
+    };
+    let result;
+    if (subcommand === 'python' && process.platform === 'win32') {
+      const manager = await runtime.pathManager.installOfficialPythonManager();
+      result = manager.success ? await runtime.pathManager.installPythonRuntime(rest[0], progress) : manager;
+    } else {
+      result = await runtime.downloads.download(subcommand, rest[0], progress);
+    }
+    if (result.success) runtime.pathManager.syncIfSelected(subcommand);
     process.stderr.write('\n'); print(result, true); return result.success ? 0 : 2;
   }
   if (command === 'use') {

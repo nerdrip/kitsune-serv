@@ -85,6 +85,11 @@ class SecretStore {
     return Boolean(this._read().items[key]);
   }
 
+  keys(prefix = '') {
+    const normalized = String(prefix || '');
+    return Object.keys(this._read().items).filter(key => key.startsWith(normalized)).sort();
+  }
+
   remove(key) {
     const payload = this._read();
     const existed = Boolean(payload.items[key]);

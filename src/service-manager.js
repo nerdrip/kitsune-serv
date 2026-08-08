@@ -1,7 +1,7 @@
 const { spawn, execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-const { SERVICE_IDS, resolveInside, assertProjectName, assertSafeSegment } = require('./path-utils');
+const { SERVICE_IDS, MANAGED_IDS, resolveInside, assertProjectName, assertSafeSegment } = require('./path-utils');
 
 const WEB_SERVICES = Object.freeze(['apache', 'nginx', 'caddy']);
 const PHP_BUILTIN_EXTENSIONS = new Set([
@@ -298,10 +298,6 @@ class ServiceManager {
         const sslCertificate = path.resolve(profile.sslCertificate || path.join(confDir, 'server.crt')).replace(/\\/g, '/');
         const sslCertificateKey = path.resolve(profile.sslCertificateKey || path.join(confDir, 'server.key')).replace(/\\/g, '/');
         if (!fs.existsSync(docRoot)) fs.mkdirSync(docRoot, { recursive: true });
-        const indexPath = path.join(docRoot, 'index.html');
-        if (!fs.existsSync(indexPath)) {
-          fs.writeFileSync(indexPath, '<html><body><h1>KitsuneServ - It works!</h1></body></html>', 'utf-8');
-        }
 
         // PHP integration via mod_proxy_fcgi
         let phpHandler = '';
@@ -433,10 +429,6 @@ ${profile.customConfig || ''}
         const sslCertificate = path.resolve(profile.sslCertificate || path.join(confDir, 'server.crt')).replace(/\\/g, '/');
         const sslCertificateKey = path.resolve(profile.sslCertificateKey || path.join(confDir, 'server.key')).replace(/\\/g, '/');
         if (!fs.existsSync(docRoot)) fs.mkdirSync(docRoot, { recursive: true });
-        const indexPath = path.join(docRoot, 'index.html');
-        if (!fs.existsSync(indexPath)) {
-          fs.writeFileSync(indexPath, '<html><body><h1>KitsuneServ - It works!</h1></body></html>', 'utf-8');
-        }
 
         // PHP integration via FastCGI
         let phpLocation = '';
@@ -1069,7 +1061,7 @@ ${profile.customConfig || ''}
   }
 
   async _applyActiveRuntimeChange(section, mutateConfig) {
-    if (!SERVICE_IDS.includes(section)) return { success: false, error: 'Unknown service' };
+    if (!MANAGED_IDS.includes(section)) return { success: false, error: 'Unknown managed component' };
     const previousConfig = this.configManager.getConfig();
     const nextConfig = JSON.parse(JSON.stringify(previousConfig));
     const previousProfile = this.configManager.getActiveProfile(previousConfig, section);

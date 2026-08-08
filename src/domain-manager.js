@@ -72,23 +72,24 @@ class DomainManager {
     const tempDir = path.join(this.appRoot, 'temp');
     fs.mkdirSync(tempDir, { recursive: true });
     const tempSource = path.join(tempDir, `hosts-${crypto.randomUUID()}.tmp`);
+    let scriptPath = '';
     fs.writeFileSync(tempSource, content, { encoding: 'utf8', mode: 0o600 });
     try {
       if (process.platform === 'win32') {
-        const scriptPath = path.join(tempDir, `hosts-${crypto.randomUUID()}.ps1`);
+        scriptPath = path.join(tempDir, `hosts-${crypto.randomUUID()}.ps1`);
         const escapedSource = tempSource.replace(/'/g, "''");
         const escapedTarget = this.hostsPath.replace(/'/g, "''");
         fs.writeFileSync(scriptPath, `$ErrorActionPreference='Stop'\nCopy-Item -LiteralPath '${escapedSource}' -Destination '${escapedTarget}' -Force\n`, 'utf8');
         const escapedScript = scriptPath.replace(/'/g, "''");
-        const command = `$process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -PassThru -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','${escapedScript}'); exit $process.ExitCode`;
+        const command = `$process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','${escapedScript}'); exit $process.ExitCode`;
         execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { windowsHide: true, timeout: 120000 });
-        try { fs.unlinkSync(scriptPath); } catch {}
       } else {
         const probe = spawnSync('which', ['pkexec'], { encoding: 'utf8' });
         if (probe.status !== 0) throw new Error('Writing /etc/hosts requires administrator access. Install pkexec or run the sync command as root.');
         execFileSync('pkexec', ['cp', tempSource, this.hostsPath], { timeout: 120000, stdio: 'ignore' });
       }
     } finally {
+      try { if (scriptPath) fs.unlinkSync(scriptPath); } catch {}
       try { fs.unlinkSync(tempSource); } catch {}
     }
   }

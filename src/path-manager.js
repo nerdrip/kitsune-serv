@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFile, execFileSync } = require('child_process');
-const { SERVICE_IDS, isPathInside } = require('./path-utils');
+const { MANAGED_IDS, isPathInside } = require('./path-utils');
 
 const BIN_CANDIDATES = Object.freeze({
   apache: ['bin', 'Apache24/bin'],
@@ -20,8 +20,10 @@ const BIN_CANDIDATES = Object.freeze({
   redis: { win32: ['.'], other: ['bin'] },
   memcached: ['.', 'bin'],
   minio: ['.'],
-  python: { win32: ['.'], other: ['bin'] },
-  deno: ['.']
+  python: { win32: ['.', 'Scripts'], other: ['bin'] },
+  deno: ['.'],
+  composer: ['.'],
+  java: ['bin']
 });
 
 const WINDOWS_READ_PATH_SCRIPT = [
@@ -37,6 +39,17 @@ const WINDOWS_READ_MACHINE_PATH_SCRIPT = [
 const WINDOWS_WRITE_PATH_SCRIPT = [
   "$value = [Environment]::GetEnvironmentVariable('KITSUNESERV_USER_PATH_VALUE', 'Process')",
   "[Environment]::SetEnvironmentVariable('Path', $value, 'User')"
+].join('; ');
+
+const WINDOWS_READ_JAVA_HOME_SCRIPT = [
+  "$value = [Environment]::GetEnvironmentVariable('JAVA_HOME', 'User')",
+  'if ($null -ne $value) { [Console]::Out.Write($value) }'
+].join('; ');
+
+const WINDOWS_WRITE_JAVA_HOME_SCRIPT = [
+  "$value = [Environment]::GetEnvironmentVariable('KITSUNESERV_JAVA_HOME_VALUE', 'Process')",
+  "if ([string]::IsNullOrWhiteSpace($value)) { $value = $null }",
+  "[Environment]::SetEnvironmentVariable('JAVA_HOME', $value, 'User')"
 ].join('; ');
 
 const WINDOWS_WRITE_PYTHON_MANAGER_DEFAULT_SCRIPT = [
@@ -162,6 +175,8 @@ class PathManager {
     this._readUserPathOverride = options.readUserPath;
     this._readMachinePathOverride = options.readMachinePath;
     this._writeUserPathOverride = options.writeUserPath;
+    this._readUserJavaHomeOverride = options.readUserJavaHome;
+    this._writeUserJavaHomeOverride = options.writeUserJavaHome;
     this._broadcastOverride = options.broadcast;
     this._registerPythonRuntimesOverride = options.registerPythonRuntimes;
     this._setPythonManagerDefaultOverride = options.setPythonManagerDefault;
@@ -180,12 +195,12 @@ class PathManager {
     return this.platform === 'win32' ? candidates.win32 : candidates.other;
   }
 
-  getEntries(serviceIds = SERVICE_IDS) {
+  getEntries(serviceIds = MANAGED_IDS) {
     const config = this.configManager.getConfig();
     const entries = [];
     const seen = new Set();
-    const selected = new Set(Array.isArray(serviceIds) ? serviceIds : SERVICE_IDS);
-    for (const section of SERVICE_IDS) {
+    const selected = new Set(Array.isArray(serviceIds) ? serviceIds : MANAGED_IDS);
+    for (const section of MANAGED_IDS) {
       if (!selected.has(section)) continue;
       const profile = this.configManager.getActiveProfile(config, section);
       if (!profile || !this.downloadManager.isInstalled(section, profile.version)) continue;
@@ -202,7 +217,23 @@ class PathManager {
         }
       }
     }
+    // Composer is a PHAR and therefore always needs the active PHP binary,
+    // even when only Composer itself was selected for the system PATH.
+    const composerProfile = selected.has('composer') ? this.configManager.getActiveProfile(config, 'composer') : null;
+    if (composerProfile && this.downloadManager.isInstalled('composer', composerProfile.version) && !selected.has('php')) {
+      for (const candidate of this.getEntries(['php'])) {
+        const key = normalizeEntry(candidate, this.platform);
+        if (!seen.has(key)) { seen.add(key); entries.push(candidate); }
+      }
+    }
     return entries;
+  }
+
+  _javaHome(config = this.configManager.getConfig()) {
+    const profile = this.configManager.getActiveProfile(config, 'java');
+    if (!profile || !this.downloadManager.isInstalled('java', profile.version)) return '';
+    const home = this.downloadManager.getInstallPath('java', profile.version);
+    return fs.existsSync(path.join(home, 'bin')) ? home : '';
   }
 
   isManagedEntry(entry) {
@@ -239,7 +270,7 @@ class PathManager {
       catch { return config; }
       const currentParts = this.split(current);
       const currentSet = new Set(currentParts.map(entry => normalizeEntry(entry, this.platform)));
-      for (const section of SERVICE_IDS) {
+      for (const section of MANAGED_IDS) {
         const serviceRoot = path.join(this.downloadManager.dataDir, section);
         const hasCurrentEntry = this.getEntries([section]).some(entry => currentSet.has(normalizeEntry(entry, this.platform)));
         const hasPreviousVersionEntry = currentParts.some(entry => {
@@ -256,11 +287,11 @@ class PathManager {
   getSelectedServices() {
     const config = this._ensureSelectionInitialized();
     const selected = Array.isArray(config.general?.pathServices) ? config.general.pathServices : [];
-    return SERVICE_IDS.filter(section => selected.includes(section));
+    return MANAGED_IDS.filter(section => selected.includes(section));
   }
 
   _saveSelection(serviceIds) {
-    const selected = SERVICE_IDS.filter(section => serviceIds.includes(section));
+    const selected = MANAGED_IDS.filter(section => serviceIds.includes(section));
     const config = this.configManager.getConfig();
     config.general = { ...(config.general || {}), pathServices: selected, pathSelectionInitialized: true };
     const result = this.configManager.saveConfig(config);
@@ -282,6 +313,24 @@ class PathManager {
     return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', WINDOWS_READ_MACHINE_PATH_SCRIPT], {
       encoding: 'utf8', windowsHide: true
     });
+  }
+
+  readUserJavaHome() {
+    if (this._readUserJavaHomeOverride) return String(this._readUserJavaHomeOverride() || '');
+    if (this.platform !== 'win32') return '';
+    return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', WINDOWS_READ_JAVA_HOME_SCRIPT], {
+      encoding: 'utf8', windowsHide: true
+    }).trim();
+  }
+
+  writeUserJavaHome(value) {
+    if (this._writeUserJavaHomeOverride) return this._writeUserJavaHomeOverride(value) !== false;
+    if (this.platform !== 'win32') return false;
+    execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', WINDOWS_WRITE_JAVA_HOME_SCRIPT], {
+      encoding: 'utf8', windowsHide: true,
+      env: { ...process.env, KITSUNESERV_JAVA_HOME_VALUE: String(value || '') }
+    });
+    return true;
   }
 
   _officialPythonManagerStatus() {
@@ -441,6 +490,58 @@ class PathManager {
       })
       .finally(() => { this._pythonManagerInstallPromise = null; });
     return this._pythonManagerInstallPromise;
+  }
+
+  async installPythonRuntime(version, onProgress) {
+    if (this.platform !== 'win32') return { success: false, error: 'Python Install Manager provisioning is available only on Windows' };
+    if (!/^[0-9]+(?:\.[0-9]+){1,2}$/.test(String(version || ''))) return { success: false, error: 'Invalid Python version' };
+    const manager = this._officialPythonManagerStatus();
+    if (!manager.installed || !manager.path) return { success: false, error: 'Official Python Install Manager is not installed' };
+    const target = this.downloadManager.getInstallPath('python', String(version));
+    const python = path.join(target, 'python.exe');
+    const hadPreviousRuntime = fs.existsSync(python);
+    if (fs.existsSync(python)) {
+      try {
+        execFileSync(python, ['-m', 'pip', '--version'], { encoding: 'utf8', windowsHide: true, timeout: 15000 });
+        return { success: true, path: target, alreadyInstalled: true, pipAvailable: true };
+      } catch {
+        // Older KitsuneServ builds used Python's embeddable archive, which has
+        // no supported pip. Replace it transactionally with a full runtime.
+      }
+    }
+    const staging = `${target}.manager-installing-${process.pid}-${Date.now()}`;
+    const backup = `${target}.manager-backup-${process.pid}-${Date.now()}`;
+    const remove = async candidate => { try { await fs.promises.rm(candidate, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {} };
+    await remove(staging);
+    onProgress?.({ service: 'python', version, stage: 'python-runtime', percent: 15 });
+    try {
+      await new Promise((resolve, reject) => {
+        execFile(manager.path, ['install', `--target=${staging}`, String(version), '-y'], {
+          encoding: 'utf8', windowsHide: true, timeout: 10 * 60 * 1000
+        }, (error, stdout, stderr) => error ? reject(new Error(String(stderr || stdout || error.message).trim())) : resolve());
+      });
+      const stagedPython = path.join(staging, 'python.exe');
+      if (!fs.existsSync(stagedPython)) throw new Error('Python Manager did not create python.exe');
+      execFileSync(stagedPython, ['-m', 'pip', '--version'], { encoding: 'utf8', windowsHide: true, timeout: 30000 });
+      onProgress?.({ service: 'python', version, stage: 'python-runtime', percent: 85 });
+      if (fs.existsSync(target)) await fs.promises.rename(target, backup);
+      try { await fs.promises.rename(staging, target); }
+      catch (error) {
+        if (fs.existsSync(backup) && !fs.existsSync(target)) await fs.promises.rename(backup, target);
+        throw error;
+      }
+      await remove(backup);
+      this._pythonIntegrationSignature = '';
+      this._ensurePythonLaunchers();
+      onProgress?.({ service: 'python', version, stage: 'done', percent: 100 });
+      return { success: true, path: target, upgradedFromEmbeddable: hadPreviousRuntime, pipAvailable: true };
+    } catch (error) {
+      await remove(staging);
+      if (fs.existsSync(backup) && !fs.existsSync(target)) {
+        try { await fs.promises.rename(backup, target); } catch {}
+      }
+      return { success: false, error: `Python installation failed: ${error.message}` };
+    }
   }
 
   _clearPythonManagerIntegration() {
@@ -655,12 +756,38 @@ class PathManager {
     return this._broadcastWindowsChange();
   }
 
+  _syncWindowsJavaHome(selected) {
+    if (this.platform !== 'win32') return '';
+    const config = this.configManager.getConfig();
+    const managedHome = selected.includes('java') ? this._javaHome(config) : '';
+    const current = this.readUserJavaHome();
+    config.general = { ...(config.general || {}) };
+    if (managedHome) {
+      if (current && !this.isManagedEntry(current) && !config.general.javaHomeBeforeKitsune) {
+        config.general.javaHomeBeforeKitsune = current;
+        this.configManager.saveConfig(config);
+      }
+      if (normalizeEntry(current || '.', this.platform) !== normalizeEntry(managedHome, this.platform)) {
+        this.writeUserJavaHome(managedHome);
+      }
+      return managedHome;
+    }
+    if (current && this.isManagedEntry(current)) {
+      const restore = String(config.general.javaHomeBeforeKitsune || '');
+      this.writeUserJavaHome(restore);
+      delete config.general.javaHomeBeforeKitsune;
+      this.configManager.saveConfig(config);
+      return restore;
+    }
+    return current;
+  }
+
   getStatus() {
     const selected = this.getSelectedServices();
     const pythonLauncher = this._ensurePythonLaunchers();
     const entries = this.getEntries(selected);
     const config = this.configManager.getConfig();
-    const services = SERVICE_IDS.map(section => {
+    const services = MANAGED_IDS.map(section => {
       const profile = this.configManager.getActiveProfile(config, section);
       const installed = Boolean(profile && this.downloadManager.isInstalled(section, profile.version));
       const serviceEntries = this.getEntries([section]);
@@ -676,7 +803,7 @@ class PathManager {
     if (this.platform !== 'win32') {
       const shellRc = this._getShellRcPath();
       const added = Boolean(shellRc && fs.existsSync(shellRc) && fs.readFileSync(shellRc, 'utf8').includes('# KitsuneServ PATH'));
-      return { added, enabled: selected.length > 0, entries, selected, services, integrationDisabled: this.systemIntegrationDisabled, python: this._pythonAliasStatus(selected, pythonLauncher) };
+      return { added, enabled: selected.length > 0, entries, selected, services, javaHome: selected.includes('java') ? this._javaHome(config) : '', integrationDisabled: this.systemIntegrationDisabled, python: this._pythonAliasStatus(selected, pythonLauncher) };
     }
     const current = this.readUserPath();
     const currentParts = this.split(current);
@@ -686,13 +813,13 @@ class PathManager {
     const hasAllActive = entries.length > 0 && [...activeSet].every(entry => currentSet.has(entry));
     const hasOnlyActiveManaged = managedParts.every(entry => activeSet.has(normalizeEntry(entry, this.platform)));
     const synced = (entries.length === 0 ? managedParts.length === 0 : hasAllActive && hasOnlyActiveManaged);
-    return { added: selected.length > 0 && synced, enabled: selected.length > 0, synced, entries, selected, services, integrationDisabled: this.systemIntegrationDisabled, python: this._pythonAliasStatus(selected, pythonLauncher) };
+    return { added: selected.length > 0 && synced, enabled: selected.length > 0, synced, entries, selected, services, javaHome: selected.includes('java') ? this._javaHome(config) : '', integrationDisabled: this.systemIntegrationDisabled, python: this._pythonAliasStatus(selected, pythonLauncher) };
   }
 
   apply(serviceIds) {
     try {
       if (this.systemIntegrationDisabled) return { success: false, error: 'System PATH integration is disabled for this application run' };
-      if (!Array.isArray(serviceIds) || serviceIds.some(section => !SERVICE_IDS.includes(section))) {
+      if (!Array.isArray(serviceIds) || serviceIds.some(section => !MANAGED_IDS.includes(section))) {
         return { success: false, error: 'Invalid PATH service selection' };
       }
       const selected = this._saveSelection([...new Set(serviceIds)]);
@@ -700,8 +827,8 @@ class PathManager {
     } catch (err) { return { success: false, error: err.message }; }
   }
 
-  add(serviceIds = SERVICE_IDS) {
-    if (!Array.isArray(serviceIds) || serviceIds.some(section => !SERVICE_IDS.includes(section))) {
+  add(serviceIds = MANAGED_IDS) {
+    if (!Array.isArray(serviceIds) || serviceIds.some(section => !MANAGED_IDS.includes(section))) {
       return { success: false, error: 'Invalid PATH service selection' };
     }
     return this.apply([...new Set([...this.getSelectedServices(), ...serviceIds])]);
@@ -715,10 +842,13 @@ class PathManager {
       if (this.platform === 'win32') {
         const separator = ';';
         const newPath = [...entries, ...this.stripManaged(this.readUserPath())].join(separator);
+        const javaHome = this._syncWindowsJavaHome(selected);
         const broadcast = this.writeUserPath(newPath);
         this.env.PATH = [...entries, ...this.stripManaged(this.env.PATH || '')].join(separator);
+        if (javaHome) this.env.JAVA_HOME = javaHome;
+        else if (this.isManagedEntry(this.env.JAVA_HOME || '')) delete this.env.JAVA_HOME;
         return {
-          success: true, entries, selected, broadcast,
+          success: true, entries, selected, broadcast, javaHome,
           warning: broadcast ? undefined : 'PATH was saved, but Windows could not broadcast the environment change. Reopen Explorer or sign out to refresh inherited environments.',
           pending: selected.filter(section => this.getEntries([section]).length === 0),
           python: this._pythonAliasStatus(selected, pythonLauncher)
@@ -730,7 +860,8 @@ class PathManager {
       content = this._removeShellBlock(content);
       if (selected.length) {
         const quoted = entries.map(entry => `'${entry.replace(/'/g, `'"'"'`)}'`).join(':');
-        content += `\n# KitsuneServ PATH - START\nexport PATH=${quoted}${quoted ? ':' : ''}$PATH\n# KitsuneServ PATH - END\n`;
+        const javaHome = selected.includes('java') ? this._javaHome() : '';
+        content += `\n# KitsuneServ PATH - START\n${javaHome ? `export JAVA_HOME='${javaHome.replace(/'/g, `'"'"'`)}'\n` : ''}export PATH=${quoted}${quoted ? ':' : ''}$PATH\n# KitsuneServ PATH - END\n`;
       }
       fs.writeFileSync(shellRc, content, 'utf8');
       this.env.PATH = [...entries, ...this.stripManaged(this.env.PATH || '')].join(':');
@@ -739,10 +870,10 @@ class PathManager {
   }
 
   remove(serviceIds) {
-    if (serviceIds !== undefined && (!Array.isArray(serviceIds) || serviceIds.some(section => !SERVICE_IDS.includes(section)))) {
+    if (serviceIds !== undefined && (!Array.isArray(serviceIds) || serviceIds.some(section => !MANAGED_IDS.includes(section)))) {
       return { success: false, error: 'Invalid PATH service selection' };
     }
-    const removing = serviceIds === undefined ? SERVICE_IDS : serviceIds;
+    const removing = serviceIds === undefined ? MANAGED_IDS : serviceIds;
     return this.apply(this.getSelectedServices().filter(section => !removing.includes(section)));
   }
 
@@ -753,13 +884,13 @@ class PathManager {
   }
 
   syncForConfigTransition(previous, current) {
-    const selected = SERVICE_IDS.filter(section => current?.general?.pathServices?.includes(section));
-    const previousSelected = SERVICE_IDS.filter(section => previous?.general?.pathServices?.includes(section));
+    const selected = MANAGED_IDS.filter(section => current?.general?.pathServices?.includes(section));
+    const previousSelected = MANAGED_IDS.filter(section => previous?.general?.pathServices?.includes(section));
     const pythonVersionChanged = this.configManager.getActiveProfile(previous, 'python')?.version
       !== this.configManager.getActiveProfile(current, 'python')?.version;
     if (pythonVersionChanged) this._ensurePythonLaunchers();
     const selectionChanged = selected.join('|') !== previousSelected.join('|');
-    const activeVersionChanged = SERVICE_IDS.some(section => {
+    const activeVersionChanged = MANAGED_IDS.some(section => {
       if (!selected.includes(section) && !previousSelected.includes(section)) return false;
       return this.configManager.getActiveProfile(previous, section)?.version
         !== this.configManager.getActiveProfile(current, section)?.version;
@@ -774,10 +905,29 @@ class PathManager {
     const env = { ...baseEnvironment };
     if (this.env.PYTHON_MANAGER_DEFAULT) env.PYTHON_MANAGER_DEFAULT = this.env.PYTHON_MANAGER_DEFAULT;
     const separator = this.platform === 'win32' ? ';' : ':';
+    let inheritedPath = env.PATH || env.Path || env.path || '';
+    if (this.platform === 'win32') {
+      // Electron inherits Explorer's environment only once. Re-read both
+      // registry-backed PATH values so a scan sees tools installed later.
+      const current = [];
+      try { current.push(this.readMachinePath()); } catch {}
+      try { current.push(this.readUserPath()); } catch {}
+      current.push(inheritedPath);
+      const seen = new Set();
+      inheritedPath = current.flatMap(value => this.split(value)).filter(entry => {
+        const key = normalizeEntry(entry, this.platform);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }).join(separator);
+      for (const key of Object.keys(env)) if (key.toLowerCase() === 'path' && key !== 'PATH') delete env[key];
+    }
     // The built-in terminal intentionally exposes every installed active
     // runtime, independently from the optional Windows user PATH selection.
-    const active = this.getEntries(SERVICE_IDS);
-    env.PATH = [...active, ...this.stripManaged(env.PATH || '')].join(separator);
+    const active = this.getEntries(MANAGED_IDS);
+    env.PATH = [...active, ...this.stripManaged(inheritedPath)].join(separator);
+    const javaHome = this._javaHome();
+    if (javaHome) env.JAVA_HOME = javaHome;
     return env;
   }
 

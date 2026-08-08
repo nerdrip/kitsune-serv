@@ -28,8 +28,22 @@ test('download paths cannot escape the managed servers directory', t => {
 test('catalog exposes all supported services and installed state', t => {
   const manager = createManager(t);
   const catalog = manager.getCatalog();
-  assert.equal(catalog.length, 16);
+  assert.equal(catalog.length, 18);
   assert.equal(catalog.find(service => service.id === 'node').versions[0].version, '24.18.0');
+  assert.equal(catalog.find(service => service.id === 'composer').category, 'Developer tools');
+  assert.equal(catalog.find(service => service.id === 'java').name, 'Eclipse Temurin JDK');
+});
+
+test('creates a platform launcher for managed Composer', async t => {
+  const manager = createManager(t);
+  manager._platform = 'win';
+  const target = manager.getInstallPath('composer', '2.10.2');
+  fs.mkdirSync(target, { recursive: true });
+  fs.writeFileSync(path.join(target, 'composer.phar'), 'synthetic phar');
+  await manager._finalizeManagedTool('composer', target);
+  const launcher = fs.readFileSync(path.join(target, 'composer.cmd'), 'utf8');
+  assert.match(launcher, /php .*composer\.phar/i);
+  assert.equal(manager._urlExtension('OpenJDK25U-jdk_x64_windows_hotspot.zip'), '.zip');
 });
 
 test('plain HTTP downloads are rejected unless they target loopback', async t => {

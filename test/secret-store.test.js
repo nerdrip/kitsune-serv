@@ -12,8 +12,10 @@ test('secret store encrypts values at rest and can remove them', t => {
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const store = new SecretStore(root, { externalKey: 'unit-test-master-key' });
   store.set('database:test', 'super-secret-password');
+  store.set('database:second', 'another-value');
   assert.equal(store.get('database:test'), 'super-secret-password');
   assert.equal(store.has('database:test'), true);
+  assert.deepEqual(store.keys('database:'), ['database:second', 'database:test']);
   const contents = fs.readFileSync(path.join(root, 'config', 'secrets.json'), 'utf8');
   assert.doesNotMatch(contents, /super-secret-password/);
   assert.equal(store.remove('database:test').removed, true);

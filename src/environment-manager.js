@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { SERVICE_IDS, isPathInside } = require('./path-utils');
+const { MANAGED_IDS, isPathInside } = require('./path-utils');
 
 const SECRET_PATTERN = /(pass(word)?|secret|token|private[_-]?key|api[_-]?key|database_url)/i;
 
@@ -21,7 +21,7 @@ class EnvironmentManager {
 
   _sanitizeConfig(config) {
     const clean = structuredClone(config);
-    for (const service of SERVICE_IDS) {
+    for (const service of MANAGED_IDS) {
       for (const profile of clean[service]?.profiles || []) {
         for (const key of Object.keys(profile)) if (SECRET_PATTERN.test(key)) delete profile[key];
         if (Array.isArray(profile.envVars)) profile.envVars = profile.envVars.map(item => SECRET_PATTERN.test(item?.key || '') ? { ...item, value: '' } : item);
@@ -40,7 +40,7 @@ class EnvironmentManager {
   _payload(label = '') {
     const config = this._sanitizeConfig(this.configManager.getConfig());
     const installed = {};
-    for (const service of SERVICE_IDS) installed[service] = this.downloadManager.getInstalledVersions(service);
+    for (const service of MANAGED_IDS) installed[service] = this.downloadManager.getInstalledVersions(service);
     return {
       schemaVersion: 1,
       kind: 'KitsuneServEnvironment',
@@ -65,7 +65,7 @@ class EnvironmentManager {
     const currentProjects = this.projectManager.list();
     const required = [];
     for (const [service, versions] of Object.entries(payload.installed || {})) {
-      for (const version of versions || []) if (SERVICE_IDS.includes(service) && !this.downloadManager.isInstalled(service, version)) required.push({ service, version });
+      for (const version of versions || []) if (MANAGED_IDS.includes(service) && !this.downloadManager.isInstalled(service, version)) required.push({ service, version });
     }
     return {
       valid: true,
@@ -75,13 +75,13 @@ class EnvironmentManager {
       newProjects: payload.projects.filter(project => !currentProjects.some(current => current.slug === project.slug)).map(project => project.name),
       updatedProjects: payload.projects.filter(project => currentProjects.some(current => current.slug === project.slug)).map(project => project.name),
       missingVersions: required,
-      pathServices: (payload.pathServices || []).filter(service => SERVICE_IDS.includes(service))
+      pathServices: (payload.pathServices || []).filter(service => MANAGED_IDS.includes(service))
     };
   }
 
   _mergeSecretFields(next, current) {
     const result = structuredClone(next);
-    for (const service of SERVICE_IDS) {
+    for (const service of MANAGED_IDS) {
       for (const profile of result[service]?.profiles || []) {
         const currentProfile = current[service]?.profiles?.find(item => item.id === profile.id)
           || current[service]?.profiles?.find(item => item.version === profile.version);

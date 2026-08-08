@@ -1,6 +1,6 @@
 {
   "name": "kitsuneserv",
-  "version": "1.0.0-beta13",
+  "version": "3.0.0",
   "main": "src/main.js",
   "desktopName": "com.kitsuneserv.app.desktop",
   "bin": {
@@ -10,6 +10,8 @@
     "start": "electron .",
     "server": "node src/server.js",
     "test": "node --test test/*.test.js",
+    "verify:release": "npm test && npm run check && node scripts/check-release.js",
+    "test:packaged": "node scripts/smoke-packaged-app.js",
     "test:download-smoke": "node scripts/smoke-service-install.js",
     "check": "node scripts/check-project.js",
     "build:win": "electron-builder --win nsis --config.directories.output=artifacts/windows",
@@ -18,6 +20,8 @@
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux --config.directories.output=artifacts/linux",
     "build:server": "node scripts/build-server-package.js",
+    "build:plesk": "node scripts/build-plesk-extension.js",
+    "dist:release": "npm run dist:win && npm run build:server && npm run build:plesk && npm run build:sbom && npm run build:manifest && npm run build:checksums",
     "build:checksums": "node scripts/write-checksums.js",
     "build:sbom": "node scripts/generate-sbom.js",
     "build:manifest": "node scripts/generate-release-manifest.js",

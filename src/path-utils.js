@@ -9,6 +9,11 @@ const SERVICE_IDS = Object.freeze([
   'redis', 'memcached', 'minio'
 ]);
 
+// Installable developer tools participate in version/PATH management, but
+// they are not long-running services and must never be passed to start/stop.
+const TOOL_IDS = Object.freeze(['composer', 'java']);
+const MANAGED_IDS = Object.freeze([...SERVICE_IDS, ...TOOL_IDS]);
+
 const PROJECT_SECTIONS = Object.freeze(['node', 'go', 'bun', 'python', 'deno']);
 
 function isPathInside(root, candidate) {
@@ -57,6 +62,8 @@ function assertProjectName(value) {
 
 module.exports = {
   SERVICE_IDS,
+  TOOL_IDS,
+  MANAGED_IDS,
   PROJECT_SECTIONS,
   isPathInside,
   resolveInside,

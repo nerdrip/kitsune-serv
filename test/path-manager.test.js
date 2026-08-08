@@ -6,13 +6,14 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { PathManager, normalizeEntry } = require('../src/path-manager');
-const { SERVICE_IDS } = require('../src/path-utils');
+const { MANAGED_IDS } = require('../src/path-utils');
 
 const VERSIONS = Object.freeze({
   apache: '2.4.66', nginx: '1.30.4', caddy: '2.11.4', postgresql: '18.4',
   mysql: '8.4.10', mariadb: '12.3.2', mongodb: '8.0.6', php: '8.5.9',
   node: '24.18.0', go: '1.26.5', bun: '1.3.14', python: '3.14.3',
-  deno: '2.9.4', redis: '8.8.1', memcached: '1.6.8', minio: 'latest'
+  deno: '2.9.4', redis: '8.8.1', memcached: '1.6.8', minio: 'latest',
+  composer: '2.10.2', java: '25.0.4.7'
 });
 
 function clone(value) {
@@ -24,7 +25,7 @@ class MemoryConfigManager {
     this.config = {
       general: { pathServices: [], pathSelectionInitialized: initialized }
     };
-    for (const service of SERVICE_IDS) {
+    for (const service of MANAGED_IDS) {
       const profile = { id: `${service}-active`, name: service, version: VERSIONS[service] };
       this.config[service] = { enabled: true, activeProfileId: profile.id, profiles: [profile] };
     }
@@ -61,6 +62,7 @@ function createHarness(t, initialized = true, machinePath = '', managerOptions =
   const configManager = new MemoryConfigManager(initialized);
   const downloadManager = new FakeDownloadManager(root);
   let userPath = 'C:\\External Tools;C:\\Windows\\System32';
+  let javaHome = 'C:\\System Java';
   let pythonManagerOwned = false;
   const env = { PATH: userPath, LOCALAPPDATA: path.join(root, 'local-app-data') };
   const manager = new PathManager(downloadManager, configManager, {
@@ -68,6 +70,8 @@ function createHarness(t, initialized = true, machinePath = '', managerOptions =
     readUserPath: () => userPath,
     readMachinePath: () => machinePath,
     writeUserPath: value => { userPath = value; },
+    readUserJavaHome: () => javaHome,
+    writeUserJavaHome: value => { javaHome = value; },
     broadcast: () => true,
     readPythonManagerOwnership: () => pythonManagerOwned,
     writePythonManagerOwnership: value => { pythonManagerOwned = value; },
@@ -76,6 +80,7 @@ function createHarness(t, initialized = true, machinePath = '', managerOptions =
   return {
     root, manager, configManager, downloadManager, env,
     getUserPath: () => userPath,
+    getJavaHome: () => javaHome,
     getPythonManagerOwned: () => pythonManagerOwned,
     setUserPath: value => { userPath = value; env.PATH = value; }
   };
@@ -98,6 +103,24 @@ test('resolves nested Apache and PostgreSQL binary layouts', t => {
 
   assert.deepEqual(h.manager.getEntries(['apache']), [apacheBin]);
   assert.deepEqual(h.manager.getEntries(['postgresql']), [postgresBin]);
+});
+
+test('managed Composer brings active PHP and Java synchronizes JAVA_HOME', t => {
+  const h = createHarness(t);
+  const composer = install(h, 'composer');
+  const php = install(h, 'php');
+  const javaHome = h.downloadManager.getInstallPath('java', VERSIONS.java);
+  const javaBin = install(h, 'java', VERSIONS.java, 'bin');
+
+  assert.deepEqual(h.manager.getEntries(['composer']), [composer, php]);
+  const applied = h.manager.apply(['composer', 'java']);
+  assert.equal(applied.success, true);
+  assert.equal(h.getJavaHome(), javaHome);
+  assert.ok(normalizedEntries(h.manager, h.getUserPath()).includes(normalizeEntry(javaBin, 'win32')));
+
+  const removed = h.manager.apply(['composer']);
+  assert.equal(removed.success, true);
+  assert.equal(h.getJavaHome(), 'C:\\System Java');
 });
 
 test('applies an exact service selection and preserves unrelated user PATH entries', t => {

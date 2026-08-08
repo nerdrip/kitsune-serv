@@ -7,6 +7,7 @@ const os = require('os');
 const path = require('path');
 const ActivityManager = require('../src/activity-manager');
 const ProjectManager = require('../src/project-manager');
+const SecretStore = require('../src/secret-store');
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kitsune-projects-'));
@@ -37,7 +38,7 @@ function fixture(t) {
   const downloadManager = { isInstalled: () => true };
   const activityManager = new ActivityManager(root);
   const manager = new ProjectManager(root, configManager, downloadManager, serviceManager, activityManager);
-  return { root, manager, running, calls, config };
+  return { root, manager, running, calls, config, configManager, downloadManager, serviceManager, activityManager };
 }
 
 test('project manager creates normalized projects from stack templates', t => {
@@ -49,6 +50,18 @@ test('project manager creates normalized projects from stack templates', t => {
   assert.equal(fs.existsSync(project.root), true);
   assert.equal(manager.list().length, 1);
   assert.ok(manager.templates().some(template => template.id === 'laravel'));
+});
+
+test('project manager synchronizes every registered local domain on request', t => {
+  const { root, manager } = fixture(t);
+  manager.create({ name: 'API', templateId: 'blank' });
+  manager.domainManager = {
+    apply: (projects, options) => ({ success: true, domains: projects.map(project => project.domain), options })
+  };
+  const result = manager.syncDomains({ elevate: true });
+  assert.deepEqual(result.domains, ['api.test']);
+  assert.equal(result.options.elevate, true);
+  assert.equal(fs.existsSync(path.join(root, 'projects', 'workspaces', 'api')), true);
 });
 
 test('project start orders dependencies and stop reverses them', async t => {
@@ -109,4 +122,50 @@ test('stopping a web project restores the previous server domain and document ro
   await manager.stop(project.id);
   assert.equal(config.nginx.profiles[0].serverName, 'localhost');
   assert.equal(path.resolve(config.nginx.profiles[0].documentRoot), path.resolve(originalRoot));
+});
+
+test('project manager persists and recovers an interrupted running state', async t => {
+  const { root, manager, configManager, downloadManager, serviceManager } = fixture(t);
+  const project = manager.create({ name: 'Recoverable API', templateId: 'node-postgresql' });
+  await manager.start(project.id);
+  const nextSession = new ProjectManager(root, configManager, downloadManager, serviceManager, new ActivityManager(root));
+  const report = await nextSession.recover({ enabled: true });
+  assert.deepEqual(report.interrupted, [project.id]);
+  assert.equal(nextSession.get(project.id).state.status, 'interrupted');
+  assert.match(nextSession.get(project.id).state.error, /previous session/i);
+});
+
+test('project environment profiles, encrypted secrets and lifecycle hooks work together', async t => {
+  const { root, manager, calls } = fixture(t);
+  const secretStore = new SecretStore(root, { externalKey: 'project-test-key' });
+  const hooks = [];
+  manager.setSecretStore(secretStore);
+  manager.setHookRunner(async (_projectId, commandName, options) => {
+    hooks.push(`${options.hookName}:${commandName}`);
+    return { success: true };
+  });
+  const project = manager.create({
+    name: 'Profiled API',
+    templateId: 'node-postgresql',
+    env: { SHARED_VALUE: 'base' },
+    environmentProfiles: { development: { env: { PROFILE_VALUE: 'local' } } },
+    activeEnvironment: 'development',
+    commands: { prepare: 'node -e "process.exit(0)"', cleanup: 'node -e "process.exit(0)"' },
+    hooks: { beforeStart: 'prepare', afterStop: 'cleanup' },
+    tags: ['api', 'local']
+  });
+  assert.equal(manager.setSecrets(project.id, { DATABASE_PASSWORD: 'encrypted-value' }).success, true);
+  assert.deepEqual(manager.listSecretKeys(project.id), ['DATABASE_PASSWORD']);
+  assert.deepEqual(manager.resolveEnvironment(project.id, { includeSecrets: true }), {
+    SHARED_VALUE: 'base', PROFILE_VALUE: 'local', DATABASE_PASSWORD: 'encrypted-value'
+  });
+  assert.equal(fs.readFileSync(path.join(root, 'config', 'secrets.json'), 'utf8').includes('encrypted-value'), false);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(project.root, 'kitsune.lock'), 'utf8')).environment, 'development');
+  await manager.start(project.id);
+  await manager.stop(project.id);
+  assert.deepEqual(hooks, ['beforeStart:prepare', 'afterStop:cleanup']);
+  assert.ok(calls.includes('start:node'));
+  const removed = manager.remove(project.id);
+  assert.equal(removed.success, true);
+  assert.deepEqual(secretStore.keys(`project:${project.id}:env:`), []);
 });

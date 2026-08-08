@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const { SERVICE_IDS } = require('./path-utils');
+const { MANAGED_IDS } = require('./path-utils');
 
 const SECRET_KEY = /(pass(word)?|secret|token|private.?key|api.?key|database.?url|authorization|cookie)/i;
 
@@ -49,7 +49,7 @@ class SupportManager {
     const doctor = diagnosticsManager ? await diagnosticsManager.doctor() : null;
     const statuses = serviceManager?.getAllStatuses?.() || {};
     const services = {};
-    for (const service of SERVICE_IDS) {
+    for (const service of MANAGED_IDS) {
       const installed = downloadManager?.getInstalledVersions?.(service) || [];
       const logs = serviceManager?.getLogs?.(service, 80) || [];
       if (installed.length || statuses[service]?.running || logs.length) services[service] = { installed, status: statuses[service] || {}, logs };

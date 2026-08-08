@@ -12,13 +12,13 @@ const TOOL_CATALOG = Object.freeze([
   { id: 'pnpm', command: 'pnpm', args: ['--version'], category: 'javascript' },
   { id: 'yarn', command: 'yarn', args: ['--version'], category: 'javascript' },
   { id: 'corepack', command: 'corepack', args: ['--version'], category: 'javascript' },
-  { id: 'pip', command: 'pip', args: ['--version'], category: 'python' },
+  { id: 'pip', command: 'pip', args: ['--version'], category: 'python', fallbacks: [{ command: 'python', args: ['-m', 'pip', '--version'] }] },
   { id: 'pipx', command: 'pipx', args: ['--version'], category: 'python' },
   { id: 'uv', command: 'uv', args: ['--version'], category: 'python' },
   { id: 'poetry', command: 'poetry', args: ['--version'], category: 'python' },
   { id: 'go', command: 'go', args: ['version'], category: 'go' },
   { id: 'cargo', command: 'cargo', args: ['--version'], category: 'rust' },
-  { id: 'java', command: 'java', args: ['--version'], category: 'java' },
+  { id: 'java', command: 'java', args: ['-version'], category: 'java' },
   { id: 'dotnet', command: 'dotnet', args: ['--version'], category: 'dotnet' }
 ]);
 
@@ -39,21 +39,31 @@ class CommandManager {
     this.activityManager = activityManager;
     this.allowDesktopIntegration = options.allowDesktopIntegration !== false;
     this.platformManager = options.platformManager || null;
+    this.platform = options.platform || process.platform;
+    this.comspec = options.comspec || process.env.COMSPEC || 'cmd.exe';
     this._spawn = options.spawn || spawn;
+    this._spawnSync = options.spawnSync || spawnSync;
     this.tasks = new Map();
     this.outputLimit = Math.max(64 * 1024, Number(options.outputLimit) || 2 * 1024 * 1024);
     this.onOutput = null;
     this.onExit = null;
     this.toolProvider = null;
+    this.integrationEnvironmentProvider = null;
   }
 
   setToolProvider(provider) {
     this.toolProvider = typeof provider === 'function' ? provider : null;
   }
 
+  setIntegrationEnvironmentProvider(provider) {
+    this.integrationEnvironmentProvider = typeof provider === 'function' ? provider : null;
+  }
+
   _environment(project) {
     const base = this.pathManager?.buildEnvironment(process.env) || { ...process.env };
-    return { ...base, ...project.env, KITSUNE_PROJECT_ID: project.id, KITSUNE_PROJECT_ROOT: project.root };
+    const integration = this.integrationEnvironmentProvider?.() || {};
+    const projectEnvironment = this.projectManager?.resolveEnvironment?.(project, { includeSecrets: true }) || project.env || {};
+    return { ...base, ...integration, ...projectEnvironment, KITSUNE_PROJECT_ID: project.id, KITSUNE_PROJECT_ROOT: project.root, KITSUNE_ENVIRONMENT: project.activeEnvironment || 'development' };
   }
 
   _append(task, stream, chunk) {
@@ -100,15 +110,40 @@ class CommandManager {
     this.tasks.set(id, task);
     child.stdout.on('data', chunk => this._append(task, 'stdout', chunk));
     child.stderr.on('data', chunk => this._append(task, 'stderr', chunk));
-    child.on('error', error => this._append(task, 'stderr', `[KitsuneServ] ${error.message}\n`));
-    child.on('exit', code => {
+    const finish = (code, error = null) => {
+      if (task.finishedAt) return;
+      if (error) this._append(task, 'stderr', `[KitsuneServ] ${error.message}\n`);
       task.status = code === 0 ? 'completed' : task.status === 'stopping' ? 'cancelled' : 'failed';
       task.exitCode = code;
       task.finishedAt = new Date().toISOString();
       task.process = null;
-      try { this.onExit?.(this._public(task)); } catch {}
-    });
+      const publicTask = this._public(task);
+      for (const waiter of task.waiters.splice(0)) waiter(publicTask);
+      try { this.onExit?.(publicTask); } catch {}
+    };
+    task.waiters = [];
+    child.on('error', error => finish(null, error));
+    child.on('exit', code => finish(code));
     return { success: true, task: this._public(task) };
+  }
+
+  async runAndWait(projectId, commandName, options = {}) {
+    const started = this.start(projectId, commandName, options.execution || 'host', options.distribution || '');
+    if (!started.success) return started;
+    const task = this.tasks.get(started.task.id);
+    if (!task) return { success: false, error: 'Project task disappeared before it could be monitored' };
+    const timeoutMs = Math.max(1000, Math.min(60 * 60 * 1000, Number(options.timeoutMs) || 10 * 60 * 1000));
+    const completed = await new Promise(resolve => {
+      const timer = setTimeout(() => {
+        this.stop(task.id);
+        resolve({ ...this._public(task), status: 'failed', error: `Command timed out after ${Math.ceil(timeoutMs / 1000)} seconds` });
+      }, timeoutMs);
+      timer.unref?.();
+      task.waiters.push(result => { clearTimeout(timer); resolve(result); });
+    });
+    return completed.status === 'completed'
+      ? { success: true, task: completed }
+      : { success: false, error: completed.error || `Command exited with code ${completed.exitCode ?? 'unknown'}`, task: completed };
   }
 
   stop(id) {
@@ -123,7 +158,7 @@ class CommandManager {
   }
 
   _public(task) {
-    const { process: _process, ...result } = task;
+    const { process: _process, waiters: _waiters, ...result } = task;
     return structuredClone(result);
   }
 
@@ -147,37 +182,148 @@ class CommandManager {
     return { success: true, removed };
   }
 
+  _resolveExecutable(command, env) {
+    const finder = this.platform === 'win32' ? 'where.exe' : 'which';
+    const result = this._spawnSync(finder, [command], { env, encoding: 'utf8', windowsHide: true, timeout: 5000 });
+    if (result.status !== 0) return '';
+    const candidates = String(result.stdout || '').split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+    if (this.platform !== 'win32') return candidates[0] || '';
+    return candidates.find(candidate => /\.(?:exe|com)$/i.test(candidate))
+      || candidates.find(candidate => /\.(?:cmd|bat)$/i.test(candidate))
+      || candidates[0] || '';
+  }
+
+  _resolveWindowsIdeExecutable(ide, executable) {
+    if (this.platform !== 'win32' || ide.id !== 'vscode') return executable;
+    const candidates = [];
+    if (executable) {
+      const binDir = path.dirname(executable);
+      candidates.push(path.resolve(binDir, '..', 'Code.exe'));
+      candidates.push(path.resolve(binDir, '..', 'Code - Insiders.exe'));
+    }
+    if (process.env.LOCALAPPDATA) {
+      candidates.push(path.join(process.env.LOCALAPPDATA, 'Programs', 'Microsoft VS Code', 'Code.exe'));
+      candidates.push(path.join(process.env.LOCALAPPDATA, 'Programs', 'Microsoft VS Code Insiders', 'Code - Insiders.exe'));
+    }
+    for (const root of [process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter(Boolean)) {
+      candidates.push(path.join(root, 'Microsoft VS Code', 'Code.exe'));
+      candidates.push(path.join(root, 'Microsoft VS Code Insiders', 'Code - Insiders.exe'));
+    }
+    return candidates.find(candidate => fs.existsSync(candidate)) || executable;
+  }
+
+  _spawnDesktopProcess(executable, args, options) {
+    if (this.platform !== 'win32' || !/\.(?:cmd|bat)$/i.test(executable)) {
+      return this._spawn(executable, args, options);
+    }
+    const quote = value => `"${String(value).replace(/%/g, '%%')}"`;
+    const commandLine = [executable, ...args].map(quote).join(' ');
+    return this._spawn(this.comspec, ['/d', '/s', '/c', commandLine], options);
+  }
+
+  _runProbe(probe, env) {
+    const executable = this._resolveExecutable(probe.command, env);
+    if (!executable) return { installed: false, executable: '', output: '' };
+    let result;
+    if (this.platform === 'win32' && /\.(?:cmd|bat)$/i.test(executable)) {
+      const safeArgs = (probe.args || []).every(value => !/[\r\n&|<>^%]/.test(String(value)));
+      if (!safeArgs) return { installed: false, executable, output: 'Unsafe version probe arguments' };
+      result = this._spawnSync(this.comspec, ['/d', '/c', executable, ...(probe.args || [])], {
+        env, encoding: 'utf8', windowsHide: true, timeout: 5000
+      });
+    } else {
+      result = this._spawnSync(executable, probe.args || [], { env, encoding: 'utf8', windowsHide: true, timeout: 5000 });
+    }
+    const output = String(result.stdout || result.stderr || '').trim().split(/\r?\n/)[0] || '';
+    return { installed: result.status === 0, executable, output };
+  }
+
   toolchains() {
     const env = this.pathManager?.buildEnvironment(process.env) || process.env;
     const contributed = this.toolProvider ? this.toolProvider().map(tool => ({ ...tool, args: tool.versionArgs || ['--version'], category: 'plugin' })) : [];
     return [...TOOL_CATALOG, ...contributed].map(tool => {
-      const result = spawnSync(tool.command, tool.args, { env, encoding: 'utf8', windowsHide: true, timeout: 5000 });
-      const output = String(result.stdout || result.stderr || '').trim().split(/\r?\n/)[0] || '';
-      return { ...tool, installed: result.status === 0, version: output.slice(0, 300) };
+      let status = this._runProbe(tool, env);
+      for (const fallback of tool.fallbacks || []) {
+        if (status.installed) break;
+        status = this._runProbe(fallback, env);
+      }
+      const managed = Boolean(status.executable && this.pathManager?.isManagedEntry(path.dirname(status.executable)));
+      const config = this.pathManager?.configManager?.getConfig?.();
+      const pythonProfile = tool.id === 'pip' ? this.pathManager?.configManager?.getActiveProfile?.(config, 'python') : null;
+      const repairable = Boolean(tool.id === 'pip' && !status.installed && pythonProfile
+        && this.pathManager?.downloadManager?.isInstalled?.('python', pythonProfile.version));
+      const { fallbacks: _fallbacks, ...publicTool } = tool;
+      return {
+        ...publicTool,
+        installed: status.installed,
+        version: status.output.slice(0, 300),
+        executable: status.executable,
+        source: status.executable ? (managed ? 'KitsuneServ' : 'System') : '',
+        repairable,
+        manageable: ['composer', 'java'].includes(tool.id)
+      };
     });
   }
 
+  async repairTool(id, onProgress) {
+    if (id !== 'pip') return { success: false, error: 'This tool has no automatic repair action' };
+    const config = this.pathManager?.configManager?.getConfig?.();
+    const profile = this.pathManager?.configManager?.getActiveProfile?.(config, 'python');
+    if (!profile || !this.pathManager?.downloadManager?.isInstalled?.('python', profile.version)) {
+      return { success: false, error: 'Install Python in Version Manager first' };
+    }
+    const manager = await this.pathManager.installOfficialPythonManager();
+    if (!manager.success) return manager;
+    const result = await this.pathManager.installPythonRuntime(profile.version, onProgress);
+    if (result.success) {
+      const pathResult = this.pathManager.syncIfSelected('python');
+      if (!pathResult.success) result.pathWarning = pathResult.error;
+    }
+    return result;
+  }
+
   ides() {
-    const command = process.platform === 'win32' ? 'where.exe' : 'which';
+    const env = this.pathManager?.buildEnvironment(process.env) || process.env;
     return IDE_CATALOG.map(ide => {
       let executable = '';
       for (const candidate of ide.commands) {
-        const result = spawnSync(command, [candidate], { encoding: 'utf8', windowsHide: true });
-        if (result.status === 0) { executable = String(result.stdout || '').split(/\r?\n/).map(value => value.trim()).find(Boolean) || candidate; break; }
+        executable = this._resolveExecutable(candidate, env);
+        if (executable) break;
       }
+      executable = this._resolveWindowsIdeExecutable(ide, executable);
       return { id: ide.id, name: ide.name, installed: Boolean(executable), executable };
     });
   }
 
-  openIDE(projectId, ideId) {
+  async openIDE(projectId, ideId) {
     if (!this.allowDesktopIntegration) return { success: false, error: 'Opening a desktop IDE is disabled in server mode' };
     const project = this.projectManager.get(projectId);
     const ide = IDE_CATALOG.find(item => item.id === ideId);
     const status = this.ides().find(item => item.id === ideId);
     if (!ide || !status?.installed) return { success: false, error: 'Selected IDE is not installed or not available in PATH' };
-    const child = spawn(status.executable, ide.args(project.root), { cwd: project.root, detached: true, stdio: 'ignore', windowsHide: true });
-    child.unref();
-    return { success: true };
+    if (!fs.existsSync(project.root)) return { success: false, error: 'Project directory does not exist' };
+    try {
+      const child = this._spawnDesktopProcess(status.executable, ide.args(project.root), {
+        cwd: project.root,
+        env: this.pathManager?.buildEnvironment(process.env) || process.env,
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true
+      });
+      return await new Promise(resolve => {
+        let settled = false;
+        const finish = result => {
+          if (settled) return;
+          settled = true;
+          if (result.success) child.unref?.();
+          resolve(result);
+        };
+        child.once('error', error => finish({ success: false, error: `Could not open ${ide.name}: ${error.message}` }));
+        child.once('spawn', () => finish({ success: true, executable: status.executable }));
+      });
+    } catch (error) {
+      return { success: false, error: `Could not open ${ide.name}: ${error.message}` };
+    }
   }
 
   stopAll() {

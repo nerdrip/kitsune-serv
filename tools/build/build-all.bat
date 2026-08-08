@@ -10,6 +10,8 @@ if errorlevel 1 exit /b %errorlevel%
 set "KITSUNE_SKIP_VERIFY=1"
 call tools\build\build-server.bat
 if errorlevel 1 exit /b %errorlevel%
+call tools\build\build-plesk.bat
+if errorlevel 1 exit /b %errorlevel%
 call tools\build\build-windows.bat
 if errorlevel 1 exit /b %errorlevel%
 call tools\build\build-linux.bat

@@ -40,6 +40,7 @@ if (Boolean(TLS_CERT_PATH) !== Boolean(TLS_KEY_PATH)) {
   throw new Error('KITSUNE_TLS_CERT and KITSUNE_TLS_KEY must be provided together');
 }
 const IS_HTTPS = Boolean(TLS_CERT_PATH && TLS_KEY_PATH);
+const SAFE_MODE = args.includes('--safe-mode') || process.env.KITSUNE_SAFE_MODE === '1';
 
 // Authentication credentials (from env or auto-generated)
 const AUTH_USER = process.env.KITSUNE_USER || 'admin';
@@ -47,8 +48,6 @@ const AUTH_PASS = process.env.KITSUNE_PASS || crypto.randomBytes(12).toString('b
 const API_TOKEN = process.env.KITSUNE_API_TOKEN || '';
 const TOTP_SECRET = process.env.KITSUNE_TOTP_SECRET || '';
 const ALLOWED_IPS = String(process.env.KITSUNE_ALLOWED_IPS || '').split(',').map(value => value.trim()).filter(Boolean);
-// Sessions store (in-memory)
-const sessions = new Map();
 const SESSION_MAX_AGE = 24 * 60 * 60 * 1000; // 24 hours
 const loginAttempts = new Map();
 const LOGIN_WINDOW = 15 * 60 * 1000;
@@ -78,78 +77,98 @@ const PlatformManager = require('./platform-manager');
 const TunnelManager = require('./tunnel-manager');
 const UpdateManager = require('./update-manager');
 const SupportManager = require('./support-manager');
+const IntegrationManager = require('./integration-manager');
+const ProjectDetector = require('./project-detector');
+const LabManager = require('./lab-manager');
+const ApiFlowManager = require('./api-flow-manager');
+const ObservabilityManager = require('./observability-manager');
+const AutomationManager = require('./automation-manager');
+const AuditManager = require('./audit-manager');
+const IdentityManager = require('./identity-manager');
+const HubManager = require('./hub-manager');
 const { PathManager } = require('./path-manager');
 
 const configManager = new ConfigManager(appRoot);
 const downloadManager = new DownloadManager({ appRoot, catalogRoot: defaultsRoot });
 const serviceManager = new ServiceManager(downloadManager, configManager);
 const pathManager = new PathManager(downloadManager, configManager, {
-  systemIntegrationDisabled: process.env.KITSUNE_DISABLE_SYSTEM_INTEGRATION === '1'
+  systemIntegrationDisabled: SAFE_MODE || process.env.KITSUNE_DISABLE_SYSTEM_INTEGRATION === '1'
 });
-try {
-  const selectedPathServices = pathManager.getSelectedServices();
-  if (selectedPathServices.length || pathManager.hasManagedEntries()) pathManager.sync(selectedPathServices);
-} catch (err) {
-  console.warn('Could not synchronize the user PATH:', err.message);
+if (!SAFE_MODE) {
+  try {
+    const selectedPathServices = pathManager.getSelectedServices();
+    if (selectedPathServices.length || pathManager.hasManagedEntries()) pathManager.sync(selectedPathServices);
+  } catch (err) {
+    console.warn('Could not synchronize the user PATH:', err.message);
+  }
 }
 const activityManager = new ActivityManager(appRoot);
 const secretStore = new SecretStore(appRoot);
+const integrationManager = new IntegrationManager(appRoot, secretStore);
+const auditManager = new AuditManager(appRoot);
 const dbViewer = new DbViewer(downloadManager, configManager, serviceManager, secretStore);
 const backupManager = new BackupManager(appRoot, configManager, downloadManager, dbViewer, activityManager);
-const backupTimer = setInterval(() => backupManager.runDue().catch(error => console.warn('[KitsuneServ] Scheduled backup warning:', error.message)), 60_000);
-backupTimer.unref();
-setTimeout(() => backupManager.runDue().catch(error => console.warn('[KitsuneServ] Scheduled backup warning:', error.message)), 5_000).unref();
+if (!SAFE_MODE) {
+  const backupTimer = setInterval(() => backupManager.runDue().catch(error => console.warn('[KitsuneServ] Scheduled backup warning:', error.message)), 60_000);
+  backupTimer.unref();
+  setTimeout(() => backupManager.runDue().catch(error => console.warn('[KitsuneServ] Scheduled backup warning:', error.message)), 5_000).unref();
+}
 const appStoreManager = new AppStoreManager(downloadManager, configManager, dbViewer, serviceManager);
+const labManager = new LabManager(appRoot, { appStoreManager, serviceManager, configManager, downloadManager, pathManager, secretStore, activityManager });
+const apiFlowManager = new ApiFlowManager(appRoot, { dbViewer, secretStore });
 const domainManager = new DomainManager(appRoot);
 const projectManager = new ProjectManager(appRoot, configManager, downloadManager, serviceManager, activityManager, domainManager);
+const projectDetector = new ProjectDetector();
 const pluginManager = new PluginManager(appRoot);
 projectManager.setTemplateProvider(() => pluginManager.projectTemplates());
 const platformManager = new PlatformManager(appRoot);
 const tunnelManager = new TunnelManager(projectManager);
 const updateManager = new UpdateManager(appRoot, require('../package.json').version, activityManager, { allowInstall: false });
-const diagnosticsManager = new DiagnosticsManager(appRoot, configManager, downloadManager, serviceManager, pathManager);
+const diagnosticsManager = new DiagnosticsManager(appRoot, configManager, downloadManager, serviceManager, pathManager, {
+  domainManager,
+  projectProvider: () => projectManager.list()
+});
+projectManager.setDiagnosticsManager(diagnosticsManager);
+const recoveryPromise = projectManager.recover({ enabled: configManager.getConfig().general?.crashRecovery !== false, safeMode: SAFE_MODE })
+  .catch(error => ({ success: false, interrupted: [], restored: [], warnings: [error.message], safeMode: SAFE_MODE }));
 const commandManager = new CommandManager(projectManager, pathManager, activityManager, { allowDesktopIntegration: false, platformManager });
 commandManager.setToolProvider(() => pluginManager.tools());
+projectManager.setSecretStore(secretStore);
+projectManager.setHookRunner((projectId, commandName, options) => commandManager.runAndWait(projectId, commandName, options));
+commandManager.setIntegrationEnvironmentProvider(() => integrationManager.buildEnvironment());
 const environmentManager = new EnvironmentManager(appRoot, configManager, downloadManager, projectManager, pathManager, serviceManager);
+const identityManager = new IdentityManager(appRoot, secretStore, { sessionMaxAge: SESSION_MAX_AGE });
+const identityBootstrap = identityManager.bootstrap(AUTH_USER, AUTH_PASS);
+const hubManager = new HubManager(appRoot, { identityManager, secretStore, projectManager, labManager, apiFlowManager, environmentManager });
 const supportManager = new SupportManager(appRoot, { configManager, downloadManager, serviceManager, diagnosticsManager, projectManager, activityManager, environmentManager, pluginManager, platformManager });
+const observabilityManager = new ObservabilityManager(appRoot, serviceManager);
+const automationManager = new AutomationManager(appRoot, { serviceManager, projectManager, commandManager, labManager, backupManager, diagnosticsManager });
+if (!SAFE_MODE) {
+  observabilityManager.start();
+  const automationTimer = setInterval(() => automationManager.runDue().catch(error => console.warn('[KitsuneServ] Automation warning:', error.message)), 30000);
+  automationTimer.unref();
+}
 activityManager.on('changed', payload => broadcastSSE('activity:changed', payload));
 commandManager.onOutput = payload => broadcastSSE('command:output', payload);
 commandManager.onExit = payload => broadcastSSE('command:exit', payload);
 tunnelManager.onChanged = payload => broadcastSSE('tunnel:changed', payload);
+labManager.onChanged = payload => broadcastSSE('lab:changed', payload);
+apiFlowManager.onChanged = payload => broadcastSSE('apiFlow:changed', payload);
+observabilityManager.onChanged = payload => broadcastSSE('observability:changed', payload);
+automationManager.onChanged = payload => broadcastSSE('automation:changed', payload);
+hubManager.onChanged = payload => broadcastSSE('hub:changed', payload);
 
 // ============ Session helpers ============
 
-function generateSessionId() {
-  return crypto.randomBytes(32).toString('hex');
-}
-
-function createSession(username, req) {
-  const id = generateSessionId();
-  sessions.set(id, {
-    username, createdAt: Date.now(), lastSeenAt: Date.now(),
+function createSession(userId, req, provider = 'local') {
+  return identityManager.createSession(userId, {
     address: normalizeIp(req?.socket?.remoteAddress || ''),
-    userAgent: String(req?.headers?.['user-agent'] || '').slice(0, 300)
+    userAgent: String(req?.headers?.['user-agent'] || '').slice(0, 300), provider
   });
-  return id;
 }
 
 function validateSession(sessionId) {
-  const now = Date.now();
-  for (const [id, value] of sessions) {
-    if (now - value.createdAt > SESSION_MAX_AGE) {
-      sessions.delete(id);
-      terminateSessionResources(id);
-    }
-  }
-  if (!sessionId) return false;
-  const session = sessions.get(sessionId);
-  if (!session) return false;
-  if (now - session.createdAt > SESSION_MAX_AGE) {
-    sessions.delete(sessionId);
-    return false;
-  }
-  session.lastSeenAt = now;
-  return true;
+  return identityManager.validateSession(sessionId);
 }
 
 function getSessionIdFromReq(req) {
@@ -189,9 +208,13 @@ function hasValidOrigin(req) {
 }
 
 function hasValidApiToken(req) {
-  if (!API_TOKEN) return false;
   const match = String(req.headers.authorization || '').match(/^Bearer\s+(.+)$/i);
-  return Boolean(match && timingSafeTextEqual(match[1], API_TOKEN));
+  if (!match) return null;
+  if (API_TOKEN && timingSafeTextEqual(match[1], API_TOKEN)) {
+    const owner = identityManager.listUsers().find(item => item.roles.includes('owner')) || identityManager.listUsers()[0];
+    return owner ? { user: owner, principal: identityManager.principal(owner, { tokenKind: 'legacy-api' }) } : null;
+  }
+  return identityManager.validateToken(match[1]);
 }
 
 // ============ HTTP helpers ============
@@ -304,7 +327,8 @@ function getLoginPage(error = '') {
     <input type="text" id="username" name="username" autocomplete="username" required autofocus>
     <label for="password">Password</label>
     <input type="password" id="password" name="password" autocomplete="current-password" required>
-    ${TOTP_SECRET ? '<label for="totp">Authenticator code</label><input type="text" id="totp" name="totp" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>' : ''}
+    <label for="totp">Authenticator or recovery code <span style="color:#666">(if enabled)</span></label>
+    <input type="text" id="totp" name="totp" inputmode="numeric" autocomplete="one-time-code">
     <button type="submit">Sign In</button>
   </form>
 </body>
@@ -409,7 +433,18 @@ window.kitsuneAPI = {
     testConnection: (connection) => window.kitsuneAPI._call('db/testConnection', { connection }),
     listDatabasesFor: (connection) => window.kitsuneAPI._call('db/listDatabasesFor', { connection }),
     listTablesFor: (connection, database) => window.kitsuneAPI._call('db/listTablesFor', { connection, database }),
+    listObjectsFor: (connection, database) => window.kitsuneAPI._call('db/listObjectsFor', { connection, database }),
+    describeObjectFor: (connection, database, schema, objectName) => window.kitsuneAPI._call('db/describeObjectFor', { connection, database, schema, objectName }),
+    tableDataFor: (connection, database, table, limit, offset, schema) => window.kitsuneAPI._call('db/tableDataFor', { connection, database, table, limit, offset, schema }),
     executeQueryFor: (connection, database, query) => window.kitsuneAPI._call('db/executeQueryFor', { connection, database, query }),
+    executeWorkbench: (connection, database, query, options) => window.kitsuneAPI._call('db/executeWorkbench', { connection, database, query, options }),
+    cancelQuery: (id) => window.kitsuneAPI._call('db/cancelQuery', { id }),
+    activeQueries: () => window.kitsuneAPI._call('db/activeQueries'),
+    queryHistory: (limit) => window.kitsuneAPI._call('db/queryHistory', { limit }),
+    clearQueryHistory: () => window.kitsuneAPI._call('db/clearQueryHistory'),
+    savedQueries: () => window.kitsuneAPI._call('db/savedQueries'),
+    saveQuery: (input) => window.kitsuneAPI._call('db/saveQuery', { input }),
+    removeSavedQuery: (id) => window.kitsuneAPI._call('db/removeSavedQuery', { id }),
     createDatabaseFor: (connection, name) => window.kitsuneAPI._call('db/createDatabaseFor', { connection, name }),
     dropDatabaseFor: (connection, name) => window.kitsuneAPI._call('db/dropDatabaseFor', { connection, name })
   },
@@ -499,6 +534,12 @@ window.kitsuneAPI = {
     stop: (id) => window.kitsuneAPI._call('workspace/stop', { id }),
     export: (id) => window.kitsuneAPI._call('workspace/export', { id }),
     import: (manifest, options) => window.kitsuneAPI._call('workspace/import', { manifest, options }),
+    detect: (directory) => window.kitsuneAPI._call('workspace/detect', { directory }),
+    inspectCompose: (file) => window.kitsuneAPI._call('workspace/inspectCompose', { file }),
+    inspectDevcontainer: (file) => window.kitsuneAPI._call('workspace/inspectDevcontainer', { file }),
+    secretKeys: (id) => window.kitsuneAPI._call('workspace/secretKeys', { id }),
+    setSecrets: (id, secrets) => window.kitsuneAPI._call('workspace/setSecrets', { id, secrets }),
+    environment: (id) => window.kitsuneAPI._call('workspace/environment', { id }),
     url: (id) => window.kitsuneAPI._call('workspace/url', { id }),
     open: (id) => window.kitsuneAPI._call('workspace/open', { id })
   },
@@ -511,9 +552,19 @@ window.kitsuneAPI = {
   diagnostics: {
     doctor: (projectId) => window.kitsuneAPI._call('diagnostics/doctor', { projectId }),
     compatibility: (projectId) => window.kitsuneAPI._call('diagnostics/compatibility', { projectId }),
+    preflight: (projectId) => window.kitsuneAPI._call('diagnostics/preflight', { projectId }),
     ports: () => window.kitsuneAPI._call('diagnostics/ports'),
     findFreePort: (start, end) => window.kitsuneAPI._call('diagnostics/findFreePort', { start, end }),
-    repair: (issue) => window.kitsuneAPI._call('diagnostics/repair', { issue })
+    repair: (issue) => window.kitsuneAPI._call('diagnostics/repair', { issue }),
+    repairAll: (projectId) => window.kitsuneAPI._call('diagnostics/repairAll', { projectId })
+  },
+  integration: {
+    list: () => window.kitsuneAPI._call('integration/list'),
+    save: (id, config, secrets) => window.kitsuneAPI._call('integration/save', { id, config, secrets }),
+    remove: (id) => window.kitsuneAPI._call('integration/remove', { id }),
+    test: (id) => window.kitsuneAPI._call('integration/test', { id }),
+    readiness: (category) => window.kitsuneAPI._call('integration/readiness', { category }),
+    assistant: (prompt, context) => window.kitsuneAPI._call('integration/assistant', { prompt, context })
   },
   domain: {
     status: () => window.kitsuneAPI._call('domain/status'),
@@ -531,7 +582,10 @@ window.kitsuneAPI = {
     onOutput: (cb) => { window._kitsuneCommandOutputCb = cb; },
     onExit: (cb) => { window._kitsuneCommandExitCb = cb; }
   },
-  toolchain: { list: () => window.kitsuneAPI._call('toolchain/list') },
+  toolchain: {
+    list: () => window.kitsuneAPI._call('toolchain/list'),
+    repair: id => window.kitsuneAPI._call('toolchain/repair', { id })
+  },
   ide: {
     list: () => window.kitsuneAPI._call('ide/list'),
     open: (projectId, ideId) => window.kitsuneAPI._call('ide/open', { projectId, ideId })
@@ -571,11 +625,32 @@ window.kitsuneAPI = {
     install: () => window.kitsuneAPI._call('update/install')
   },
   support: { generate: () => window.kitsuneAPI._call('support/generate') },
+  identity: {
+    roles: () => window.kitsuneAPI._call('identity/roles'), users: () => window.kitsuneAPI._call('identity/users'),
+    createUser: (input) => window.kitsuneAPI._call('identity/createUser', { input }), updateUser: (id, patch) => window.kitsuneAPI._call('identity/updateUser', { id, patch }), removeUser: (id) => window.kitsuneAPI._call('identity/removeUser', { id }),
+    enableTotp: (id) => window.kitsuneAPI._call('identity/enableTotp', { id }), disableTotp: (id) => window.kitsuneAPI._call('identity/disableTotp', { id }),
+    tokens: () => window.kitsuneAPI._call('identity/tokens'), createToken: (input) => window.kitsuneAPI._call('identity/createToken', { input }), revokeToken: (id) => window.kitsuneAPI._call('identity/revokeToken', { id }),
+    invitations: () => window.kitsuneAPI._call('identity/invitations'), createInvitation: (input) => window.kitsuneAPI._call('identity/createInvitation', { input }), removeInvitation: (id) => window.kitsuneAPI._call('identity/removeInvitation', { id })
+  },
+  hub: {
+    status: () => window.kitsuneAPI._call('hub/status'), settings: () => window.kitsuneAPI._call('hub/settings'), configure: (input) => window.kitsuneAPI._call('hub/configure', { input }),
+    teams: () => window.kitsuneAPI._call('hub/teams'), saveTeam: (input) => window.kitsuneAPI._call('hub/saveTeam', { input }), removeTeam: (id) => window.kitsuneAPI._call('hub/removeTeam', { id }),
+    nodes: () => window.kitsuneAPI._call('hub/nodes'), createPairing: (input) => window.kitsuneAPI._call('hub/createPairing', { input }), revokeNode: (id) => window.kitsuneAPI._call('hub/revokeNode', { id }),
+    routes: () => window.kitsuneAPI._call('hub/routes'), saveRoute: (input) => window.kitsuneAPI._call('hub/saveRoute', { input }), removeRoute: (id) => window.kitsuneAPI._call('hub/removeRoute', { id }),
+    inventory: (filters) => window.kitsuneAPI._call('hub/inventory', { filters }), publishLocal: (options) => window.kitsuneAPI._call('hub/publishLocal', { options }), publish: (input) => window.kitsuneAPI._call('hub/sync/publish', { input }),
+    history: (id) => window.kitsuneAPI._call('hub/history', { id }), rollback: (id, revision) => window.kitsuneAPI._call('hub/rollback', { id, revision }), applyObject: (id, options) => window.kitsuneAPI._call('hub/applyObject', { id, options }),
+    deployments: (filters) => window.kitsuneAPI._call('hub/deployments', { filters }), createDeployment: (input) => window.kitsuneAPI._call('hub/createDeployment', { input }), approveDeployment: (id) => window.kitsuneAPI._call('hub/approveDeployment', { id }), updateDeployment: (id, input) => window.kitsuneAPI._call('hub/updateDeployment', { id, input }),
+    connectors: () => window.kitsuneAPI._call('hub/connectors'), saveConnector: (input, secret) => window.kitsuneAPI._call('hub/saveConnector', { input, secret }), removeConnector: (id) => window.kitsuneAPI._call('hub/removeConnector', { id }),
+    remotes: () => window.kitsuneAPI._call('hub/remotes'), saveRemote: (input, token) => window.kitsuneAPI._call('hub/saveRemote', { input, token }), removeRemote: (id) => window.kitsuneAPI._call('hub/removeRemote', { id }), pushRemote: (id, options) => window.kitsuneAPI._call('hub/pushRemote', { id, options }), pullRemote: (id, options) => window.kitsuneAPI._call('hub/pullRemote', { id, options }), syncRemote: (id, options) => window.kitsuneAPI._call('hub/syncRemote', { id, options }),
+    reconcile: () => window.kitsuneAPI._call('hub/reconcile'), onChanged: (cb) => { window._kitsuneHubChangedCb = cb; }
+  },
   security: {
     status: () => window.kitsuneAPI._call('security/status'),
     sessions: () => window.kitsuneAPI._call('security/sessions'),
     revokeSession: (id) => window.kitsuneAPI._call('security/revokeSession', { id }),
-    revokeOtherSessions: () => window.kitsuneAPI._call('security/revokeOtherSessions')
+    revokeOtherSessions: () => window.kitsuneAPI._call('security/revokeOtherSessions'),
+    audit: (options) => window.kitsuneAPI._call('audit/list', { options }),
+    verifyAudit: () => window.kitsuneAPI._call('audit/verify')
   },
   appStore: {
     catalog: () => window.kitsuneAPI._call('appStore/catalog'),
@@ -588,6 +663,58 @@ window.kitsuneAPI = {
     removeCustomApp: (appId) => window.kitsuneAPI._call('appStore/removeCustomApp', { appId }),
     checkRequirements: (appId) => window.kitsuneAPI._call('appStore/checkRequirements', { appId }),
     onProgress: (cb) => { window._kitsuneAppStoreCb = cb; }
+  },
+  lab: {
+    recipes: () => window.kitsuneAPI._call('lab/recipes'),
+    preview: (input) => window.kitsuneAPI._call('lab/preview', { input }),
+    list: () => window.kitsuneAPI._call('lab/list'),
+    get: (id) => window.kitsuneAPI._call('lab/get', { id }),
+    create: (input, secrets) => window.kitsuneAPI._call('lab/create', { input, secrets }),
+    update: (id, patch, secrets) => window.kitsuneAPI._call('lab/update', { id, patch, secrets }),
+    provision: (id) => window.kitsuneAPI._call('lab/provision', { id }),
+    start: (id) => window.kitsuneAPI._call('lab/start', { id }),
+    stop: (id) => window.kitsuneAPI._call('lab/stop', { id }),
+    health: (id) => window.kitsuneAPI._call('lab/health', { id }),
+    remove: (id, options) => window.kitsuneAPI._call('lab/remove', { id, options }),
+    onChanged: (cb) => { window._kitsuneLabChangedCb = cb; },
+    onProgress: (cb) => { window._kitsuneLabProgressCb = cb; }
+  },
+  apiFlow: {
+    catalog: () => window.kitsuneAPI._call('apiFlow/catalog'),
+    list: () => window.kitsuneAPI._call('apiFlow/list'),
+    get: (id) => window.kitsuneAPI._call('apiFlow/get', { id }),
+    validate: (input) => window.kitsuneAPI._call('apiFlow/validate', { input }),
+    save: (input) => window.kitsuneAPI._call('apiFlow/save', { input }),
+    remove: (id) => window.kitsuneAPI._call('apiFlow/remove', { id }),
+    start: (id) => window.kitsuneAPI._call('apiFlow/start', { id }),
+    stop: (id) => window.kitsuneAPI._call('apiFlow/stop', { id }),
+    status: (id) => window.kitsuneAPI._call('apiFlow/status', { id }),
+    test: (projectId, endpointId, request) => window.kitsuneAPI._call('apiFlow/test', { projectId, endpointId, request }),
+    request: (projectId, endpointId, request) => window.kitsuneAPI._call('apiFlow/request', { projectId, endpointId, request }),
+    logs: (projectId, limit) => window.kitsuneAPI._call('apiFlow/logs', { projectId, limit }),
+    clearLogs: (projectId) => window.kitsuneAPI._call('apiFlow/clearLogs', { projectId }),
+    onChanged: (cb) => { window._kitsuneApiFlowChangedCb = cb; }
+  },
+  observability: {
+    overview: () => window.kitsuneAPI._call('observability/overview'),
+    collect: () => window.kitsuneAPI._call('observability/collect'),
+    history: (options) => window.kitsuneAPI._call('observability/history', { options }),
+    alerts: () => window.kitsuneAPI._call('observability/alerts'),
+    acknowledge: (id) => window.kitsuneAPI._call('observability/acknowledge', { id }),
+    rules: () => window.kitsuneAPI._call('observability/rules'),
+    saveRule: (input) => window.kitsuneAPI._call('observability/saveRule', { input }),
+    removeRule: (id) => window.kitsuneAPI._call('observability/removeRule', { id }),
+    prometheus: () => window.kitsuneAPI._call('observability/prometheus'),
+    onChanged: (cb) => { window._kitsuneObservabilityCb = cb; }
+  },
+  automation: {
+    list: () => window.kitsuneAPI._call('automation/list'),
+    history: (limit) => window.kitsuneAPI._call('automation/history', { limit }),
+    save: (input) => window.kitsuneAPI._call('automation/save', { input }),
+    remove: (id) => window.kitsuneAPI._call('automation/remove', { id }),
+    run: (id) => window.kitsuneAPI._call('automation/run', { id }),
+    runDue: () => window.kitsuneAPI._call('automation/runDue'),
+    onChanged: (cb) => { window._kitsuneAutomationCb = cb; }
   },
   window: {
     minimize: () => Promise.resolve(),
@@ -672,6 +799,12 @@ window.kitsuneAPI._selectServerDirectory = function(initialPath) {
       if (msg.type === 'command:output' && window._kitsuneCommandOutputCb) window._kitsuneCommandOutputCb(msg.payload);
       if (msg.type === 'command:exit' && window._kitsuneCommandExitCb) window._kitsuneCommandExitCb(msg.payload);
       if (msg.type === 'tunnel:changed' && window._kitsuneTunnelCb) window._kitsuneTunnelCb(msg.payload);
+      if (msg.type === 'lab:changed' && window._kitsuneLabChangedCb) window._kitsuneLabChangedCb(msg.payload);
+      if (msg.type === 'lab:progress' && window._kitsuneLabProgressCb) window._kitsuneLabProgressCb(msg.payload);
+      if (msg.type === 'apiFlow:changed' && window._kitsuneApiFlowChangedCb) window._kitsuneApiFlowChangedCb(msg.payload);
+      if (msg.type === 'hub:changed' && window._kitsuneHubChangedCb) window._kitsuneHubChangedCb(msg.payload);
+      if (msg.type === 'observability:changed' && window._kitsuneObservabilityCb) window._kitsuneObservabilityCb(msg.payload);
+      if (msg.type === 'automation:changed' && window._kitsuneAutomationCb) window._kitsuneAutomationCb(msg.payload);
     } catch {}
   };
 })();
@@ -691,6 +824,8 @@ function broadcastSSE(type, payload, targetSessionId = null) {
 
 // Wire up service exit events
 serviceManager._onServiceExit = (section, code) => {
+  observabilityManager.recordServiceExit(section, code);
+  auditManager.record({ source: 'service-supervisor', action: code === 0 ? 'service.exit' : 'service.crash', target: section, success: code === 0, details: { exitCode: code } });
   broadcastSSE('service:exited', { section, code });
 };
 
@@ -728,6 +863,36 @@ async function syncPathAfterChange(section, result) {
     : { ...result, pathWarning: pathResult.error };
 }
 
+function endpointPermission(endpoint, body = {}) {
+  if (endpoint === 'security/status') return '';
+  if (endpoint.startsWith('security/') || endpoint.startsWith('identity/')) return 'users.manage';
+  if (endpoint.startsWith('audit/')) return 'audit.read';
+  if (endpoint === 'hub/status' || endpoint === 'hub/settings' || endpoint === 'hub/reconcile') return 'nodes.read';
+  if (endpoint === 'hub/nodes' || endpoint === 'hub/heartbeat') return 'nodes.read';
+  if (['hub/createPairing', 'hub/revokeNode'].includes(endpoint)) return 'nodes.manage';
+  if (endpoint === 'hub/teams') return 'nodes.read';
+  if (endpoint.startsWith('hub/saveTeam') || endpoint.startsWith('hub/removeTeam')) return 'teams.manage';
+  if (endpoint === 'hub/routes') return 'routes.read';
+  if (['hub/saveRoute', 'hub/removeRoute'].includes(endpoint)) return 'routes.*';
+  if (endpoint === 'hub/inventory' || endpoint === 'hub/history') return 'projects.read';
+  if (endpoint === 'hub/sync/publish') {
+    const kind = String(body.input?.kind || 'project');
+    return kind === 'api-flow' ? 'api-flows.sync' : `${kind}s.sync`;
+  }
+  if (['hub/publishLocal', 'hub/rollback', 'hub/applyObject'].includes(endpoint)) return 'projects.sync';
+  if (endpoint === 'hub/deployments') return 'deployments.read';
+  if (endpoint === 'hub/createDeployment') return 'deployments.create';
+  if (endpoint === 'hub/approveDeployment' || endpoint === 'hub/updateDeployment') return 'deployments.update';
+  if (['hub/pushRemote', 'hub/pullRemote', 'hub/syncRemote'].includes(endpoint)) return 'projects.sync';
+  if (endpoint.startsWith('hub/') && /(configure|Connector|Remote)/.test(endpoint)) return 'settings.manage';
+  if (endpoint.startsWith('config/') && !['config/get', 'config/getDefaults', 'config/getAppRoot'].includes(endpoint)) return 'settings.manage';
+  if (endpoint.startsWith('workspace/')) return /\/(list|get|templates|detect|inspect|environment|url|secretKeys)$/.test(endpoint) ? 'projects.read' : (/\/(start|stop|open)$/.test(endpoint) ? 'projects.operate' : 'projects.sync');
+  if (endpoint.startsWith('lab/')) return /\/(list|get|recipes|preview|health)$/.test(endpoint) ? 'labs.read' : (/\/(start|stop|provision)$/.test(endpoint) ? 'labs.operate' : 'labs.sync');
+  if (endpoint.startsWith('apiFlow/')) return /\/(list|get|catalog|validate|status|logs)$/.test(endpoint) ? 'api-flows.read' : 'api-flows.*';
+  if (endpoint.startsWith('service/') || endpoint.startsWith('terminal/') || endpoint.startsWith('command/')) return 'nodes.operate';
+  return '';
+}
+
 function syncPathForConfigTransition(previous, current, result) {
   if (!result?.success) return result;
   const pathResult = pathManager.syncForConfigTransition(previous, current);
@@ -738,23 +903,75 @@ function syncPathForConfigTransition(previous, current, result) {
 }
 
 async function handleAPI(endpoint, body, context = {}) {
+  const permission = endpointPermission(endpoint, body);
+  if (permission && !identityManager.hasPermission(context.principal, permission, context.resource || null)) {
+    const error = new Error(`Missing permission: ${permission}`); error.status = 403; throw error;
+  }
   switch (endpoint) {
     case 'security/status': return {
-      mode: 'server', https: IS_HTTPS, totpEnabled: Boolean(TOTP_SECRET), apiTokenEnabled: Boolean(API_TOKEN),
+      mode: 'server', https: IS_HTTPS, totpEnabled: identityManager.listUsers().some(user => user.mfaEnabled), apiTokenEnabled: Boolean(API_TOKEN) || identityManager.listTokens().length > 0,
       allowlistEnabled: ALLOWED_IPS.length > 0, allowedRules: ALLOWED_IPS, currentSessionId: context.sessionId || null,
-      sessionCount: sessions.size, clientAddress: context.clientAddress || ''
+      sessionCount: identityManager.listSessions().length, clientAddress: context.clientAddress || '', user: context.user || null,
+      authMode: hubManager.settings().authMode
     };
-    case 'security/sessions': return [...sessions.entries()].map(([id, session]) => ({ id, ...session, current: id === context.sessionId }));
+    case 'security/sessions': return identityManager.listSessions(context.sessionId);
     case 'security/revokeSession': {
       const id = String(body.id || '');
-      if (!/^[a-f0-9]{64}$/.test(id) || !sessions.has(id)) return { success: false, error: 'Session not found' };
-      sessions.delete(id); terminateSessionResources(id); return { success: true, revokedCurrent: id === context.sessionId };
+      const result = identityManager.revokeSession(id); if (result.success) terminateSessionResources(id);
+      return { ...result, revokedCurrent: id === context.sessionId };
     }
     case 'security/revokeOtherSessions': {
-      let removed = 0;
-      for (const id of [...sessions.keys()]) if (id !== context.sessionId) { sessions.delete(id); terminateSessionResources(id); removed += 1; }
-      return { success: true, removed };
+      const existing = identityManager.listSessions(context.sessionId).filter(item => !item.current);
+      const result = identityManager.revokeOtherSessions(context.sessionId); for (const item of existing) terminateSessionResources(item.id); return result;
     }
+    case 'identity/roles': return identityManager.roles();
+    case 'identity/users': return identityManager.listUsers();
+    case 'identity/createUser': return identityManager.createUser(body.input || {});
+    case 'identity/updateUser': return identityManager.updateUser(body.id, body.patch || {});
+    case 'identity/removeUser': return identityManager.removeUser(body.id);
+    case 'identity/enableTotp': return identityManager.enableTotp(body.id);
+    case 'identity/disableTotp': return identityManager.disableTotp(body.id);
+    case 'identity/tokens': return identityManager.listTokens();
+    case 'identity/createToken': return identityManager.createToken(body.input || {});
+    case 'identity/revokeToken': return identityManager.revokeToken(body.id);
+    case 'identity/invitations': return identityManager.listInvitations();
+    case 'identity/createInvitation': return identityManager.createInvitation({ ...(body.input || {}), createdBy: context.principal?.userId || '' });
+    case 'identity/removeInvitation': return identityManager.removeInvitation(body.id);
+    case 'hub/status': return hubManager.status();
+    case 'hub/settings': return hubManager.settings();
+    case 'hub/configure': return hubManager.configure(body.input || {});
+    case 'hub/teams': return hubManager.listTeams();
+    case 'hub/saveTeam': return hubManager.saveTeam(body.input || {}, context.principal);
+    case 'hub/removeTeam': return hubManager.removeTeam(body.id);
+    case 'hub/nodes': return hubManager.listNodes();
+    case 'hub/createPairing': return hubManager.createPairing(body.input || {}, context.principal);
+    case 'hub/heartbeat': return hubManager.heartbeat(body.nodeId || context.principal?.nodeId, body.input || {});
+    case 'hub/revokeNode': return hubManager.revokeNode(body.id);
+    case 'hub/routes': return hubManager.listRoutes();
+    case 'hub/saveRoute': return hubManager.saveRoute(body.input || {});
+    case 'hub/removeRoute': return hubManager.removeRoute(body.id);
+    case 'hub/inventory': return hubManager.inventory(body.filters || {});
+    case 'hub/sync/publish': return hubManager.publish(body.input || {}, context.principal);
+    case 'hub/publishLocal': return hubManager.publishLocal(body.options || {}, context.principal);
+    case 'hub/history': return hubManager.history(body.id);
+    case 'hub/rollback': return hubManager.rollback(body.id, body.revision, context.principal);
+    case 'hub/applyObject': return hubManager.applyObject(body.id, body.options || {});
+    case 'hub/deployments': return hubManager.listDeployments(body.filters || {});
+    case 'hub/createDeployment': return hubManager.createDeployment(body.input || {}, context.principal);
+    case 'hub/approveDeployment': return hubManager.approveDeployment(body.id, context.principal);
+    case 'hub/updateDeployment': return hubManager.updateDeployment(body.id, body.input || {});
+    case 'hub/connectors': return hubManager.listConnectors();
+    case 'hub/saveConnector': return hubManager.saveConnector(body.input || {}, body.secret || '');
+    case 'hub/removeConnector': return hubManager.removeConnector(body.id);
+    case 'hub/remotes': return hubManager.listRemotes();
+    case 'hub/saveRemote': return hubManager.saveRemote(body.input || {}, body.token || '');
+    case 'hub/removeRemote': return hubManager.removeRemote(body.id);
+    case 'hub/pushRemote': return hubManager.pushToRemote(body.id, body.options || {}, context.principal);
+    case 'hub/pullRemote': return hubManager.pullFromRemote(body.id, body.options || {}, context.principal);
+    case 'hub/syncRemote': return hubManager.syncRemote(body.id, body.options || {}, context.principal);
+    case 'hub/reconcile': return hubManager.reconcile();
+    case 'audit/list': return auditManager.list(body.options || {});
+    case 'audit/verify': return auditManager.verify();
     // Config
     case 'config/get': return configManager.getConfig();
     case 'config/save': {
@@ -875,21 +1092,22 @@ async function handleAPI(endpoint, body, context = {}) {
     case 'download/isInstalled': return downloadManager.isInstalled(body.service, body.version);
     case 'download/installedVersions': return downloadManager.getInstalledVersions(body.service);
     case 'download/install': {
-      const result = await downloadManager.download(body.service, body.version, (progress) => {
-        broadcastSSE('download:progress', progress);
-      });
+      const progress = payload => broadcastSSE('download:progress', payload);
+      let result;
+      if (body.service === 'python' && process.platform === 'win32') {
+        progress({ service: body.service, version: body.version, stage: 'python-manager', percent: 5 });
+        broadcastSSE('path:pythonManagerStatus', { stage: 'installing', automatic: true });
+        const managerResult = await pathManager.installOfficialPythonManager();
+        broadcastSSE('path:pythonManagerStatus', {
+          stage: managerResult.success ? 'complete' : 'failed', automatic: true,
+          alreadyInstalled: Boolean(managerResult.alreadyInstalled), error: managerResult.error || ''
+        });
+        if (!managerResult.success) return { success: false, error: managerResult.error || 'Python Install Manager installation failed' };
+        result = await pathManager.installPythonRuntime(body.version, progress);
+      } else {
+        result = await downloadManager.download(body.service, body.version, progress);
+      }
       if (result.success) {
-        if (body.service === 'python' && process.platform === 'win32') {
-          broadcastSSE('download:progress', { service: body.service, version: body.version, stage: 'python-manager', percent: 100 });
-          broadcastSSE('path:pythonManagerStatus', { stage: 'installing', automatic: true });
-          const managerResult = await pathManager.installOfficialPythonManager();
-          if (!managerResult.success) result.pythonManagerWarning = managerResult.error;
-          broadcastSSE('path:pythonManagerStatus', {
-            stage: managerResult.success ? 'complete' : 'failed', automatic: true,
-            alreadyInstalled: Boolean(managerResult.alreadyInstalled), error: managerResult.error || ''
-          });
-          broadcastSSE('download:progress', { service: body.service, version: body.version, stage: 'done', percent: 100 });
-        }
         const pathResult = pathManager.syncIfSelected(body.service);
         if (!pathResult.success) result.pathWarning = pathResult.error;
       }
@@ -918,7 +1136,11 @@ async function handleAPI(endpoint, body, context = {}) {
     }
     case 'app/getInfo': {
       const packageInfo = require('../package.json');
-      return { name: 'KitsuneServ', version: packageInfo.version, dataRoot: appRoot, platform: process.platform, mode: 'server' };
+      await recoveryPromise;
+      return {
+        name: 'KitsuneServ', version: packageInfo.version, dataRoot: appRoot, platform: process.platform, mode: 'server', safeMode: SAFE_MODE,
+        migration: configManager.getMigrationInfo(), recovery: projectManager.getRecoveryReport()
+      };
     }
     case 'download/diskUsage': {
       // Compute disk usage per service
@@ -1066,7 +1288,18 @@ async function handleAPI(endpoint, body, context = {}) {
     case 'db/testConnection': return dbViewer.testConnection(body.connection);
     case 'db/listDatabasesFor': return dbViewer.listDatabasesFor(body.connection);
     case 'db/listTablesFor': return dbViewer.listTablesFor(body.connection, body.database);
+    case 'db/listObjectsFor': return dbViewer.listObjectsFor(body.connection, body.database);
+    case 'db/describeObjectFor': return dbViewer.describeObjectFor(body.connection, body.database, body.schema, body.objectName);
+    case 'db/tableDataFor': return dbViewer.tableDataFor(body.connection, body.database, body.table, body.limit, body.offset, body.schema);
     case 'db/executeQueryFor': return dbViewer.executeQueryFor(body.connection, body.database, body.query);
+    case 'db/executeWorkbench': return dbViewer.executeWorkbench(body.connection, body.database, body.query, body.options || {});
+    case 'db/cancelQuery': return dbViewer.cancelQuery(body.id);
+    case 'db/activeQueries': return dbViewer.listActiveQueries();
+    case 'db/queryHistory': return dbViewer.queryHistory(body.limit);
+    case 'db/clearQueryHistory': return dbViewer.clearQueryHistory();
+    case 'db/savedQueries': return dbViewer.listSavedQueries();
+    case 'db/saveQuery': return dbViewer.saveQuery(body.input || {});
+    case 'db/removeSavedQuery': return dbViewer.removeSavedQuery(body.id);
     case 'db/createDatabaseFor': return dbViewer.createDatabaseFor(body.connection, body.name);
     case 'db/dropDatabaseFor': return dbViewer.dropDatabaseFor(body.connection, body.name);
     case 'db/getToolUrl': {
@@ -1164,13 +1397,31 @@ async function handleAPI(endpoint, body, context = {}) {
     case 'workspace/templates': return projectManager.templates();
     case 'workspace/list': return projectManager.list();
     case 'workspace/get': return projectManager.get(body.id);
-    case 'workspace/create': return projectManager.create(body.options || {});
-    case 'workspace/update': return projectManager.update(body.id, body.patch || {});
-    case 'workspace/remove': return projectManager.remove(body.id, body.options || {});
-    case 'workspace/start': return projectManager.start(body.id);
+    case 'workspace/create': {
+      const project = projectManager.create(body.options || {});
+      return { ...project, hostsSync: projectManager.syncDomains({ elevate: false }) };
+    }
+    case 'workspace/update': {
+      const project = projectManager.update(body.id, body.patch || {});
+      return { ...project, hostsSync: projectManager.syncDomains({ elevate: false }) };
+    }
+    case 'workspace/remove': {
+      const result = projectManager.remove(body.id, body.options || {});
+      return result.success ? { ...result, hostsSync: projectManager.syncDomains({ elevate: false }) } : result;
+    }
+    case 'workspace/start': await recoveryPromise; return projectManager.start(body.id);
     case 'workspace/stop': return projectManager.stop(body.id);
     case 'workspace/export': return projectManager.exportManifest(body.id);
-    case 'workspace/import': return projectManager.importManifest(body.manifest, body.options || {});
+    case 'workspace/import': {
+      const project = projectManager.importManifest(body.manifest, body.options || {});
+      return { ...project, hostsSync: projectManager.syncDomains({ elevate: false }) };
+    }
+    case 'workspace/detect': return projectDetector.detect(body.directory);
+    case 'workspace/inspectCompose': return projectDetector.inspectCompose(body.file);
+    case 'workspace/inspectDevcontainer': return projectDetector.inspectDevcontainer(body.file);
+    case 'workspace/secretKeys': return projectManager.listSecretKeys(body.id);
+    case 'workspace/setSecrets': return projectManager.setSecrets(body.id, body.secrets || {});
+    case 'workspace/environment': return projectManager.resolveEnvironment(body.id, { includeSecrets: false });
     case 'workspace/url': return { url: projectManager.getUrl(body.id) };
     case 'workspace/open': {
       const project = projectManager.get(body.id);
@@ -1183,15 +1434,24 @@ async function handleAPI(endpoint, body, context = {}) {
 
     case 'diagnostics/doctor': return diagnosticsManager.doctor(body.projectId ? projectManager.get(body.projectId) : null);
     case 'diagnostics/compatibility': return diagnosticsManager.compatibility(body.projectId ? projectManager.get(body.projectId) : null);
+    case 'diagnostics/preflight': return diagnosticsManager.preflight(projectManager.get(body.projectId));
     case 'diagnostics/ports': return diagnosticsManager.ports();
     case 'diagnostics/findFreePort': return diagnosticsManager.findFreePort(body.start, body.end);
     case 'diagnostics/repair': return diagnosticsManager.repair(body.issue);
+    case 'diagnostics/repairAll': return diagnosticsManager.repairAll(body.projectId ? projectManager.get(body.projectId) : null);
+    case 'integration/list': return integrationManager.list();
+    case 'integration/save': return integrationManager.save(body.id, body.config, body.secrets);
+    case 'integration/remove': return integrationManager.remove(body.id);
+    case 'integration/test': return integrationManager.test(body.id);
+    case 'integration/readiness': return integrationManager.readiness(body.category);
+    case 'integration/assistant': return integrationManager.assistant(body.prompt, body.context || {});
     case 'command/start': return commandManager.start(body.projectId, body.name, body.execution, body.distribution);
     case 'command/stop': return commandManager.stop(body.id);
     case 'command/list': return commandManager.list(body.projectId);
     case 'command/get': return commandManager.get(body.id);
     case 'command/clear': return commandManager.clearFinished();
     case 'toolchain/list': return commandManager.toolchains();
+    case 'toolchain/repair': return commandManager.repairTool(body.id, progress => broadcastSSE('download:progress', progress));
     case 'ide/list': return commandManager.ides();
     case 'ide/open': return commandManager.openIDE(body.projectId, body.ideId);
     case 'environment/export': return environmentManager.export(body.label);
@@ -1219,7 +1479,7 @@ async function handleAPI(endpoint, body, context = {}) {
     case 'update/install': return updateManager.install();
     case 'support/generate': return supportManager.generate();
     case 'domain/status': return domainManager.status(projectManager.list());
-    case 'domain/apply': return domainManager.apply(projectManager.list(), { elevate: false });
+    case 'domain/apply': return projectManager.syncDomains({ elevate: false });
     case 'domain/certificateStatus': return domainManager.certificateStatus(body.domain);
     case 'domain/installCertificateAuthority': return domainManager.installCertificateAuthority();
     case 'domain/issueCertificate': return domainManager.issueCertificate(body.domain);
@@ -1250,8 +1510,11 @@ async function handleAPI(endpoint, body, context = {}) {
       const version = phpProfile.version;
       if (!downloadManager.isInstalled('php', version)) return { installed: false, phpAvailable: false };
       const phpPath = downloadManager.getInstallPath('php', version);
-      const composerPath = path.join(phpPath, 'composer.phar');
-      return { installed: fs.existsSync(composerPath), phpAvailable: true, phpPath };
+      const composerProfile = configManager.getActiveProfile(config, 'composer');
+      const managedPath = composerProfile && downloadManager.isInstalled('composer', composerProfile.version)
+        ? downloadManager.getInstallPath('composer', composerProfile.version) : '';
+      const composerPath = managedPath ? path.join(managedPath, 'composer.phar') : path.join(phpPath, 'composer.phar');
+      return { installed: fs.existsSync(composerPath), phpAvailable: true, phpPath, composerPath, version: composerProfile?.version || '', managed: Boolean(managedPath) };
     }
     case 'composer/install': {
       const config = configManager.getConfig();
@@ -1259,27 +1522,14 @@ async function handleAPI(endpoint, body, context = {}) {
       if (!phpProfile) return { success: false, error: 'No active PHP profile' };
       const version = phpProfile.version;
       if (!downloadManager.isInstalled('php', version)) return { success: false, error: 'PHP not installed' };
-      const phpPath = downloadManager.getInstallPath('php', version);
-      const isWin = process.platform === 'win32';
-      const phpExe = path.join(phpPath, isWin ? 'php.exe' : 'bin/php');
-      const composerPath = path.join(phpPath, 'composer.phar');
-      const setupPath = path.join(phpPath, 'composer-setup.php');
-      const signaturePath = `${setupPath}.sig`;
-      try {
-        await downloadManager._downloadFile('https://getcomposer.org/installer', setupPath);
-        await downloadManager._downloadFile('https://composer.github.io/installer.sig', signaturePath);
-        const expected = fs.readFileSync(signaturePath, 'utf-8').trim().toLowerCase();
-        const actual = crypto.createHash('sha384').update(fs.readFileSync(setupPath)).digest('hex');
-        if (!/^[a-f0-9]{96}$/.test(expected) || actual !== expected) throw new Error('Composer installer signature verification failed');
-        execFileSync(phpExe, [setupPath, `--install-dir=${phpPath}`, '--filename=composer.phar'], { encoding: 'utf-8', timeout: 60000 });
-        return { success: true };
-      } catch (err) {
-        return { success: false, error: err.message };
-      } finally {
-        for (const tempPath of [setupPath, signaturePath]) {
-          try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch {}
-        }
+      const composerProfile = configManager.getActiveProfile(config, 'composer');
+      if (!composerProfile) return { success: false, error: 'No active Composer profile' };
+      const result = await downloadManager.download('composer', composerProfile.version, progress => broadcastSSE('download:progress', progress));
+      if (result.success) {
+        const pathResult = pathManager.syncIfSelected('composer');
+        if (!pathResult.success) result.pathWarning = pathResult.error;
       }
+      return result;
     }
     case 'composer/run': {
       const config = configManager.getConfig();
@@ -1290,7 +1540,10 @@ async function handleAPI(endpoint, body, context = {}) {
       const phpPath = downloadManager.getInstallPath('php', version);
       const isWin = process.platform === 'win32';
       const phpExe = path.join(phpPath, isWin ? 'php.exe' : 'bin/php');
-      const composerPhar = path.join(phpPath, 'composer.phar');
+      const composerProfile = configManager.getActiveProfile(config, 'composer');
+      const managedPath = composerProfile && downloadManager.isInstalled('composer', composerProfile.version)
+        ? downloadManager.getInstallPath('composer', composerProfile.version) : '';
+      const composerPhar = managedPath ? path.join(managedPath, 'composer.phar') : path.join(phpPath, 'composer.phar');
       if (!fs.existsSync(composerPhar)) return { success: false, output: 'Composer not installed.' };
       const composerArgs = body.command.trim().split(/\s+/).filter(Boolean);
       const allowedCmds = ['install', 'update', 'require', 'remove', 'dump-autoload', 'create-project', 'init', 'show', 'list', 'search', 'validate', 'status', 'self-update', 'config', 'run-script', 'exec', 'outdated', 'audit'];
@@ -1305,7 +1558,7 @@ async function handleAPI(endpoint, body, context = {}) {
         const output = execFileSync(phpExe, [composerPhar, ...composerArgs], {
           encoding: 'utf-8', timeout: 120000,
           cwd: resolvedCwd,
-          env: { ...process.env, COMPOSER_HOME: path.join(phpPath, 'composer') }
+          env: { ...pathManager.buildEnvironment(process.env), COMPOSER_HOME: path.join(managedPath || phpPath, 'composer-home') }
         });
         return { success: true, output };
       } catch (err) {
@@ -1338,6 +1591,45 @@ async function handleAPI(endpoint, body, context = {}) {
     case 'appStore/remove': return appStoreManager.remove(body.instanceName);
     case 'appStore/getUrl': return appStoreManager.getAppUrl(body.instanceName);
     case 'appStore/getExePath': return appStoreManager.getExePath(body.instanceName);
+    case 'lab/recipes': return labManager.recipes();
+    case 'lab/preview': return labManager.preview(body.input || {});
+    case 'lab/list': return labManager.list();
+    case 'lab/get': return labManager.get(body.id);
+    case 'lab/create': return labManager.create(body.input || {}, body.secrets || {});
+    case 'lab/update': return labManager.update(body.id, body.patch || {}, body.secrets || {});
+    case 'lab/provision': return labManager.provision(body.id, progress => broadcastSSE('lab:progress', progress, context.sessionId));
+    case 'lab/start': return labManager.start(body.id);
+    case 'lab/stop': return labManager.stop(body.id);
+    case 'lab/health': return labManager.health(body.id);
+    case 'lab/remove': return labManager.remove(body.id, body.options || {});
+    case 'apiFlow/catalog': return apiFlowManager.catalog();
+    case 'apiFlow/list': return apiFlowManager.list();
+    case 'apiFlow/get': return apiFlowManager.get(body.id);
+    case 'apiFlow/validate': return apiFlowManager.validate(body.input || {});
+    case 'apiFlow/save': return apiFlowManager.save(body.input || {});
+    case 'apiFlow/remove': return apiFlowManager.remove(body.id);
+    case 'apiFlow/start': return apiFlowManager.start(body.id);
+    case 'apiFlow/stop': return apiFlowManager.stop(body.id);
+    case 'apiFlow/status': return apiFlowManager.status(body.id);
+    case 'apiFlow/test': return apiFlowManager.test(body.projectId, body.endpointId, body.request || {});
+    case 'apiFlow/request': return apiFlowManager.request(body.projectId, body.endpointId, body.request || {});
+    case 'apiFlow/logs': return apiFlowManager.logs(body.projectId, body.limit);
+    case 'apiFlow/clearLogs': return apiFlowManager.clearLogs(body.projectId);
+    case 'observability/overview': return observabilityManager.overview();
+    case 'observability/collect': return observabilityManager.collect();
+    case 'observability/history': return observabilityManager.history(body.options || {});
+    case 'observability/alerts': return observabilityManager.alertsList();
+    case 'observability/acknowledge': return observabilityManager.acknowledgeAlert(body.id);
+    case 'observability/rules': return observabilityManager.rulesList();
+    case 'observability/saveRule': return observabilityManager.saveRule(body.input || {});
+    case 'observability/removeRule': return observabilityManager.removeRule(body.id);
+    case 'observability/prometheus': return observabilityManager.prometheus();
+    case 'automation/list': return automationManager.list();
+    case 'automation/history': return automationManager.history(body.limit);
+    case 'automation/save': return automationManager.save(body.input || {});
+    case 'automation/remove': return automationManager.remove(body.id);
+    case 'automation/run': return automationManager.run(body.id, { manual: true });
+    case 'automation/runDue': return automationManager.runDue();
     case 'appStore/addCustomApp': return appStoreManager.addCustomApp(body.opts);
     case 'appStore/removeCustomApp': return appStoreManager.removeCustomApp(body.appId);
     case 'appStore/checkRequirements': return appStoreManager.checkRequirementsById(body.appId);
@@ -1373,12 +1665,52 @@ function parseFormBody(req) {
   });
 }
 
+function shouldAuditEndpoint(endpoint) {
+  return /(?:save|create|update|remove|delete|start|stop|restart|install|apply|reset|import|set|revoke|run|provision|acknowledge|clear|restore|download|execute|test|repair|issue|switch|rename|duplicate|drop|publish|sync|pair|rollback|approve|configure)/i.test(endpoint);
+}
+
+function auditTarget(body = {}) {
+  const candidates = [
+    body.id, body.projectId, body.service, body.section, body.name, body.instanceName,
+    body.database, body.domain, body.appId, body.label, body.input?.id, body.input?.name,
+    body.connection?.id, body.connection?.name
+  ];
+  return String(candidates.find(value => typeof value === 'string' && value.trim()) || '').slice(0, 200);
+}
+
 // ============ HTTP Server ============
+
+function routeAuthentication(req, route) {
+  if (route.authPolicy === 'public') return { allowed: true, authentication: null };
+  const session = validateSession(getSessionIdFromReq(req));
+  const token = hasValidApiToken(req);
+  if (route.authPolicy === 'token') return { allowed: Boolean(token), authentication: token };
+  return { allowed: Boolean(session || token), authentication: session || token };
+}
+
+function proxyHubRequest(req, res, route) {
+  const target = new URL(route.target); const transport = target.protocol === 'https:' ? https : http;
+  const headers = { ...req.headers, host: target.host, 'x-forwarded-host': req.headers.host || '', 'x-forwarded-proto': IS_HTTPS ? 'https' : 'http', 'x-kitsune-route': route.id };
+  delete headers['proxy-authorization']; delete headers['proxy-connection'];
+  const upstream = transport.request({ protocol: target.protocol, hostname: target.hostname, port: target.port || undefined, method: req.method, path: req.url, headers, timeout: 30_000 }, response => {
+    const responseHeaders = { ...response.headers }; delete responseHeaders['transfer-encoding'];
+    res.writeHead(response.statusCode || 502, responseHeaders); response.pipe(res);
+  });
+  upstream.on('timeout', () => upstream.destroy(new Error('Gateway timeout')));
+  upstream.on('error', error => { if (!res.headersSent) sendJSON(res, { error: `Hub gateway: ${error.message}` }, 502); else res.end(); });
+  req.pipe(upstream);
+}
 
 async function handleRequest(req, res) {
   const url = new URL(req.url, 'http://localhost');
   const pathname = url.pathname;
   const clientAddress = normalizeIp(req.socket.remoteAddress || '');
+  const hubRoute = hubManager.resolveRoute(req.headers.host || '');
+  if (hubManager.settings().gatewayEnabled !== false && hubRoute) {
+    const authorization = routeAuthentication(req, hubRoute);
+    if (!authorization.allowed) { sendJSON(res, { error: 'Authentication is required for this Hub route' }, 401); return; }
+    proxyHubRequest(req, res, hubRoute); return;
+  }
   if (!isIpAllowed(clientAddress, ALLOWED_IPS)) {
     sendJSON(res, { error: 'Client address is not allowed' }, 403);
     return;
@@ -1402,32 +1734,57 @@ async function handleRequest(req, res) {
     const form = await parseFormBody(req);
     const inputUser = form.username || '';
     const inputPass = form.password || '';
-    // Compare fixed-size digests so Unicode input cannot create unequal buffers.
-    const userOk = timingSafeTextEqual(inputUser, AUTH_USER);
-    const passOk = timingSafeTextEqual(inputPass, AUTH_PASS);
+    const localAllowed = hubManager.settings().authMode !== 'plesk' || process.env.KITSUNE_ALLOW_LOCAL_LOGIN === '1';
+    const authentication = localAllowed ? identityManager.authenticate(inputUser, inputPass, form.totp || '') : { success: false };
     const totpOk = !TOTP_SECRET || verifyTotp(TOTP_SECRET, form.totp || '');
-    if (userOk && passOk && totpOk) {
+    if (authentication.success && totpOk) {
       loginAttempts.delete(getClientKey(req));
-      const sessionId = createSession(form.username, req);
+      const session = createSession(authentication.user.id, req);
+      auditManager.record({ actor: authentication.user.username, source: 'server-auth', action: 'session.login', target: clientAddress, success: true });
       res.writeHead(302, {
-        'Set-Cookie': `kitsune_session=${sessionId}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_MAX_AGE / 1000}${IS_HTTPS ? '; Secure' : ''}`,
+        'Set-Cookie': `kitsune_session=${session.token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_MAX_AGE / 1000}${IS_HTTPS ? '; Secure' : ''}`,
         'Location': '/'
       });
       res.end();
     } else {
       recordFailedLogin(req);
+      auditManager.record({ actor: inputUser || 'unknown', source: 'server-auth', action: 'session.login', target: clientAddress, success: false });
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(getLoginPage('Invalid username, password or authenticator code'));
     }
     return;
   }
 
+  // Short-lived, signed Plesk SSO hand-off. The Plesk password never leaves Plesk.
+  if (pathname === '/auth/plesk' && req.method === 'POST') {
+    try {
+      const form = await parseFormBody(req);
+      const login = hubManager.loginWithPlesk(form.assertion || '', form.signature || '', { address: clientAddress, userAgent: req.headers['user-agent'] || '' });
+      auditManager.record({ actor: login.user.username, source: 'plesk-auth', action: 'session.login', target: clientAddress, success: true });
+      res.writeHead(302, { 'Set-Cookie': `kitsune_session=${login.token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_MAX_AGE / 1000}${IS_HTTPS ? '; Secure' : ''}`, 'Location': '/' });
+      res.end();
+    } catch (error) {
+      auditManager.record({ actor: 'plesk-user', source: 'plesk-auth', action: 'session.login', target: clientAddress, success: false, details: { error: error.message } });
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(getLoginPage(error.message));
+    }
+    return;
+  }
+
+  if (pathname === '/auth/pair' && req.method === 'POST') {
+    try { const body = await parseBody(req); sendJSON(res, hubManager.completePairing(body.code, body.device || {})); }
+    catch (error) { sendJSON(res, { error: error.message }, 400); }
+    return;
+  }
+
   // ---- Logout ----
   if (pathname === '/auth/logout') {
-    const sid = getSessionIdFromReq(req);
-    if (sid) {
-      sessions.delete(sid);
-      terminateSessionResources(sid);
+    const token = getSessionIdFromReq(req);
+    const authenticated = validateSession(token);
+    if (authenticated) {
+      const actor = authenticated.user.username;
+      identityManager.revokeSession(authenticated.sessionId);
+      terminateSessionResources(authenticated.sessionId);
+      auditManager.record({ actor, source: 'server-auth', action: 'session.logout', target: clientAddress, success: true });
     }
     res.writeHead(302, {
       'Set-Cookie': 'kitsune_session=; Path=/; HttpOnly; Max-Age=0',
@@ -1438,9 +1795,11 @@ async function handleRequest(req, res) {
   }
 
   // ---- Auth check for everything else ----
-  const sessionId = getSessionIdFromReq(req);
-  const apiTokenAuthenticated = pathname.startsWith('/api/') && hasValidApiToken(req);
-  if (!validateSession(sessionId) && !apiTokenAuthenticated) {
+  const sessionToken = getSessionIdFromReq(req);
+  const sessionAuthentication = validateSession(sessionToken);
+  const apiAuthentication = pathname.startsWith('/api/') ? hasValidApiToken(req) : null;
+  const authentication = apiAuthentication || sessionAuthentication;
+  if (!authentication) {
     // Unauthenticated
     if (pathname.startsWith('/api/')) {
       sendJSON(res, { error: 'Unauthorized' }, 401);
@@ -1450,6 +1809,8 @@ async function handleRequest(req, res) {
     }
     return;
   }
+  const sessionId = sessionAuthentication?.sessionId || '';
+  const apiTokenAuthenticated = Boolean(apiAuthentication);
 
   // ---- SSE events endpoint ----
   if (pathname === '/api/events') {
@@ -1469,6 +1830,13 @@ async function handleRequest(req, res) {
     return;
   }
 
+  if (pathname === '/api/metrics' && req.method === 'GET') {
+    const content = observabilityManager.prometheus();
+    res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8', 'Content-Length': Buffer.byteLength(content), 'Cache-Control': 'no-store' });
+    res.end(content);
+    return;
+  }
+
   // ---- API endpoints ----
   if (pathname.startsWith('/api/') && req.method === 'POST') {
     if (!hasValidOrigin(req)) {
@@ -1480,11 +1848,23 @@ async function handleRequest(req, res) {
       return;
     }
     const endpoint = pathname.slice(5); // strip '/api/'
+    const started = Date.now();
+    let body = {};
     try {
-      const body = await parseBody(req);
-      const result = await handleAPI(endpoint, body, { sessionId, apiTokenAuthenticated, clientAddress });
+      body = await parseBody(req);
+      const result = await handleAPI(endpoint, body, { sessionId, apiTokenAuthenticated, clientAddress, user: authentication.user, principal: authentication.principal });
+      if (shouldAuditEndpoint(endpoint)) auditManager.record({
+        actor: authentication.user?.username || (apiTokenAuthenticated ? 'api-token' : 'web-user'),
+        source: 'server-api', action: endpoint.replaceAll('/', '.'), target: auditTarget(body),
+        success: result?.success !== false, durationMs: Date.now() - started
+      });
       sendJSON(res, result);
     } catch (err) {
+      if (shouldAuditEndpoint(endpoint)) auditManager.record({
+        actor: authentication.user?.username || (apiTokenAuthenticated ? 'api-token' : 'web-user'),
+        source: 'server-api', action: endpoint.replaceAll('/', '.'), target: auditTarget(body),
+        success: false, durationMs: Date.now() - started, details: { error: err.message }
+      });
       sendJSON(res, { error: err.message || 'Internal server error' }, err.status || 500);
     }
     return;
@@ -1558,6 +1938,20 @@ const server = IS_HTTPS
   ? https.createServer({ key: fs.readFileSync(TLS_KEY_PATH), cert: fs.readFileSync(TLS_CERT_PATH) }, requestListener)
   : http.createServer(requestListener);
 
+server.on('upgrade', (req, socket, head) => {
+  const route = hubManager.resolveRoute(req.headers.host || '');
+  if (!route || route.websocket === false || !routeAuthentication(req, route).allowed) { socket.destroy(); return; }
+  const target = new URL(route.target); const transport = target.protocol === 'https:' ? https : http;
+  const upstream = transport.request({ protocol: target.protocol, hostname: target.hostname, port: target.port || undefined, method: 'GET', path: req.url, headers: { ...req.headers, host: target.host, 'x-forwarded-host': req.headers.host || '', 'x-forwarded-proto': IS_HTTPS ? 'https' : 'http' } });
+  upstream.on('upgrade', (response, upstreamSocket, upstreamHead) => {
+    socket.write(`HTTP/1.1 ${response.statusCode || 101} ${response.statusMessage || 'Switching Protocols'}\r\n`);
+    for (const [name, value] of Object.entries(response.headers)) socket.write(`${name}: ${Array.isArray(value) ? value.join(', ') : value}\r\n`);
+    socket.write('\r\n'); if (upstreamHead.length) socket.write(upstreamHead); if (head.length) upstreamSocket.write(head);
+    upstreamSocket.pipe(socket).pipe(upstreamSocket);
+  });
+  upstream.on('error', () => socket.destroy()); upstream.end();
+});
+
 // ============ Graceful shutdown ============
 let shutdownInProgress = false;
 async function shutdown(exitCode = 0) {
@@ -1566,7 +1960,12 @@ async function shutdown(exitCode = 0) {
   console.log('\n[KitsuneServ] Shutting down...');
   commandManager.stopAll();
   tunnelManager.stopAll();
+  labManager.stopAll();
+  await apiFlowManager.stopAll();
+  observabilityManager.stop();
+  try { await projectManager.stopAll(); } catch (err) { console.warn('[KitsuneServ] Project shutdown warning:', err.message); }
   try { await serviceManager.stopAll(); } catch (err) { console.warn('[KitsuneServ] Service shutdown warning:', err.message); }
+  try { projectManager.markCleanShutdown(); } catch {}
   for (const term of terminals.values()) {
     try { term.process.kill(); } catch {}
   }
