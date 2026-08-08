@@ -66,7 +66,13 @@ test('web mode authenticates and exposes a desktop-parity API', { timeout: 30000
       KITSUNE_PASS: 'secret+word',
       KITSUNE_DATA_DIR: dataRoot,
       KITSUNE_DISABLE_SYSTEM_INTEGRATION: '1',
-      KITSUNE_SAFE_MODE: '1'
+      KITSUNE_SAFE_MODE: '1',
+      KITSUNE_PANEL_DOMAIN: 'managed.example.test',
+      KITSUNE_HUB_AUTH_MODE: 'hybrid',
+      KITSUNE_HUB_AUTO_PROVISION: '1',
+      KITSUNE_PLESK_URL: 'https://plesk.example.test:8443',
+      KITSUNE_PLESK_CONNECTOR_ID: 'managed-plesk',
+      KITSUNE_PLESK_CONNECTOR_SECRET: 'managed-plesk-integration-secret-123456'
     },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true
@@ -116,6 +122,17 @@ test('web mode authenticates and exposes a desktop-parity API', { timeout: 30000
   const security = await (await request('security/status')).json();
   assert.equal(security.mode, 'server');
   assert.equal(security.user.username, 'admin');
+  const managedHubSettings = await (await request('hub/settings')).json();
+  assert.equal(managedHubSettings.enabled, true);
+  assert.equal(managedHubSettings.panelDomain, 'managed.example.test');
+  assert.equal(managedHubSettings.authMode, 'hybrid');
+  assert.equal(managedHubSettings.tlsMode, 'external');
+  assert.equal(managedHubSettings.autoProvisionPleskUsers, true);
+  const managedConnectors = await (await request('hub/connectors')).json();
+  assert.equal(managedConnectors.length, 1);
+  assert.equal(managedConnectors[0].id, 'managed-plesk');
+  assert.equal(managedConnectors[0].baseUrl, 'https://plesk.example.test:8443');
+  assert.equal(managedConnectors[0].configured, true);
   const hubConfiguration = await (await request('hub/configure', { input: { enabled: true, panelDomain: 'panel.example.test', authMode: 'hybrid' } })).json();
   assert.equal(hubConfiguration.wildcardDomain, '*.panel.example.test');
   const publicRoute = await (await request('hub/saveRoute', { input: { name: 'Echo', kind: 'project', target: `http://127.0.0.1:${upstreamPort}`, authPolicy: 'public' } })).json();

@@ -7,7 +7,11 @@ const { execFileSync } = require('child_process');
 const root = path.resolve(__dirname, '..');
 const source = path.join(root, 'plesk-extension', 'kitsuneserv-bridge');
 const stage = path.join(root, 'artifacts', '.plesk-stage');
-const output = path.join(root, 'artifacts', 'plesk', `kitsuneserv-bridge-${require('../package.json').version}.zip`);
+const meta = fs.readFileSync(path.join(source, 'meta.xml'), 'utf8');
+const version = meta.match(/<version>([^<]+)<\/version>/)?.[1];
+const release = meta.match(/<release>([^<]+)<\/release>/)?.[1];
+if (!version || !release) throw new Error('Plesk meta.xml must define version and release');
+const output = path.join(root, 'artifacts', 'plesk', `kitsuneserv-bridge-${version}-r${release}.zip`);
 fs.rmSync(stage, { recursive: true, force: true }); fs.mkdirSync(stage, { recursive: true }); fs.cpSync(source, stage, { recursive: true });
 for (const relative of ['htdocs/images/icon.png', '_meta/icons/64x64.png']) { const target = path.join(stage, relative); fs.mkdirSync(path.dirname(target), { recursive: true }); fs.copyFileSync(path.join(root, 'assets', 'icon.png'), target); }
 fs.mkdirSync(path.dirname(output), { recursive: true }); if (fs.existsSync(output)) fs.unlinkSync(output);

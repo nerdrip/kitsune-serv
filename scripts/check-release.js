@@ -43,6 +43,10 @@ for (const endpoint of ['hub/status', 'hub/publishLocal', 'hub/syncRemote', 'ide
 }
 const pleskMeta = read('plesk-extension/kitsuneserv-bridge/meta.xml');
 if (!pleskMeta.includes(`<version>${version}</version>`)) fail('Plesk extension version differs from the application version');
+const pleskRelease = pleskMeta.match(/<release>([^<]+)<\/release>/)?.[1];
+if (!pleskRelease) fail('Plesk extension release is missing');
+const expectedPleskArchive = `kitsuneserv-bridge-${version}-r${pleskRelease}.zip`;
+if (!readme.includes(expectedPleskArchive)) fail(`README does not reference ${expectedPleskArchive}`);
 
 const manifestPath = path.join(root, 'artifacts', 'release-manifest.json');
 if (fs.existsSync(manifestPath)) {
@@ -53,6 +57,7 @@ if (fs.existsSync(manifestPath)) {
     if (['win32', 'linux'].includes(item.platform) && !['x64', 'arm64'].includes(item.arch)) fail(`Missing desktop architecture for ${item.file}`);
     if (item.platform === 'server' && !String(item.file || '').startsWith('server/')) fail(`Server archive is in a desktop update channel: ${item.file}`);
     if (item.platform === 'plesk' && !String(item.file || '').startsWith('plesk/')) fail(`Plesk archive is in a desktop update channel: ${item.file}`);
+    if (item.platform === 'plesk' && path.basename(item.file || '') !== expectedPleskArchive) fail(`Stale Plesk package in release manifest: ${item.file}`);
   }
 }
 

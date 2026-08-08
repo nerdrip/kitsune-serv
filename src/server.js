@@ -140,6 +140,30 @@ const environmentManager = new EnvironmentManager(appRoot, configManager, downlo
 const identityManager = new IdentityManager(appRoot, secretStore, { sessionMaxAge: SESSION_MAX_AGE });
 const identityBootstrap = identityManager.bootstrap(AUTH_USER, AUTH_PASS);
 const hubManager = new HubManager(appRoot, { identityManager, secretStore, projectManager, labManager, apiFlowManager, environmentManager });
+const managedPanelDomain = String(process.env.KITSUNE_PANEL_DOMAIN || '').trim();
+if (managedPanelDomain) {
+  hubManager.configure({
+    enabled: true,
+    panelDomain: managedPanelDomain,
+    authMode: process.env.KITSUNE_HUB_AUTH_MODE || 'hybrid',
+    gatewayEnabled: true,
+    tlsMode: 'external',
+    autoProvisionPleskUsers: process.env.KITSUNE_HUB_AUTO_PROVISION !== '0'
+  });
+}
+const managedPleskConnectorId = String(process.env.KITSUNE_PLESK_CONNECTOR_ID || '').trim();
+const managedPleskConnectorSecret = String(process.env.KITSUNE_PLESK_CONNECTOR_SECRET || '');
+const managedPleskUrl = String(process.env.KITSUNE_PLESK_URL || '').trim();
+if (managedPleskConnectorId && managedPleskConnectorSecret && managedPleskUrl) {
+  hubManager.saveConnector({
+    id: managedPleskConnectorId,
+    name: `Plesk — ${new URL(managedPleskUrl).hostname}`,
+    baseUrl: managedPleskUrl,
+    authMode: process.env.KITSUNE_HUB_AUTH_MODE || 'hybrid',
+    enabled: process.env.KITSUNE_HUB_AUTH_MODE !== 'independent',
+    autoProvisionUsers: process.env.KITSUNE_HUB_AUTO_PROVISION !== '0'
+  }, managedPleskConnectorSecret);
+}
 const supportManager = new SupportManager(appRoot, { configManager, downloadManager, serviceManager, diagnosticsManager, projectManager, activityManager, environmentManager, pluginManager, platformManager });
 const observabilityManager = new ObservabilityManager(appRoot, serviceManager);
 const automationManager = new AutomationManager(appRoot, { serviceManager, projectManager, commandManager, labManager, backupManager, diagnosticsManager });

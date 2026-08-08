@@ -1,9 +1,223 @@
-<?php $s = $this->settings; ?>
-<style>
-.ks-wrap{max-width:1000px}.ks-hero{padding:24px;border-radius:12px;background:linear-gradient(135deg,#24264a,#15162c);color:#fff;margin-bottom:16px}.ks-hero h2{margin:0 0 7px;font-size:24px}.ks-hero p{margin:0;color:#b7bbd8}.ks-state{display:inline-block;margin-top:14px;padding:5px 9px;border-radius:20px;background:<?php echo $s['paired'] ? '#176b4b' : '#74402f';?>;font-size:12px}.ks-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.ks-card{padding:18px;border:1px solid #d7dbe3;border-radius:9px;background:#fff}.ks-card h3{margin:0 0 13px}.ks-field{display:block;margin:10px 0}.ks-field span{display:block;margin-bottom:4px;font-size:12px;color:#687080}.ks-field input,.ks-field select{width:100%;box-sizing:border-box;padding:8px}.ks-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px}.ks-button{display:inline-block;padding:9px 13px;border:0;border-radius:5px;background:#3868d9;color:#fff;text-decoration:none;cursor:pointer}.ks-button.secondary{background:#596273}.ks-note{font-size:12px;color:#737b89;line-height:1.55}@media(max-width:800px){.ks-grid{grid-template-columns:1fr}}
-</style>
-<div class="ks-wrap"><div class="ks-hero"><h2>KitsuneServ Bridge</h2><p>Plesk SSO, domain inventory and deployment node for Kitsune Hub.</p><span class="ks-state"><?php echo $s['paired'] ? '● PAIRED · ' . $this->escape($s['nodeId']) : '○ NOT PAIRED'; ?></span></div>
-<div class="ks-grid"><div class="ks-card"><h3>Open Kitsune Hub</h3><p class="ks-note">Continue with your current Plesk identity. The hand-off is signed, expires in 60 seconds and can be used only once.</p><div class="ks-actions"><a class="ks-button" href="<?php echo $this->url(['controller'=>'index','action'=>'sso']); ?>">Sign in with Plesk</a><?php if ($s['paired']): ?><form method="post" action="<?php echo $this->url(['controller'=>'index','action'=>'sync']); ?>"><button class="ks-button secondary" type="submit">Sync inventory</button></form><?php endif; ?></div><p class="ks-note">Last sync: <?php echo $this->escape($s['lastSync'] ?: 'never'); ?></p></div>
-<?php if ($this->isAdmin): ?><div class="ks-card"><h3>Pair this server</h3><form method="post" action="<?php echo $this->url(['controller'=>'index','action'=>'pair']); ?>"><label class="ks-field"><span>10-minute pairing code from Kitsune Hub</span><input name="pairing_code" placeholder="abcdef-123456" required></label><button class="ks-button" type="submit">Pair Plesk node</button></form></div>
-<div class="ks-card"><h3>Connection and authentication</h3><form method="post" action="<?php echo $this->url(['controller'=>'index','action'=>'save']); ?>"><label class="ks-field"><span>Kitsune Hub URL</span><input name="hub_url" value="<?php echo $this->escape($s['hubUrl']); ?>" placeholder="https://panel.example.com" required></label><label class="ks-field"><span>Panel base domain</span><input name="panel_domain" value="<?php echo $this->escape($s['panelDomain']); ?>" placeholder="panel.example.com"></label><label class="ks-field"><span>Connector ID from Hub</span><input name="connector_id" value="<?php echo $this->escape($s['connectorId']); ?>" required></label><label class="ks-field"><span>Shared SSO secret (leave blank to keep)</span><input type="password" name="shared_secret"></label><label class="ks-field"><span>Authentication mode</span><select name="auth_mode"><option value="hybrid" <?php echo $s['authMode']==='hybrid'?'selected':''; ?>>Hybrid: Plesk + independent</option><option value="plesk" <?php echo $s['authMode']==='plesk'?'selected':''; ?>>Plesk only</option><option value="independent" <?php echo $s['authMode']==='independent'?'selected':''; ?>>Independent only</option></select></label><label><input type="checkbox" name="auto_provision" value="1" <?php echo $s['autoProvision']?'checked':''; ?>> Automatically create Kitsune users on first Plesk SSO</label><div class="ks-actions"><button class="ks-button" type="submit">Save configuration</button></div></form></div>
-<div class="ks-card"><h3>DNS and certificate readiness</h3><p class="ks-note">Configure one wildcard DNS record <strong>*.<?php echo $this->escape($s['panelDomain'] ?: 'panel.example.com'); ?></strong> pointing to the Hub gateway. Issue a wildcard certificate using SSL It!/Let’s Encrypt or provide an external certificate. The bridge deliberately does not bypass certificate validation.</p></div><?php endif; ?></div></div>
+<?php
+$c = $this->config;
+$state = $this->state;
+$secrets = $this->secretStatus;
+$e = static function ($value) { return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8'); };
+$url = static function ($action) { return pm_Context::getActionUrl('index', $action); };
+$service = (array) ($state['service'] ?? []);
+$repository = (array) ($state['repository'] ?? []);
+$deployment = (array) ($state['deployment'] ?? []);
+$proxy = (array) ($state['proxy'] ?? []);
+$serviceActive = !empty($service['active']);
+$healthOk = ($service['health'] ?? null) === true;
+$paired = (bool) $this->paired;
+$shortCommit = static function ($value) { return $value ? substr((string) $value, 0, 10) : '—'; };
+?>
+<div class="ks-shell" data-deployment-mode="<?php echo $e($c['deployment_mode']); ?>" data-url-mode="<?php echo $e($c['url_mode']); ?>" data-proxy-mode="<?php echo $e($c['proxy_mode']); ?>">
+  <header class="ks-hero">
+    <div class="ks-brand">
+      <span class="ks-logo">狐</span>
+      <div>
+        <div class="ks-eyebrow">PLESK DEPLOYMENT &amp; IDENTITY BRIDGE</div>
+        <h1>KitsuneServ Bridge</h1>
+        <p>Wdrożenie z repozytorium, domena Pleska, reverse proxy, SSO i synchronizacja z Kitsune Hub.</p>
+      </div>
+    </div>
+    <div class="ks-hero-status">
+      <span class="ks-pill <?php echo $serviceActive ? 'is-good' : 'is-muted'; ?>"><i></i><?php echo $serviceActive ? 'Usługa działa' : 'Usługa zatrzymana'; ?></span>
+      <span class="ks-pill <?php echo $paired ? 'is-good' : 'is-warning'; ?>"><i></i><?php echo $paired ? 'Węzeł sparowany' : 'Brak parowania'; ?></span>
+      <span class="ks-version">v<?php echo $e($this->extensionVersion); ?></span>
+    </div>
+  </header>
+
+  <nav class="ks-tabs" aria-label="Sekcje KitsuneServ Bridge">
+    <button type="button" class="is-active" data-ks-tab="overview">Przegląd</button>
+    <?php if ($this->isAdmin): ?>
+      <button type="button" data-ks-tab="deployment">Wdrożenie</button>
+      <button type="button" data-ks-tab="configuration">Konfiguracja</button>
+      <button type="button" data-ks-tab="access">Dostęp i SSO</button>
+      <button type="button" data-ks-tab="manual">Instrukcja ręczna</button>
+      <button type="button" data-ks-tab="logs">Logi</button>
+    <?php endif; ?>
+  </nav>
+
+  <main>
+    <section class="ks-tab-panel is-active" data-ks-panel="overview">
+      <?php if ($this->warnings): ?>
+        <div class="ks-alert-stack">
+          <?php foreach ($this->warnings as $warning): ?>
+            <div class="ks-alert is-<?php echo $e($warning[0]); ?>"><span><?php echo $warning[0] === 'critical' ? '!' : ($warning[0] === 'warning' ? '⚠' : 'i'); ?></span><p><?php echo $e($warning[1]); ?></p></div>
+          <?php endforeach; ?>
+        </div>
+      <?php else: ?>
+        <div class="ks-alert is-success"><span>✓</span><p>Konfiguracja jest kompletna, a ostatnia kontrola nie wykryła problemów.</p></div>
+      <?php endif; ?>
+
+      <div class="ks-metrics">
+        <article><span>Publikacja</span><strong><?php echo $e($c['panel_domain'] ?: 'Nie wybrano'); ?></strong><small><?php echo $e($c['hub_url'] ?: 'Brak adresu Hub'); ?></small></article>
+        <article><span>Wersja wdrożona</span><strong><?php echo $e($deployment['version'] ?? '—'); ?></strong><small>commit <?php echo $e($shortCommit($deployment['commit'] ?? null)); ?></small></article>
+        <article><span>Repozytorium</span><strong><?php echo !empty($repository['updateAvailable']) ? 'Aktualizacja dostępna' : 'Stan lokalny'; ?></strong><small><?php echo $e($c['repository_branch']); ?> · <?php echo $e($shortCommit($repository['localCommit'] ?? null)); ?></small></article>
+        <article><span>Zdrowie usługi</span><strong class="<?php echo $healthOk ? 'ks-good-text' : ''; ?>"><?php echo $healthOk ? 'HTTP odpowiada' : ($serviceActive ? 'Brak odpowiedzi' : 'Nie działa'); ?></strong><small>PID <?php echo $e(($service['pid'] ?? 0) ?: '—'); ?> · port <?php echo $e($c['hub_port']); ?></small></article>
+      </div>
+
+      <div class="ks-grid ks-grid-2">
+        <article class="ks-card">
+          <div class="ks-card-head"><div><span class="ks-kicker">BIEŻĄCY TRYB</span><h2>Jak działa ten węzeł</h2></div><span class="ks-icon">⌁</span></div>
+          <dl class="ks-summary">
+            <div><dt>Aplikacja</dt><dd><?php echo $c['deployment_mode'] === 'managed' ? 'Zarządzana przez Plesk Bridge' : 'Istniejący zewnętrzny Hub'; ?></dd></div>
+            <div><dt>Adres publiczny</dt><dd><?php echo $c['url_mode'] === 'automatic' ? 'Automatycznie z domeny' : 'Wpisany ręcznie'; ?></dd></div>
+            <div><dt>Reverse proxy</dt><dd><?php echo $c['proxy_mode'] === 'managed' ? 'Automatyczny blok nginx' : 'Konfiguracja ręczna'; ?></dd></div>
+            <div><dt>Uwierzytelnianie</dt><dd><?php echo $c['auth_mode'] === 'hybrid' ? 'Plesk + konta niezależne' : ($c['auth_mode'] === 'plesk' ? 'Tylko Plesk' : 'Tylko konta niezależne'); ?></dd></div>
+          </dl>
+        </article>
+        <article class="ks-card">
+          <div class="ks-card-head"><div><span class="ks-kicker">SZYBKI DOSTĘP</span><h2>Kitsune Hub</h2></div><span class="ks-icon">↗</span></div>
+          <p class="ks-muted">Logowanie przekazuje krótkotrwałe, podpisane potwierdzenie bieżącej tożsamości Pleska.</p>
+          <div class="ks-actions">
+            <a class="ks-button is-primary <?php echo (!$c['hub_url'] || !$c['connector_id'] || !$secrets['shared_secret']) ? 'is-disabled' : ''; ?>" href="<?php echo $e($url('sso')); ?>">Otwórz Hub przez Plesk SSO</a>
+            <?php if ($c['hub_url']): ?><a class="ks-button" href="<?php echo $e($c['hub_url']); ?>" target="_blank" rel="noopener">Otwórz adres Hub</a><?php endif; ?>
+          </div>
+          <div class="ks-inline-state"><span class="<?php echo $paired ? 'is-good' : 'is-warning'; ?>"></span><div><strong><?php echo $paired ? 'Połączono z Hubem' : 'Węzeł nie jest sparowany'; ?></strong><small>Ostatnia synchronizacja: <?php echo $e($c['last_sync'] ?: 'nigdy'); ?></small></div></div>
+        </article>
+      </div>
+    </section>
+
+    <?php if ($this->isAdmin): ?>
+    <section class="ks-tab-panel" data-ks-panel="deployment">
+      <div class="ks-section-title"><div><span class="ks-kicker">OPERACJE ZARZĄDZANE</span><h2>Repozytorium, wdrożenie i usługa</h2><p>Każda operacja działa jako zadanie długie Pleska. Aktualizacja nie nadpisuje katalogu danych i zachowuje poprzednie wdrożenie do automatycznego rollbacku.</p></div></div>
+      <div class="ks-grid ks-grid-2">
+        <article class="ks-card ks-operation-card">
+          <div class="ks-card-head"><div><span class="ks-kicker">KOD I WYDANIE</span><h2>Aktualizacja aplikacji</h2></div><span class="ks-icon">⇅</span></div>
+          <p class="ks-muted">Repozytorium: <code><?php echo $e($c['repository_url']); ?></code><br>Gałąź: <code><?php echo $e($c['repository_branch']); ?></code></p>
+          <form method="post" action="<?php echo $e($url('operation')); ?>" class="ks-operation-form">
+            <button class="ks-button" name="operation" value="check">Sprawdź wersję</button>
+            <button class="ks-button" name="operation" value="sync" data-ks-confirm="Pobrać najnowszy kod do zarządzanego repozytorium?">Pobierz kod</button>
+            <button class="ks-button is-primary" name="operation" value="deploy" data-ks-confirm="Wdrożyć lokalną kopię i zrestartować usługę KitsuneServ?">Wdróż lokalny kod</button>
+            <button class="ks-button is-primary" name="operation" value="sync-deploy" data-ks-confirm="Pobrać najnowszy kod, wdrożyć go i zrestartować usługę?">Pobierz i wdróż</button>
+          </form>
+          <div class="ks-state-table"><div><span>Lokalny commit</span><code><?php echo $e($repository['localCommit'] ?? '—'); ?></code></div><div><span>Zdalny commit</span><code><?php echo $e($repository['remoteCommit'] ?? '—'); ?></code></div><div><span>Wdrożono</span><strong><?php echo $e($deployment['deployedAt'] ?? '—'); ?></strong></div></div>
+        </article>
+        <article class="ks-card ks-operation-card">
+          <div class="ks-card-head"><div><span class="ks-kicker">SYSTEMD I NGINX</span><h2>Sterowanie usługą</h2></div><span class="ks-icon">◉</span></div>
+          <div class="ks-service-banner <?php echo $serviceActive ? 'is-running' : ''; ?>"><span></span><div><strong><?php echo $serviceActive ? 'kitsuneserv-hub.service działa' : 'kitsuneserv-hub.service nie działa'; ?></strong><small><?php echo !empty($service['enabled']) ? 'Autostart włączony' : 'Autostart wyłączony'; ?> · health <?php echo $healthOk ? 'OK' : 'brak'; ?></small></div></div>
+          <form method="post" action="<?php echo $e($url('operation')); ?>" class="ks-operation-form">
+            <button class="ks-button is-success" name="operation" value="start">Uruchom</button>
+            <button class="ks-button" name="operation" value="restart" data-ks-confirm="Zrestartować usługę KitsuneServ Hub?">Restart</button>
+            <button class="ks-button is-danger" name="operation" value="stop" data-ks-confirm="Zatrzymać KitsuneServ Hub? Panel przestanie odpowiadać.">Zatrzymaj</button>
+            <button class="ks-button" name="operation" value="proxy">Zastosuj reverse proxy</button>
+          </form>
+          <div class="ks-state-table"><div><span>Plik proxy</span><code><?php echo $e($proxy['path'] ?? '—'); ?></code></div><div><span>Domena proxy</span><strong><?php echo $e($proxy['domain'] ?? '—'); ?></strong></div><div><span>Ostatnia operacja</span><strong><?php echo $e($state['lastOperation'] ?? '—'); ?></strong></div></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="ks-tab-panel" data-ks-panel="configuration">
+      <div class="ks-section-title"><div><span class="ks-kicker">PEŁNA KONFIGURACJA</span><h2>Domena, repozytorium i środowisko</h2><p>Najpierw wybierz model działania i domenę. Pozostałe sekcje dopasują się automatycznie.</p></div></div>
+      <form method="post" action="<?php echo $e($url('save')); ?>" id="ks-config-form">
+        <article class="ks-card ks-config-card">
+          <div class="ks-form-section"><span>1</span><div><h3>Model wdrożenia i publikacja</h3><p>Zarządzany tryb instaluje Hub z Git i obsługuje systemd. Tryb zewnętrzny przechowuje tylko połączenie, SSO i synchronizację.</p></div></div>
+          <div class="ks-form-grid">
+            <label class="ks-field"><span>Model aplikacji</span><select name="deployment_mode" id="ks-deployment-mode"><option value="managed" <?php echo $c['deployment_mode'] === 'managed' ? 'selected' : ''; ?>>Zarządzany — instaluj i aktualizuj z repozytorium</option><option value="external" <?php echo $c['deployment_mode'] === 'external' ? 'selected' : ''; ?>>Zewnętrzny — połącz istniejący Kitsune Hub</option></select><small>W trybie zewnętrznym rozszerzenie nie modyfikuje systemd ani lokalnego kodu.</small></label>
+            <label class="ks-field"><span>Domena panelu z Pleska</span><select name="panel_domain" id="ks-panel-domain" required><option value="">— wybierz aktywną domenę —</option><?php foreach ($this->domains as $domain => $label): ?><option value="<?php echo $e($domain); ?>" <?php echo $c['panel_domain'] === $domain ? 'selected' : ''; ?>><?php echo $e($label); ?></option><?php endforeach; ?></select><small>Lista zawiera wyłącznie aktywne domeny i subdomeny z hostingiem WWW.</small></label>
+            <label class="ks-field"><span>Tworzenie publicznego adresu</span><select name="url_mode" id="ks-url-mode"><option value="automatic" <?php echo $c['url_mode'] === 'automatic' ? 'selected' : ''; ?>>Automatycznie — https://wybrana-domena</option><option value="manual" <?php echo $c['url_mode'] === 'manual' ? 'selected' : ''; ?>>Ręcznie — własny adres istniejącego Hub</option></select></label>
+            <label class="ks-field"><span>Publiczny adres Kitsune Hub</span><input type="url" name="hub_url" id="ks-hub-url" value="<?php echo $e($c['hub_url']); ?>" placeholder="https://hub.example.com" required><small id="ks-hub-url-help">Bez końcowego ukośnika i dodatkowej ścieżki.</small></label>
+            <label class="ks-field"><span>Konfiguracja reverse proxy</span><select name="proxy_mode" id="ks-proxy-mode"><option value="managed" <?php echo $c['proxy_mode'] === 'managed' ? 'selected' : ''; ?>>Automatyczna — zarządzany vhost_nginx.conf</option><option value="manual" <?php echo $c['proxy_mode'] === 'manual' ? 'selected' : ''; ?>>Ręczna — pokaż gotowy blok nginx</option></select><small>Automatyczna konfiguracja wykonuje reconfigure-domain i przy błędzie przywraca poprzedni plik.</small></label>
+            <label class="ks-field"><span>Tryb uwierzytelniania</span><select name="auth_mode"><option value="hybrid" <?php echo $c['auth_mode'] === 'hybrid' ? 'selected' : ''; ?>>Hybrydowy — Plesk SSO + konta niezależne</option><option value="plesk" <?php echo $c['auth_mode'] === 'plesk' ? 'selected' : ''; ?>>Tylko konta Pleska</option><option value="independent" <?php echo $c['auth_mode'] === 'independent' ? 'selected' : ''; ?>>Tylko konta niezależne</option></select></label>
+          </div>
+        </article>
+
+        <div data-ks-managed-section>
+          <article class="ks-card ks-config-card">
+            <div class="ks-form-section"><span>2</span><div><h3>Repozytorium Git</h3><p>Obsługiwane jest HTTPS z tokenem albo SSH z przypiętym known_hosts i opcjonalnym kluczem deploy.</p></div></div>
+            <div class="ks-form-grid">
+              <label class="ks-field ks-span-2"><span>Adres repozytorium</span><input name="repository_url" value="<?php echo $e($c['repository_url']); ?>" placeholder="https://github.com/organization/kitsune-serv.git"><small>Token nigdy nie trafia do adresu origin ani logów procesu.</small></label>
+              <label class="ks-field"><span>Gałąź wdrożeniowa</span><input name="repository_branch" value="<?php echo $e($c['repository_branch']); ?>" placeholder="main"></label>
+              <label class="ks-field"><span>Użytkownik Git HTTPS</span><input name="git_username" value="<?php echo $e($c['git_username']); ?>" autocomplete="off"></label>
+              <label class="ks-field"><span>Token Git HTTPS</span><input type="password" name="git_token" autocomplete="new-password" placeholder="<?php echo $secrets['git_token'] ? 'Zapisany — puste pole zachowa' : 'Opcjonalny dla publicznego repo'; ?>"><small><?php echo $secrets['git_token'] ? 'Sekret jest zapisany i zaszyfrowany.' : 'Brak zapisanego tokenu.'; ?></small><em class="ks-clear"><input type="checkbox" name="clear_git_token" value="1"> wyczyść zapisany token</em></label>
+              <label class="ks-field ks-span-2"><span>SSH known_hosts</span><textarea name="git_ssh_known_hosts" rows="4" placeholder="github.com ssh-ed25519 AAAA…"><?php echo $e($c['git_ssh_known_hosts']); ?></textarea><small>Wklej zweryfikowany odcisk. Host key checking pozostaje zawsze włączony.</small></label>
+              <label class="ks-field ks-span-2"><span>Prywatny klucz SSH deploy</span><textarea name="git_ssh_private_key" rows="6" autocomplete="off" placeholder="<?php echo $secrets['git_ssh_private_key'] ? 'Klucz zapisany — puste pole zachowa' : '-----BEGIN OPENSSH PRIVATE KEY-----'; ?>"></textarea><small><?php echo $secrets['git_ssh_private_key'] ? 'Klucz jest zapisany i zaszyfrowany.' : 'Opcjonalny klucz tylko do odczytu, bez hasła.'; ?></small><em class="ks-clear"><input type="checkbox" name="clear_git_ssh_private_key" value="1"> wyczyść zapisany klucz</em></label>
+            </div>
+          </article>
+
+          <article class="ks-card ks-config-card">
+            <div class="ks-form-section"><span>3</span><div><h3>Ścieżki, Node.js i systemd</h3><p>Kod źródłowy, aktywne wydanie i trwałe dane są rozdzielone. Dzięki temu aktualizacja jest atomowa i może wykonać rollback.</p></div></div>
+            <div class="ks-form-grid">
+              <label class="ks-field"><span>Katalog repozytorium</span><input name="repository_path" value="<?php echo $e($c['repository_path']); ?>"></label>
+              <label class="ks-field"><span>Katalog aktywnego wdrożenia</span><input name="deploy_path" value="<?php echo $e($c['deploy_path']); ?>"></label>
+              <label class="ks-field"><span>Katalog trwałych danych</span><input name="data_path" value="<?php echo $e($c['data_path']); ?>"></label>
+              <label class="ks-field"><span>Użytkownik usługi Linux</span><input name="service_user" value="<?php echo $e($c['service_user']); ?>"><small>Użytkownik musi istnieć na serwerze. Pełna integracja systemowa zwykle wymaga root.</small></label>
+              <label class="ks-field"><span>Plik wykonywalny Node.js</span><input name="node_binary" value="<?php echo $e($c['node_binary']); ?>"></label>
+              <label class="ks-field"><span>Plik wykonywalny npm</span><input name="npm_binary" value="<?php echo $e($c['npm_binary']); ?>"></label>
+              <label class="ks-field"><span>Adres nasłuchu</span><select name="bind_address"><option value="127.0.0.1" <?php echo $c['bind_address'] === '127.0.0.1' ? 'selected' : ''; ?>>127.0.0.1 (IPv4 loopback)</option><option value="::1" <?php echo $c['bind_address'] === '::1' ? 'selected' : ''; ?>>::1 (IPv6 loopback)</option></select></label>
+              <label class="ks-field"><span>Port lokalny Hub</span><input type="number" name="hub_port" min="1024" max="65535" value="<?php echo $e($c['hub_port']); ?>"></label>
+            </div>
+          </article>
+
+          <article class="ks-card ks-config-card">
+            <div class="ks-form-section"><span>4</span><div><h3>Konta, API i aktualizacje</h3><p>Nowy sekret zastępuje poprzedni. Puste pole zachowuje zaszyfrowaną wartość.</p></div></div>
+            <div class="ks-form-grid">
+              <label class="ks-field"><span>Pierwszy administrator</span><input name="bootstrap_user" value="<?php echo $e($c['bootstrap_user']); ?>" autocomplete="username"></label>
+              <label class="ks-field"><span>Hasło pierwszego administratora</span><input type="password" name="bootstrap_password" autocomplete="new-password" placeholder="<?php echo $secrets['bootstrap_password'] ? 'Zapisane — puste pole zachowa' : 'Minimum 12 znaków'; ?>"><small><?php echo $secrets['bootstrap_password'] ? 'Hasło jest zapisane i zaszyfrowane.' : 'Wymagane przed pierwszym wdrożeniem.'; ?></small><em class="ks-clear"><input type="checkbox" name="clear_bootstrap_password" value="1"> wyczyść zapisane hasło</em></label>
+              <label class="ks-field"><span>Główny klucz szyfrowania</span><input type="password" name="secret_key" autocomplete="new-password" placeholder="<?php echo $secrets['secret_key'] ? 'Zapisany — puste pole zachowa' : 'Minimum 32 znaki'; ?>"><small>Używany przez magazyn sekretów KitsuneServ.</small><em class="ks-clear"><input type="checkbox" name="clear_secret_key" value="1"> wyczyść klucz</em></label>
+              <label class="ks-field"><span>Token API serwera</span><input type="password" name="api_token" autocomplete="new-password" placeholder="<?php echo $secrets['api_token'] ? 'Zapisany — puste pole zachowa' : 'Opcjonalny, minimum 24 znaki'; ?>"><em class="ks-clear"><input type="checkbox" name="clear_api_token" value="1"> wyczyść token</em></label>
+              <label class="ks-field ks-span-2"><span>Dozwolone adresy IP / CIDR</span><input name="allowed_ips" value="<?php echo $e($c['allowed_ips']); ?>" placeholder="203.0.113.10, 2001:db8::/64"><small>Puste pole nie ogranicza dostępu na poziomie aplikacji. Plesk/nginx nadal kontroluje ruch publiczny.</small></label>
+              <label class="ks-field ks-span-2"><span>Adres podpisanego manifestu aktualizacji</span><input type="url" name="update_manifest_url" value="<?php echo $e($c['update_manifest_url']); ?>" placeholder="https://releases.example.com/kitsuneserv/latest.json"></label>
+              <label class="ks-field ks-span-2"><span>Klucz publiczny aktualizacji</span><textarea name="update_public_key" rows="5" placeholder="-----BEGIN PUBLIC KEY-----"><?php echo $e($c['update_public_key']); ?></textarea><small>Instalowane są wyłącznie paczki zgodne z manifestem i podpisem.</small></label>
+              <label class="ks-toggle"><input type="checkbox" name="auto_provision" value="1" <?php echo $c['auto_provision'] === '1' ? 'checked' : ''; ?>><span></span><div><strong>Automatycznie twórz konta przy pierwszym Plesk SSO</strong><small>Tożsamość i rola są pobierane z podpisanego assertion Pleska.</small></div></label>
+              <label class="ks-toggle"><input type="checkbox" name="safe_mode" value="1" <?php echo $c['safe_mode'] === 'true' ? 'checked' : ''; ?>><span></span><div><strong>Tryb bezpieczny</strong><small>Wyłącza automatyzacje i część integracji systemowych.</small></div></label>
+              <label class="ks-toggle"><input type="checkbox" name="disable_system_integration" value="1" <?php echo $c['disable_system_integration'] === 'true' ? 'checked' : ''; ?>><span></span><div><strong>Wyłącz integrację systemową aplikacji</strong><small>Ogranicza operacje systemowe wykonywane wewnątrz KitsuneServ.</small></div></label>
+            </div>
+          </article>
+        </div>
+
+        <div class="ks-sticky-save"><div><strong>Zmiany nie są wdrażane automatycznie</strong><small>Po zapisie uruchom „Pobierz i wdróż”, jeśli zmieniłeś konfigurację zarządzanej usługi.</small></div><button class="ks-button is-primary is-large" type="submit">Zapisz pełną konfigurację</button></div>
+      </form>
+    </section>
+
+    <section class="ks-tab-panel" data-ks-panel="access">
+      <div class="ks-grid ks-grid-2">
+        <article class="ks-card">
+          <div class="ks-card-head"><div><span class="ks-kicker">PLESK SSO</span><h2>Podpisane logowanie</h2></div><span class="ks-icon">⌾</span></div>
+          <p class="ks-muted">Connector ID i sekret muszą odpowiadać konektorowi utworzonemu w Kitsune Hub. Sekret nie jest nigdy wyświetlany ponownie.</p>
+          <form method="post" action="<?php echo $e($url('save')); ?>" class="ks-subform" data-ks-merge-config>
+            <?php foreach ($c as $name => $value): if (in_array($name, ['plesk_url', 'connector_id', 'last_sync', 'node_id'], true)) continue; ?><input type="hidden" name="<?php echo $e($name); ?>" value="<?php echo $e($value); ?>"><?php endforeach; ?>
+            <label class="ks-field"><span>Publiczny adres panelu Plesk</span><input type="url" name="plesk_url" value="<?php echo $e($c['plesk_url']); ?>" placeholder="https://plesk.example.com:8443"><small>Adres źródłowego panelu tożsamości, bez ścieżki i końcowego ukośnika.</small></label>
+            <label class="ks-field"><span>Connector ID z Hub</span><input name="connector_id" value="<?php echo $e($c['connector_id']); ?>" placeholder="plesk-production"></label>
+            <label class="ks-field"><span>Wspólny sekret SSO</span><input type="password" name="shared_secret" autocomplete="new-password" placeholder="<?php echo $secrets['shared_secret'] ? 'Zapisany — puste pole zachowa' : 'Minimum 32 znaki'; ?>"><small><?php echo $secrets['shared_secret'] ? 'Sekret zapisany i zaszyfrowany.' : 'Brak zapisanego sekretu.'; ?></small><em class="ks-clear"><input type="checkbox" name="clear_shared_secret" value="1"> wyczyść sekret</em></label>
+            <button class="ks-button is-primary" type="submit">Zapisz ustawienia SSO</button>
+          </form>
+        </article>
+        <article class="ks-card">
+          <div class="ks-card-head"><div><span class="ks-kicker">WĘZEŁ PLESK</span><h2>Parowanie i synchronizacja</h2></div><span class="ks-icon">⇄</span></div>
+          <?php if (!$paired): ?>
+            <form method="post" action="<?php echo $e($url('pair')); ?>" class="ks-subform">
+              <label class="ks-field"><span>10-minutowy kod parowania z Kitsune Hub</span><input name="pairing_code" placeholder="abcdef-123456" pattern="[a-fA-F0-9]{6}-[a-fA-F0-9]{6}" required></label>
+              <button class="ks-button is-primary" type="submit">Sparuj ten serwer</button>
+            </form>
+          <?php else: ?>
+            <div class="ks-service-banner is-running"><span></span><div><strong>Węzeł jest sparowany</strong><small>ID: <?php echo $e($c['node_id']); ?></small></div></div>
+            <form method="post" action="<?php echo $e($url('sync')); ?>"><button class="ks-button is-primary" type="submit">Synchronizuj domeny i możliwości</button></form>
+          <?php endif; ?>
+          <p class="ks-muted">Synchronizacja publikuje do Huba wersję Pleska, domeny dostępne dla bieżącego serwera, tryb uwierzytelniania i możliwości Bridge.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="ks-tab-panel" data-ks-panel="manual">
+      <div class="ks-section-title"><div><span class="ks-kicker">TRYB RĘCZNY</span><h2>Gotowa konfiguracja publikacji</h2><p>Użyj jej, gdy domeną zarządzasz samodzielnie albo istniejąca konfiguracja nginx koliduje z automatycznym blokiem.</p></div></div>
+      <div class="ks-grid ks-grid-2">
+        <article class="ks-card ks-code-card"><div class="ks-card-head"><div><span class="ks-kicker">NGINX</span><h2>Dodatkowe dyrektywy domeny</h2></div><button class="ks-copy" type="button" data-ks-copy="ks-nginx-code">Kopiuj</button></div><pre id="ks-nginx-code"><code><?php echo $e($this->manualProxy); ?></code></pre><ol class="ks-steps"><li>Otwórz <strong>Websites &amp; Domains → <?php echo $e($c['panel_domain'] ?: 'wybrana domena'); ?> → Apache &amp; nginx Settings</strong>.</li><li>Wklej blok do „Additional nginx directives”.</li><li>Zapisz i sprawdź <code><?php echo $e($c['hub_url'] ?: 'https://wybrana-domena'); ?></code>.</li></ol></article>
+        <article class="ks-card"><div class="ks-card-head"><div><span class="ks-kicker">DNS I TLS</span><h2>Lista kontrolna domeny</h2></div><span class="ks-icon">✓</span></div><ul class="ks-checklist"><li><span>1</span><div><strong>Rekord DNS</strong><small>Domena <code><?php echo $e($c['panel_domain'] ?: 'hub.example.com'); ?></code> wskazuje na ten serwer Plesk.</small></div></li><li><span>2</span><div><strong>Certyfikat TLS</strong><small>Wydaj certyfikat przez SSL It!/Let’s Encrypt albo zainstaluj własny.</small></div></li><li><span>3</span><div><strong>Subdomeny zasobów</strong><small>Jeżeli używasz routingu Huba, dodaj wildcard <code>*.<?php echo $e($c['panel_domain'] ?: 'hub.example.com'); ?></code>.</small></div></li><li><span>4</span><div><strong>WebSocket</strong><small>Nagłówki Upgrade/Connection muszą dotrzeć do lokalnego portu <?php echo $e($c['hub_port']); ?>.</small></div></li></ul></article>
+      </div>
+    </section>
+
+    <section class="ks-tab-panel" data-ks-panel="logs">
+      <article class="ks-card ks-log-card">
+        <div class="ks-card-head"><div><span class="ks-kicker">OSTATNIE 300 WPISÓW</span><h2>Dziennik operacji Bridge</h2></div><button class="ks-copy" type="button" data-ks-copy="ks-log-output">Kopiuj</button></div>
+        <pre id="ks-log-output"><code><?php echo $e(!empty($state['log']) ? implode("\n", (array) $state['log']) : 'Brak wykonanych operacji.'); ?></code></pre>
+        <div class="ks-log-meta"><span>Aktualizacja stanu: <?php echo $e($state['updatedAt'] ?? '—'); ?></span><span>Ostatni sukces: <?php echo $e($state['lastSuccess'] ?? '—'); ?></span></div>
+      </article>
+    </section>
+    <?php endif; ?>
+  </main>
+</div>

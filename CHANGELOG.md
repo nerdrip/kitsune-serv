@@ -1,7 +1,9 @@
 # Changelog
 
-## 3.0.0 — 2026-08-08
+## 3.0.0 — 2026-08-09
 
+- Plesk package release 3 adds Plesk-domain selection, automatic/manual publication, managed/external Hub modes, configurable Git credentials and deploy keys, atomic systemd deployments, nginx rollback, live health/log state and a complete responsive management UI.
+- Plesk package release 2 fixes the panel entry point and exposes Kitsune Hub in Service Provider, Reseller and Power User navigation plus Tools & Settings.
 - Added Kitsune Hub: persistent multi-user accounts, owner/admin/operator/developer/auditor/viewer RBAC, scoped memberships, encrypted TOTP MFA, recovery codes, invitations, persistent sessions and revocable, permission-bounded device/API tokens.
 - Added flat wildcard routing below one configured panel domain, including authenticated/public policies, HTTP and WebSocket reverse proxying, node presence, short-lived device pairing and automatic token revocation.
 - Added versioned, secret-redacted synchronization for projects, Test Labs, API Flow projects, environments, snapshots, deployment profiles and policies, with SHA-256 identity, diffs, conflicts, history, rollback and tombstones.
