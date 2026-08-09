@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.0.0-5
+
+- Fixed the privileged `sbin/kitsuneserv-bridge` entry point in packages built on Windows by enforcing Unix LF line endings, preventing `/usr/bin/env: 'php\r': No such file or directory`.
+- Added package-time normalization and repository EOL rules so executable Unix scripts cannot regress to CRLF.
+
 ## 3.0.0-4
 
 - Removed the hybrid-authentication bootstrap deadlock by generating the connector ID, encrypted shared secret and Plesk origin automatically on save or first deployment.

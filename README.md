@@ -156,7 +156,7 @@ Supports custom Git repositories as well.
 - Pair desktops, servers, CI agents and Plesk nodes with a short-lived code and monitor live presence, capabilities, version and redacted inventory
 - Synchronize projects, Test Labs and API Flow definitions in both directions with revisions, hashes, history, explicit conflicts and rollback; secret values never enter synchronized manifests
 - Connect the desktop to a remote Hub over HTTPS, optionally pin its SHA-256 certificate fingerprint, and retry synchronization idempotently
-- Install `artifacts/plesk/kitsuneserv-bridge-3.0.0-r4.zip` in Plesk and select an active hosted domain directly from the Plesk inventory
+- Install `artifacts/plesk/kitsuneserv-bridge-3.0.0-r5.zip` in Plesk and select an active hosted domain directly from the Plesk inventory
 - Choose managed deployment from a configurable Git repository or connect an existing external Hub; public URL and nginx reverse proxy can be automatic or manual
 - Configure branch and isolated source/release/data paths, HTTPS token or strict SSH deploy key, Node.js/npm, systemd service user, port, bootstrap account, API/update keys and Plesk connector secrets
 - Let Bridge generate the connector ID, encrypted shared secret and Plesk URL on save/deploy; start and restart refresh authentication settings without a full redeployment

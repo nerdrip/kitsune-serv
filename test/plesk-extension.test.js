@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { normalizeUnixTextFile } = require('../scripts/package-text-utils');
 
 const root = path.resolve(__dirname, '..');
 const extension = path.join(root, 'plesk-extension', 'kitsuneserv-bridge');
@@ -24,7 +25,7 @@ test('Plesk extension has an installable SDK structure and release metadata', ()
   const meta = fs.readFileSync(path.join(extension, 'meta.xml'), 'utf8');
   assert.match(meta, /<id>kitsuneserv-bridge<\/id>/);
   assert.match(meta, new RegExp(`<version>${require('../package.json').version.replaceAll('.', '\\.')}<\\/version>`));
-  assert.match(meta, /<release>4<\/release>/);
+  assert.match(meta, /<release>5<\/release>/);
   assert.match(meta, /<plesk_min_version>18\.0\.41<\/plesk_min_version>/);
   assert.match(meta, /<os>unix<\/os>/);
   const entrypoint = fs.readFileSync(path.join(extension, 'htdocs/index.php'), 'utf8');
@@ -80,4 +81,15 @@ test('all extension PHP sources pass a local syntax check when PHP is available'
     const result = spawnSync('php', ['-l', file], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr || result.stdout);
   }
+});
+
+test('Plesk packaging normalizes the executable entry point to Unix LF', t => {
+  const directory = fs.mkdtempSync(path.join(require('os').tmpdir(), 'kitsune-plesk-lf-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const executable = path.join(directory, 'kitsuneserv-bridge');
+  fs.writeFileSync(executable, '#!/usr/bin/env php\r\n<?php\r\necho "ok";\r\n', 'utf8');
+  normalizeUnixTextFile(executable, true);
+  const bytes = fs.readFileSync(executable);
+  assert.equal(bytes.includes(Buffer.from('\r')), false);
+  assert.equal(bytes.subarray(0, 19).toString('utf8'), '#!/usr/bin/env php\n');
 });

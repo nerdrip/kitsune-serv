@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { normalizeUnixTextFile } = require('./package-text-utils');
 
 const root = path.resolve(__dirname, '..');
 const packageInfo = require(path.join(root, 'package.json'));
@@ -37,6 +38,7 @@ for (const relative of [
 copy('tools/server', 'bin');
 copy('deploy/docker', 'deploy/docker');
 copy('.dockerignore');
+for (const name of ['install-server.sh', 'start-server.sh', 'kitsune.sh']) normalizeUnixTextFile(path.join(stage, 'bin', name), true);
 
 const archiveBase = path.join(outputRoot, packageName);
 const archives = [

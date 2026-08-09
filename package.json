@@ -62,6 +62,7 @@
     "artifactName": "${productName}-${version}-${arch}.${ext}",
     "asar": true,
     "compression": "maximum",
+    "afterPack": "scripts/after-pack.js",
     "files": [
       "src/**/*",
       "assets/icon.png",

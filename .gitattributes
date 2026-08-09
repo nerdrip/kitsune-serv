@@ -1,0 +1,6 @@
+* text=auto
+
+*.sh text eol=lf
+plesk-extension/kitsuneserv-bridge/sbin/* text eol=lf
+plesk-extension/kitsuneserv-bridge/**/*.php text eol=lf
+plesk-extension/kitsuneserv-bridge/**/*.phtml text eol=lf

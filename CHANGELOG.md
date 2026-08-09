@@ -2,6 +2,7 @@
 
 ## 3.0.0 — 2026-08-09
 
+- Plesk package release 5 forces Unix LF for its privileged PHP entry point and prevents Windows-built packages from invoking the invalid interpreter name `php\r`.
 - Plesk package release 4 removes the hybrid-auth bootstrap deadlock, auto-generates the connector settings, adds signed Plesk password verification and applies Plesk-first password checks while merging matching usernames into the existing local Hub profile.
 - Plesk package release 3 adds Plesk-domain selection, automatic/manual publication, managed/external Hub modes, configurable Git credentials and deploy keys, atomic systemd deployments, nginx rollback, live health/log state and a complete responsive management UI.
 - Plesk package release 2 fixes the panel entry point and exposes Kitsune Hub in Service Provider, Reseller and Power User navigation plus Tools & Settings.
