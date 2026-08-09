@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.0.0-9
+
+- Fixed managed publication on domains where Plesk nginx Proxy Mode already generates `location /`.
+- Bridge now records the previous per-domain setting, disables Plesk Proxy Mode through the official domain CLI, installs a `location ^~ /` Hub proxy and restores both the file and prior mode on failure.
+- Added a transition checkpoint so interrupted or failed proxy configuration is visible in extension state and logs.
+
 ## 3.0.0-8
 
 - Replaced the invalid direct read/executable check of the protected Plesk utility with an official privileged `pm_ApiCli::callSbin()` self-check.
