@@ -72,8 +72,12 @@ final class KitsuneServBridgeManager
                     $this->deploy();
                     break;
                 case 'start':
-                case 'stop':
                 case 'restart':
+                    $this->refreshAuthenticationEnvironment();
+                    $this->controlService($action);
+                    $this->refreshState();
+                    break;
+                case 'stop':
                     $this->controlService($action);
                     $this->refreshState();
                     break;
@@ -245,6 +249,34 @@ final class KitsuneServBridgeManager
         $lines = [];
         foreach ($values as $key => $value) $lines[] = $key . '=' . $this->systemdValue((string) $value);
         $this->writeAtomicFile('/etc/kitsuneserv-hub.env', implode("\n", $lines) . "\n", 0600);
+    }
+
+    private function refreshAuthenticationEnvironment()
+    {
+        $path = '/etc/kitsuneserv-hub.env';
+        if (!is_file($path)) throw new RuntimeException('Deploy KitsuneServ before controlling the service.');
+        $authMode = (string) ($this->config['auth_mode'] ?? 'hybrid');
+        if (!in_array($authMode, ['independent', 'plesk', 'hybrid'], true)) throw new RuntimeException('Invalid Hub authentication mode.');
+        $updates = [
+            'KITSUNE_HUB_AUTH_MODE' => $authMode,
+            'KITSUNE_HUB_AUTO_PROVISION' => ($this->config['auto_provision'] ?? '1') === '1' ? '1' : '0',
+            'KITSUNE_ALLOW_LOCAL_LOGIN' => $authMode === 'plesk' ? '0' : '1',
+            'KITSUNE_PLESK_URL' => (string) ($this->config['plesk_url'] ?? ''),
+            'KITSUNE_PLESK_CONNECTOR_ID' => (string) ($this->config['connector_id'] ?? ''),
+            'KITSUNE_PLESK_CONNECTOR_SECRET' => (string) ($this->config['shared_secret'] ?? ''),
+        ];
+        $keys = array_fill_keys(array_keys($updates), true);
+        $lines = preg_split('/\r?\n/', (string) file_get_contents($path));
+        $preserved = [];
+        foreach ((array) $lines as $line) {
+            if ($line === '') continue;
+            $separator = strpos($line, '=');
+            $key = $separator === false ? '' : substr($line, 0, $separator);
+            if (!isset($keys[$key])) $preserved[] = $line;
+        }
+        foreach ($updates as $key => $value) $preserved[] = $key . '=' . $this->systemdValue((string) $value);
+        $this->writeAtomicFile($path, implode("\n", $preserved) . "\n", 0600);
+        $this->log('Odświeżono konfigurację uwierzytelniania usługi przed uruchomieniem.');
     }
 
     private function writeSystemdUnit()

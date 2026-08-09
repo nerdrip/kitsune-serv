@@ -150,6 +150,11 @@ class IdentityManager {
 
   listUsers() { return this._read().users.map(user => this._publicUser(user)); }
   getUser(id) { const user = this._read().users.find(item => item.id === id); if (!user) throw new Error('User not found'); return this._publicUser(user); }
+  findUserByUsername(username) {
+    const usernameKey = String(username || '').trim().toLowerCase();
+    const user = this._read().users.find(item => item.usernameKey === usernameKey && item.active !== false);
+    return user ? this._publicUser(user) : null;
+  }
 
   createUser(input = {}) {
     const payload = this._read(); const record = this._createUserRecord(input);
@@ -210,6 +215,16 @@ class IdentityManager {
   authenticate(username, password, secondFactor = '') {
     const payload = this._read(); const user = payload.users.find(item => item.usernameKey === String(username || '').trim().toLowerCase());
     if (!user || user.active === false || !this._verifyPassword(password, user.password)) return { success: false, error: 'Invalid username, password or authenticator code' };
+    return this._completeAuthentication(payload, user, secondFactor);
+  }
+
+  authenticateExternal(userId, secondFactor = '') {
+    const payload = this._read(); const user = payload.users.find(item => item.id === String(userId || '') && item.active !== false);
+    if (!user) return { success: false, error: 'Invalid username, password or authenticator code' };
+    return this._completeAuthentication(payload, user, secondFactor);
+  }
+
+  _completeAuthentication(payload, user, secondFactor = '') {
     if (user.mfaEnabled) {
       const secret = this.secretStore?.get(this._totpKey(user.id)) || '';
       const validTotp = verifyTotp(secret, secondFactor, this.now()); const recoveryHash = sha256(String(secondFactor || '').toLowerCase());

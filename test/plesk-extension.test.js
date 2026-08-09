@@ -15,7 +15,7 @@ function walk(directory) {
 
 test('Plesk extension has an installable SDK structure and release metadata', () => {
   const required = [
-    'meta.xml', 'DESCRIPTION.md', 'CHANGES.md', 'htdocs/index.php', 'htdocs/css/kitsuneserv.css', 'htdocs/js/kitsuneserv.js',
+    'meta.xml', 'DESCRIPTION.md', 'CHANGES.md', 'htdocs/index.php', 'htdocs/public/auth.php', 'htdocs/css/kitsuneserv.css', 'htdocs/js/kitsuneserv.js',
     'plib/controllers/IndexController.php', 'plib/library/Config.php', 'plib/library/HubClient.php', 'plib/library/Task/Operate.php',
     'plib/views/scripts/index/index.phtml', 'plib/views/scripts/index/sso.phtml', 'plib/hooks/CustomButtons.php', 'plib/hooks/Permissions.php',
     'plib/hooks/LongTasks.php', 'plib/scripts/post-install.php', 'plib/scripts/pre-uninstall.php', 'sbin/kitsuneserv-bridge'
@@ -24,7 +24,7 @@ test('Plesk extension has an installable SDK structure and release metadata', ()
   const meta = fs.readFileSync(path.join(extension, 'meta.xml'), 'utf8');
   assert.match(meta, /<id>kitsuneserv-bridge<\/id>/);
   assert.match(meta, new RegExp(`<version>${require('../package.json').version.replaceAll('.', '\\.')}<\\/version>`));
-  assert.match(meta, /<release>3<\/release>/);
+  assert.match(meta, /<release>4<\/release>/);
   assert.match(meta, /<plesk_min_version>18\.0\.41<\/plesk_min_version>/);
   assert.match(meta, /<os>unix<\/os>/);
   const entrypoint = fs.readFileSync(path.join(extension, 'htdocs/index.php'), 'utf8');
@@ -42,6 +42,10 @@ test('Plesk bridge uses encrypted settings, signed SSO and strict TLS verificati
   for (const secret of ['git_token', 'git_ssh_private_key', 'bootstrap_password', 'secret_key', 'api_token', 'shared_secret', 'device_token']) assert.match(config, new RegExp(`'${secret}'`));
   assert.match(config, /pm_Settings::setEncrypted\(\$setting/);
   assert.match(php, /hash_hmac\('sha256'/);
+  assert.match(php, /pm_Auth::isValidCredentials/);
+  assert.match(php, /pm_Client::getByLogin/);
+  assert.match(php, /password-auth-nonces\.json/);
+  assert.match(config, /ensureSsoConfiguration/);
   assert.match(php, /CURLOPT_SSL_VERIFYPEER\s*=>\s*true/);
   assert.match(php, /pm_Hook_Permissions/);
   assert.doesNotMatch(php, /CURLOPT_SSL_VERIFYPEER\s*=>\s*false/);
@@ -62,7 +66,7 @@ test('Plesk bridge exposes domain-driven automatic/manual deployment configurati
 
 test('managed deployment protects credentials, data paths, service and Plesk proxy changes', () => {
   const manager = fs.readFileSync(path.join(extension, 'sbin/kitsuneserv-bridge'), 'utf8');
-  for (const marker of ['GIT_ASKPASS', 'GIT_TERMINAL_PROMPT', 'StrictHostKeyChecking=yes', 'operation.lock', 'kitsuneserv-hub.service', 'KITSUNE_PANEL_DOMAIN', 'KITSUNE_HUB_AUTH_MODE', '# BEGIN KITSUNESERV BRIDGE MANAGED', '--reconfigure-domain', 'Deployment rolled back', 'assertNoSymlinkComponents']) assert.ok(manager.includes(marker), `missing ${marker}`);
+  for (const marker of ['GIT_ASKPASS', 'GIT_TERMINAL_PROMPT', 'StrictHostKeyChecking=yes', 'operation.lock', 'kitsuneserv-hub.service', 'KITSUNE_PANEL_DOMAIN', 'KITSUNE_HUB_AUTH_MODE', 'refreshAuthenticationEnvironment', '# BEGIN KITSUNESERV BRIDGE MANAGED', '--reconfigure-domain', 'Deployment rolled back', 'assertNoSymlinkComponents']) assert.ok(manager.includes(marker), `missing ${marker}`);
   assert.match(manager, /chmod\(\$knownPath, 0600\)/);
   assert.match(manager, /writeAtomicFile\('\/etc\/kitsuneserv-hub\.env'.*0600\)/s);
   assert.doesNotMatch(manager, /StrictHostKeyChecking=(?:no|accept-new)/);

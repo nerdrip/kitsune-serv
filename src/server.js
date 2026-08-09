@@ -319,9 +319,29 @@ const MIME_TYPES = {
 
 // ============ Login page ============
 
+function escapeLoginHtml(value) {
+  return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function getLoginPage(error = '') {
+  const options = hubManager.loginOptions();
+  const ssoButton = options.pleskEnabled ? `<a class="plesk-button" href="${escapeLoginHtml(options.pleskLoginUrl)}">Zaloguj przez aktywną sesję Plesk</a>` : '';
+  const separator = options.pleskEnabled && options.localEnabled ? '<div class="separator"><span>lub użyj hasła</span></div>' : '';
+  const localForm = options.localEnabled ? `<form method="POST" action="/auth/login">
+      <label for="username">Nazwa użytkownika</label>
+      <input type="text" id="username" name="username" autocomplete="username" required autofocus>
+      <label for="password">Hasło</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" required>
+      <label for="totp">Kod uwierzytelniający lub odzyskiwania <span class="muted">(jeśli włączony)</span></label>
+      <input type="text" id="totp" name="totp" inputmode="numeric" autocomplete="one-time-code">
+      <button type="submit">Zaloguj</button>
+    </form>` : '';
+  const modeHint = options.authMode === 'hybrid'
+    ? 'Najpierw sprawdzimy hasło w Plesku. Jeśli Plesk nie ma takiego konta, użyjemy konta lokalnego Huba.'
+    : options.authMode === 'plesk' ? 'Logowanie jest zarządzane przez Plesk.' : 'Logowanie używa lokalnych kont Kitsune Hub.';
+  const unavailable = options.authMode === 'plesk' && !options.pleskEnabled ? '<div class="notice">Połączenie z Pleskiem nie jest jeszcze gotowe. Zapisz konfigurację lub uruchom wdrożenie w KitsuneServ Bridge — identyfikator i sekret utworzą się automatycznie.</div>' : '';
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="pl">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -329,7 +349,7 @@ function getLoginPage(error = '') {
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #0f0f1a; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-    .login-box { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 12px; padding: 40px; width: 380px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+    .login-box { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 12px; padding: 40px; width: min(420px, calc(100vw - 32px)); box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
     .login-box h1 { text-align: center; margin-bottom: 8px; font-size: 24px; }
     .login-box .logo { text-align: center; font-size: 48px; margin-bottom: 16px; }
     .login-box .subtitle { text-align: center; color: #888; margin-bottom: 24px; font-size: 14px; }
@@ -339,22 +359,25 @@ function getLoginPage(error = '') {
     button { width: 100%; padding: 12px; background: #e94560; color: #fff; border: none; border-radius: 6px; font-size: 15px; font-weight: 600; cursor: pointer; }
     button:hover { background: #d63851; }
     .error { color: #e94560; text-align: center; margin-bottom: 12px; font-size: 13px; }
+    .notice { background: #29243c; border: 1px solid #55486f; border-radius: 7px; color: #d7cbea; padding: 12px; margin: 16px 0; font-size: 13px; line-height: 1.45; }
+    .mode-hint { color: #999; font-size: 12px; line-height: 1.45; text-align: center; margin: -12px 0 20px; }
+    .plesk-button { display: block; width: 100%; padding: 12px; background: #3077db; color: #fff; border-radius: 6px; font-size: 15px; font-weight: 600; text-align: center; text-decoration: none; }
+    .plesk-button:hover { background: #2669c7; }
+    .separator { display: flex; align-items: center; gap: 10px; color: #74748d; font-size: 11px; margin: 19px 0; text-transform: uppercase; letter-spacing: .04em; }
+    .separator::before, .separator::after { content: ''; height: 1px; flex: 1; background: #30304b; }
+    .muted { color: #666; }
   </style>
 </head>
 <body>
-  <form class="login-box" method="POST" action="/auth/login">
+  <main class="login-box">
     <div class="logo">🦊</div>
     <h1>KitsuneServ</h1>
-    <div class="subtitle">Server Management Console</div>
-    ${error ? `<div class="error">${error.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}</div>` : ''}
-    <label for="username">Username</label>
-    <input type="text" id="username" name="username" autocomplete="username" required autofocus>
-    <label for="password">Password</label>
-    <input type="password" id="password" name="password" autocomplete="current-password" required>
-    <label for="totp">Authenticator or recovery code <span style="color:#666">(if enabled)</span></label>
-    <input type="text" id="totp" name="totp" inputmode="numeric" autocomplete="one-time-code">
-    <button type="submit">Sign In</button>
-  </form>
+    <div class="subtitle">Panel zarządzania serwerem</div>
+    <div class="mode-hint">${escapeLoginHtml(modeHint)}</div>
+    ${error ? `<div class="error">${escapeLoginHtml(error)}</div>` : ''}
+    ${unavailable}
+    ${ssoButton}${separator}${localForm}
+  </main>
 </body>
 </html>`;
 }
@@ -1758,13 +1781,19 @@ async function handleRequest(req, res) {
     const form = await parseFormBody(req);
     const inputUser = form.username || '';
     const inputPass = form.password || '';
-    const localAllowed = hubManager.settings().authMode !== 'plesk' || process.env.KITSUNE_ALLOW_LOCAL_LOGIN === '1';
-    const authentication = localAllowed ? identityManager.authenticate(inputUser, inputPass, form.totp || '') : { success: false };
     const totpOk = !TOTP_SECRET || verifyTotp(TOTP_SECRET, form.totp || '');
+    const settings = hubManager.settings(); let authentication = { success: false }; let source = 'server-auth';
+    if (totpOk && settings.authMode !== 'independent') {
+      authentication = await hubManager.authenticateWithPlesk(inputUser, inputPass, form.totp || '', { address: clientAddress, userAgent: req.headers['user-agent'] || '' });
+      if (authentication.success) source = 'plesk-password-auth';
+    }
+    const localModeEnabled = settings.authMode === 'independent' || settings.authMode === 'hybrid' || process.env.KITSUNE_ALLOW_LOCAL_LOGIN === '1';
+    const safeLocalFallback = settings.authMode === 'independent' || (!authentication.accountExists && (!authentication.unavailable || hubManager.allowsLocalPassword(inputUser)));
+    if (totpOk && !authentication.success && localModeEnabled && safeLocalFallback) authentication = identityManager.authenticate(inputUser, inputPass, form.totp || '');
     if (authentication.success && totpOk) {
       loginAttempts.delete(getClientKey(req));
-      const session = createSession(authentication.user.id, req);
-      auditManager.record({ actor: authentication.user.username, source: 'server-auth', action: 'session.login', target: clientAddress, success: true });
+      const session = authentication.token ? authentication : createSession(authentication.user.id, req);
+      auditManager.record({ actor: authentication.user.username, source, action: 'session.login', target: clientAddress, success: true });
       res.writeHead(302, {
         'Set-Cookie': `kitsune_session=${session.token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_MAX_AGE / 1000}${IS_HTTPS ? '; Secure' : ''}`,
         'Location': '/'
@@ -1772,7 +1801,7 @@ async function handleRequest(req, res) {
       res.end();
     } else {
       recordFailedLogin(req);
-      auditManager.record({ actor: inputUser || 'unknown', source: 'server-auth', action: 'session.login', target: clientAddress, success: false });
+      auditManager.record({ actor: inputUser || 'unknown', source, action: 'session.login', target: clientAddress, success: false });
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(getLoginPage('Invalid username, password or authenticator code'));
     }

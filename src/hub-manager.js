@@ -293,18 +293,89 @@ class HubManager {
     const secret = this.secretStore?.get(this._connectorSecretKey(connectorId)); if (!secret) throw new Error('Connector secret is unavailable'); const now = this.now(); const payload = { ...claims, connectorId, iat: claims.iat || now, exp: claims.exp || now + 60_000, nonce: claims.nonce || crypto.randomBytes(16).toString('hex') }; const encoded = Buffer.from(stable(payload)).toString('base64url'); return { assertion: encoded, signature: hmac(secret, encoded) };
   }
 
+  loginOptions() {
+    const payload = this._read(); const authMode = AUTH_MODES.has(payload.settings.authMode) ? payload.settings.authMode : 'hybrid';
+    const connector = payload.connectors.find(item => this._connectorReady(item));
+    let pleskLoginUrl = '';
+    if (authMode !== 'independent' && connector) {
+      pleskLoginUrl = new URL('/modules/kitsuneserv-bridge/index.php/index/sso', connector.baseUrl).toString();
+    }
+    return { authMode, localEnabled: authMode !== 'plesk', pleskEnabled: authMode !== 'independent' && Boolean(connector), pleskLoginUrl };
+  }
+
+  allowsLocalPassword(username) {
+    const payload = this._read(); const authMode = AUTH_MODES.has(payload.settings.authMode) ? payload.settings.authMode : 'hybrid';
+    if (authMode === 'independent') return true;
+    if (authMode === 'plesk') return false;
+    const user = this.identityManager.findUserByUsername(username); if (!user) return false;
+    const enabledIds = new Set(payload.connectors.filter(item => this._connectorReady(item)).map(item => item.id));
+    return !this.identityManager.listExternalIdentities(user.id).some(identity => identity.provider === 'plesk' && enabledIds.has(identity.connectorId));
+  }
+
+  _connectorReady(connector) {
+    return Boolean(connector && connector.enabled !== false && connector.authMode !== 'independent' && this.secretStore?.has(this._connectorSecretKey(connector.id)));
+  }
+
+  _resolvePleskUser(connector, claims = {}) {
+    const subject = String(claims.subject || claims.clientId || ''); if (!subject || subject.length > 255) throw new Error('Plesk identity has no valid subject');
+    let resolved = this.identityManager.resolveExternalIdentity('plesk', connector.id, subject);
+    if (resolved) return resolved;
+    if (!connector.autoProvisionUsers) throw new Error('Plesk user is not linked to KitsuneServ');
+
+    const claimedUsername = String(claims.username || '').trim();
+    let user = claimedUsername ? this.identityManager.findUserByUsername(claimedUsername) : null;
+    if (!user) {
+      const role = connector.roleMap[String(claims.role || 'user')] || 'viewer'; let username = slugify(claimedUsername || `plesk-${subject}`).replace(/-/g, '.').slice(0, 60); if (username.length < 2) username = `p.${subject}`;
+      const existingNames = new Set(this.identityManager.listUsers().map(item => item.username.toLowerCase())); let suffix = 1; const base = username; while (existingNames.has(username.toLowerCase())) username = `${base}.${suffix++}`.slice(0, 64);
+      user = this.identityManager.createUser({ username, displayName: claims.displayName || claimedUsername || username, email: claims.email || '', roles: [role], password: crypto.randomBytes(32).toString('base64url') });
+    }
+    this.identityManager.linkExternalIdentity({ provider: 'plesk', connectorId: connector.id, subject, userId: user.id, metadata: { username: claimedUsername, role: claims.role, domains: claims.domains || [] } });
+    return this.identityManager.resolveExternalIdentity('plesk', connector.id, subject);
+  }
+
   loginWithPlesk(assertion, signature, metadata = {}) {
     let claims; try { claims = JSON.parse(Buffer.from(String(assertion), 'base64url').toString('utf8')); } catch { throw new Error('Invalid Plesk assertion'); }
-    const payload = this._read(); const connector = payload.connectors.find(item => item.id === claims.connectorId && item.enabled !== false); if (!connector || connector.authMode === 'independent') throw new Error('Plesk authentication is disabled'); const secret = this.secretStore?.get(this._connectorSecretKey(connector.id)); if (!secret || !safeEqual(hmac(secret, assertion), signature)) throw new Error('Invalid Plesk assertion signature');
+    const payload = this._read(); if (payload.settings.authMode === 'independent') throw new Error('Plesk authentication is disabled');
+    const connector = payload.connectors.find(item => item.id === claims.connectorId && this._connectorReady(item)); if (!connector) throw new Error('Plesk authentication is disabled'); const secret = this.secretStore?.get(this._connectorSecretKey(connector.id)); if (!secret || !safeEqual(hmac(secret, assertion), signature)) throw new Error('Invalid Plesk assertion signature');
     const now = this.now(); if (!claims.nonce || claims.iat > now + 30_000 || claims.exp < now || claims.exp - claims.iat > 120_000 || this.assertionNonces.has(claims.nonce)) throw new Error('Plesk assertion is expired or was already used'); this.assertionNonces.set(claims.nonce, claims.exp);
-    const subject = String(claims.subject || claims.clientId || ''); if (!subject) throw new Error('Plesk assertion has no subject'); let resolved = this.identityManager.resolveExternalIdentity('plesk', connector.id, subject);
-    if (!resolved) {
-      if (!connector.autoProvisionUsers) throw new Error('Plesk user is not linked to KitsuneServ'); const role = connector.roleMap[String(claims.role || 'user')] || 'viewer'; let username = slugify(claims.username || `plesk-${subject}`).replace(/-/g, '.').slice(0, 60); if (username.length < 2) username = `p.${subject}`;
-      const existingNames = new Set(this.identityManager.listUsers().map(user => user.username.toLowerCase())); let suffix = 1; const base = username; while (existingNames.has(username.toLowerCase())) username = `${base}.${suffix++}`.slice(0, 64);
-      const user = this.identityManager.createUser({ username, displayName: claims.displayName || claims.username || username, email: claims.email || '', roles: [role], password: crypto.randomBytes(32).toString('base64url') });
-      this.identityManager.linkExternalIdentity({ provider: 'plesk', connectorId: connector.id, subject, userId: user.id, metadata: { role: claims.role, domains: claims.domains || [] } }); resolved = this.identityManager.resolveExternalIdentity('plesk', connector.id, subject);
-    }
+    const resolved = this._resolvePleskUser(connector, claims);
     const session = this.identityManager.createSession(resolved.user.id, { ...metadata, provider: `plesk:${connector.id}` }); connector.lastSeenAt = now; connector.status = 'online'; this._write(payload, { type: 'plesk-login', connectorId: connector.id, userId: resolved.user.id }); return { success: true, ...session, user: resolved.user };
+  }
+
+  async authenticateWithPlesk(username, password, secondFactor = '', metadata = {}) {
+    const payload = this._read();
+    if (payload.settings.authMode === 'independent') return { success: false, accountExists: false, unavailable: false, disabled: true };
+    const connectors = payload.connectors.filter(item => this._connectorReady(item));
+    let unavailable = false;
+    for (const connector of connectors) {
+      const secret = this.secretStore?.get(this._connectorSecretKey(connector.id));
+      const requestBody = { username: String(username || ''), password: String(password || ''), timestamp: this.now(), nonce: crypto.randomBytes(16).toString('hex') };
+      const raw = JSON.stringify(requestBody); const signed = `${requestBody.timestamp}\n${requestBody.nonce}\n${hash(raw)}`;
+      const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 8_000); timeout.unref?.();
+      try {
+        const endpoint = new URL('/modules/kitsuneserv-bridge/public/auth.php', connector.baseUrl);
+        const response = await this.fetch(endpoint, { method: 'POST', redirect: 'error', signal: controller.signal, headers: { accept: 'application/json', 'content-type': 'application/json', 'x-kitsune-connector': connector.id, 'x-kitsune-signature': hmac(secret, signed) }, body: raw });
+        const text = await response.text(); if (text.length > 64 * 1024) throw new Error('Plesk authentication response is too large');
+        let result; try { result = JSON.parse(text); } catch { result = null; }
+        if (!response.ok || !result || typeof result !== 'object') throw new Error(`Plesk authentication returned HTTP ${response.status}`);
+        if (result.valid === true) {
+          try {
+            const resolved = this._resolvePleskUser(connector, result); const authentication = this.identityManager.authenticateExternal(resolved.user.id, secondFactor);
+            if (!authentication.success) return { ...authentication, accountExists: true, provider: 'plesk' };
+            const session = this.identityManager.createSession(resolved.user.id, { ...metadata, provider: `plesk-password:${connector.id}` });
+            connector.lastSeenAt = this.now(); connector.status = 'online'; this._write(payload, { type: 'plesk-password-login', connectorId: connector.id, userId: resolved.user.id });
+            return { success: true, accountExists: true, provider: 'plesk', ...session, user: resolved.user };
+          } catch (error) {
+            return { success: false, accountExists: true, unavailable: false, provider: 'plesk', error: error.message };
+          }
+        }
+        connector.lastSeenAt = this.now(); connector.status = 'online'; this._write(payload, { type: 'plesk-password-check', connectorId: connector.id });
+        if (result.accountExists === true) return { success: false, accountExists: true, unavailable: false, provider: 'plesk', error: 'Invalid username, password or authenticator code' };
+      } catch {
+        unavailable = true; connector.status = 'error'; this._write(payload, { type: 'connector-status', connectorId: connector.id, status: 'error' });
+      } finally { clearTimeout(timeout); }
+    }
+    return { success: false, accountExists: false, unavailable };
   }
 
   listRemotes() { return this._read().remotes.map(item => ({ ...clone(item), configured: Boolean(this.secretStore?.has(this._remoteTokenKey(item.id))) })); }

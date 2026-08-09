@@ -2,7 +2,7 @@
 
 class Modules_KitsuneservBridge_Config
 {
-    public const EXTENSION_VERSION = '3.0.0-r3';
+    public const EXTENSION_VERSION = '3.0.0-r4';
 
     private const SECRET_FIELDS = [
         'git_token' => 'secret_git_token',
@@ -84,6 +84,30 @@ class Modules_KitsuneservBridge_Config
             $setting = self::SECRET_FIELDS[$field] ?? null;
             if ($setting !== null) pm_Settings::setEncrypted($setting, '');
         }
+    }
+
+    public static function ensureSsoConfiguration($pleskUrl = '')
+    {
+        $current = self::values();
+        $generated = ['connectorId' => false, 'sharedSecret' => false, 'pleskUrl' => false];
+        if ($current['auth_mode'] === 'independent') return $generated;
+
+        $changes = [];
+        if ($current['connector_id'] === '') {
+            $seed = strtolower(trim((string) ($pleskUrl ?: gethostname() ?: $current['panel_domain'] ?: 'plesk')));
+            $changes['connector_id'] = 'plesk-' . substr(hash('sha256', $seed), 0, 20);
+            $generated['connectorId'] = true;
+        }
+        if (!self::hasSecret('shared_secret')) {
+            $changes['shared_secret'] = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+            $generated['sharedSecret'] = true;
+        }
+        if ($current['plesk_url'] === '' && trim((string) $pleskUrl) !== '') {
+            $changes['plesk_url'] = rtrim(trim((string) $pleskUrl), '/');
+            $generated['pleskUrl'] = true;
+        }
+        if ($changes) self::save($changes);
+        return $generated;
     }
 
     public static function readState()

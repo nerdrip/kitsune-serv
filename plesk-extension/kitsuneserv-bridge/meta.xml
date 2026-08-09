@@ -7,7 +7,7 @@
   <category>server_tool</category>
   <category>auth</category>
   <version>3.0.0</version>
-  <release>3</release>
+  <release>4</release>
   <vendor>KitsuneServ contributors</vendor>
   <url>https://github.com/nerdrip/kitsune-serv</url>
   <help_url>https://github.com/nerdrip/kitsune-serv#kitsune-hub</help_url>

@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -87,6 +88,55 @@ test('Plesk assertions auto-provision mapped users, create sessions and reject r
   assert.throws(() => hub.loginWithPlesk(signed.assertion, signed.signature), /already used/);
   assert.equal(secrets.get(`hub:connector:${connector.id}:secret`), 'shared-connector-secret');
   assert.doesNotMatch(fs.readFileSync(path.join(hub.appRoot, 'config', 'hub.json'), 'utf8'), /shared-connector-secret/);
+});
+
+test('hybrid login checks Plesk first and links a matching local Hub account without replacing it', async t => {
+  const { hub, identity } = fixture(t);
+  hub.configure({ enabled: true, panelDomain: 'hub.example.test', authMode: 'hybrid' });
+  const local = identity.createUser({ username: 'boberski', displayName: 'Local Boberski', password: 'hub-password-b', roles: ['operator'] });
+  const secret = 'plesk-password-check-secret-123456';
+  const connector = hub.saveConnector({ id: 'plesk-main', baseUrl: 'https://plesk.example.test', authMode: 'hybrid' }, secret);
+  hub.fetch = async (url, options) => {
+    assert.equal(new URL(url).pathname, '/modules/kitsuneserv-bridge/public/auth.php');
+    const body = JSON.parse(options.body); const digest = crypto.createHash('sha256').update(options.body).digest('hex');
+    const expected = crypto.createHmac('sha256', secret).update(`${body.timestamp}\n${body.nonce}\n${digest}`).digest('base64url');
+    assert.equal(options.headers['x-kitsune-connector'], connector.id);
+    assert.equal(options.headers['x-kitsune-signature'], expected);
+    const normalizedUsername = body.username.toLowerCase(); const known = ['boberski', 'unlinked'].includes(normalizedUsername);
+    const result = known
+      ? (body.password === 'plesk-password-a'
+          ? { valid: true, accountExists: true, subject: normalizedUsername === 'boberski' ? 'plesk-client-42' : 'plesk-client-99', username: normalizedUsername, displayName: 'Plesk User', email: `${normalizedUsername}@example.test`, role: 'admin' }
+          : { valid: false, accountExists: true })
+      : { valid: false, accountExists: false };
+    return { ok: true, status: 200, text: async () => JSON.stringify(result) };
+  };
+
+  const login = await hub.authenticateWithPlesk('boberski', 'plesk-password-a', '', { address: '127.0.0.1' });
+  assert.equal(login.success, true);
+  assert.equal(login.user.id, local.id, 'the local Hub record wins a username collision');
+  assert.deepEqual(login.user.roles, ['operator'], 'Plesk role does not overwrite local authorization');
+  assert.equal(identity.listUsers().filter(user => user.username.toLowerCase() === 'boberski').length, 1);
+  assert.equal(identity.resolveExternalIdentity('plesk', connector.id, 'plesk-client-42').user.id, local.id);
+  assert.equal(identity.validateSession(login.token).session.provider, `plesk-password:${connector.id}`);
+
+  const rejected = await hub.authenticateWithPlesk('boberski', 'hub-password-b');
+  assert.equal(rejected.success, false);
+  assert.equal(rejected.accountExists, true, 'a known Plesk account must not fall through to its local password');
+  assert.equal(hub.allowsLocalPassword('boberski'), false);
+
+  const unlinkedConnector = hub.saveConnector({ id: connector.id, baseUrl: connector.baseUrl, authMode: 'hybrid', autoProvisionUsers: false }, secret);
+  assert.equal(unlinkedConnector.autoProvisionUsers, false);
+  const blockedProvision = await hub.authenticateWithPlesk('boberski', 'plesk-password-a');
+  assert.equal(blockedProvision.success, true, 'an already linked user is unaffected when automatic provisioning is disabled');
+  const unlinked = await hub.authenticateWithPlesk('unlinked', 'plesk-password-a');
+  assert.equal(unlinked.success, false);
+  assert.equal(unlinked.accountExists, true, 'a valid but unlinked Plesk user must not fall through to local login');
+  assert.equal(unlinked.unavailable, false);
+
+  hub.configure({ authMode: 'independent' });
+  assert.equal((await hub.authenticateWithPlesk('boberski', 'plesk-password-a')).disabled, true);
+  assert.equal(hub.allowsLocalPassword('boberski'), true);
+  assert.equal(identity.authenticate('boberski', 'hub-password-b').success, true);
 });
 
 test('deployment workflow enforces approval and valid state transitions', t => {

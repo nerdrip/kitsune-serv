@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.0.0-4
+
+- Removed the hybrid-authentication bootstrap deadlock by generating the connector ID, encrypted shared secret and Plesk origin automatically on save or first deployment.
+- Added a signed, replay-protected password verification endpoint backed by the official Plesk credential API.
+- Added Plesk-first hybrid password login while preserving local Hub profiles, roles, MFA and local passwords when usernames overlap.
+- Added explicit Plesk SSO and local-login choices plus authentication status guidance on the Hub login screen.
+
 ## 3.0.0-3
 
 - Added direct selection of active hosted Plesk domains and automatic or manual Hub URL generation.

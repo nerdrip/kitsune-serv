@@ -54,7 +54,27 @@ test('web mode authenticates and exposes a desktop-parity API', { timeout: 30000
   const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'kitsune-web-'));
   const port = await freePort();
   const upstreamPort = await freePort();
-  const upstream = http.createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ path: req.url, route: req.headers['x-kitsune-route'] || '' })); });
+  const managedConnectorSecret = 'managed-plesk-integration-secret-123456';
+  const upstream = http.createServer((req, res) => {
+    if (req.url === '/modules/kitsuneserv-bridge/public/auth.php' && req.method === 'POST') {
+      const chunks = []; req.on('data', chunk => chunks.push(chunk)); req.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf8'); const body = JSON.parse(raw);
+        const signed = `${body.timestamp}\n${body.nonce}\n${crypto.createHash('sha256').update(raw).digest('hex')}`;
+        const expected = crypto.createHmac('sha256', managedConnectorSecret).update(signed).digest('base64url');
+        if (req.headers['x-kitsune-connector'] !== 'managed-plesk' || req.headers['x-kitsune-signature'] !== expected) {
+          res.writeHead(401, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'Authentication failed.' })); return;
+        }
+        const known = String(body.username || '').toLowerCase() === 'boberski';
+        const valid = known && body.password === 'plesk-password-a';
+        const result = valid
+          ? { valid: true, accountExists: true, subject: 'plesk-client-42', username: 'boberski', displayName: 'Plesk Boberski', email: 'plesk@example.test', role: 'admin' }
+          : { valid: false, accountExists: known };
+        res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(result));
+      });
+      return;
+    }
+    res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ path: req.url, route: req.headers['x-kitsune-route'] || '' }));
+  });
   await new Promise(resolve => upstream.listen(upstreamPort, '127.0.0.1', resolve));
   t.after(() => upstream.close());
   const child = spawn(process.execPath, ['src/server.js', '--port', String(port)], {
@@ -70,9 +90,9 @@ test('web mode authenticates and exposes a desktop-parity API', { timeout: 30000
       KITSUNE_PANEL_DOMAIN: 'managed.example.test',
       KITSUNE_HUB_AUTH_MODE: 'hybrid',
       KITSUNE_HUB_AUTO_PROVISION: '1',
-      KITSUNE_PLESK_URL: 'https://plesk.example.test:8443',
+      KITSUNE_PLESK_URL: `http://127.0.0.1:${upstreamPort}`,
       KITSUNE_PLESK_CONNECTOR_ID: 'managed-plesk',
-      KITSUNE_PLESK_CONNECTOR_SECRET: 'managed-plesk-integration-secret-123456'
+      KITSUNE_PLESK_CONNECTOR_SECRET: managedConnectorSecret
     },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true
@@ -87,6 +107,10 @@ test('web mode authenticates and exposes a desktop-parity API', { timeout: 30000
     method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}'
   });
   assert.equal(unauthorized.status, 401);
+  const loginPage = await (await fetch(base)).text();
+  assert.match(loginPage, /Zaloguj przez aktywną sesję Plesk/);
+  assert.match(loginPage, /Najpierw sprawdzimy hasło w Plesku/);
+  assert.match(loginPage, new RegExp(`http://127\\.0\\.0\\.1:${upstreamPort}/modules/kitsuneserv-bridge/index\\.php/index/sso`));
 
   const unicodeLogin = await fetch(`${base}/auth/login`, {
     method: 'POST', redirect: 'manual',
@@ -131,8 +155,19 @@ test('web mode authenticates and exposes a desktop-parity API', { timeout: 30000
   const managedConnectors = await (await request('hub/connectors')).json();
   assert.equal(managedConnectors.length, 1);
   assert.equal(managedConnectors[0].id, 'managed-plesk');
-  assert.equal(managedConnectors[0].baseUrl, 'https://plesk.example.test:8443');
+  assert.equal(managedConnectors[0].baseUrl, `http://127.0.0.1:${upstreamPort}`);
   assert.equal(managedConnectors[0].configured, true);
+  const matchingLocal = await (await request('identity/createUser', { input: { username: 'boberski', displayName: 'Local Boberski', password: 'hub-password-b', roles: ['operator'] } })).json();
+  const localPasswordRejected = await fetch(`${base}/auth/login`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'username=boberski&password=hub-password-b' });
+  assert.equal(localPasswordRejected.status, 200, 'Plesk password has priority for a matching Plesk account');
+  const pleskPasswordLogin = await fetch(`${base}/auth/login`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'username=boberski&password=plesk-password-a' });
+  assert.equal(pleskPasswordLogin.status, 302);
+  const pleskPasswordCookie = pleskPasswordLogin.headers.get('set-cookie').split(';', 1)[0];
+  const pleskPasswordStatus = await fetch(`${base}/api/security/status`, { method: 'POST', headers: { cookie: pleskPasswordCookie, 'content-type': 'application/json' }, body: '{}' });
+  assert.equal((await pleskPasswordStatus.json()).user.id, matchingLocal.id);
+  const usersAfterMerge = await (await request('identity/users')).json();
+  assert.equal(usersAfterMerge.filter(user => user.username.toLowerCase() === 'boberski').length, 1);
+  assert.deepEqual(usersAfterMerge.find(user => user.id === matchingLocal.id).roles, ['operator']);
   const hubConfiguration = await (await request('hub/configure', { input: { enabled: true, panelDomain: 'panel.example.test', authMode: 'hybrid' } })).json();
   assert.equal(hubConfiguration.wildcardDomain, '*.panel.example.test');
   const publicRoute = await (await request('hub/saveRoute', { input: { name: 'Echo', kind: 'project', target: `http://127.0.0.1:${upstreamPort}`, authPolicy: 'public' } })).json();

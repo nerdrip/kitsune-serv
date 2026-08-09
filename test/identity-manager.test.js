@@ -65,6 +65,8 @@ test('per-user TOTP, one-use recovery codes and Plesk identities work without st
   assert.equal(manager.authenticate('plesk-user', 'independent-password').mfaRequired, true);
   const code = IdentityManager.totp(mfa.secret, now);
   assert.equal(manager.authenticate('plesk-user', 'independent-password', code).success, true);
+  assert.equal(manager.authenticateExternal(user.id).mfaRequired, true);
+  assert.equal(manager.authenticateExternal(user.id, code).success, true);
   assert.equal(manager.authenticate('plesk-user', 'independent-password', mfa.recoveryCodes[0]).success, true);
   assert.equal(manager.authenticate('plesk-user', 'independent-password', mfa.recoveryCodes[0]).success, false);
 

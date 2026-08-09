@@ -43,7 +43,10 @@ class IndexController extends pm_Controller_Action
                 if ($this->getRequest()->getPost('clear_' . $field)) $clear[] = $field;
             }
             Modules_KitsuneservBridge_Config::clearSecrets($clear);
-            $this->_status->addMessage('info', 'Konfiguracja KitsuneServ Bridge została zapisana.');
+            $generated = Modules_KitsuneservBridge_Config::ensureSsoConfiguration($this->currentPleskOrigin());
+            $message = 'Konfiguracja KitsuneServ Bridge została zapisana.';
+            if (array_filter($generated)) $message .= ' Brakujące ustawienia Plesk SSO zostały wygenerowane automatycznie.';
+            $this->_status->addMessage('info', $message);
         } catch (Throwable $exception) {
             $this->_status->addMessage('error', 'Nie zapisano konfiguracji: ' . $exception->getMessage());
         }
@@ -58,15 +61,12 @@ class IndexController extends pm_Controller_Action
         $allowed = ['check', 'sync', 'deploy', 'sync-deploy', 'start', 'stop', 'restart', 'proxy'];
         try {
             if (!in_array($action, $allowed, true)) throw new RuntimeException('Wybierz prawidłową operację.');
+            Modules_KitsuneservBridge_Config::ensureSsoConfiguration($this->currentPleskOrigin());
             $config = Modules_KitsuneservBridge_Config::values();
             if ($config['deployment_mode'] !== 'managed') throw new RuntimeException('Operacje serwera są dostępne tylko w trybie wdrożenia zarządzanego.');
             if ($action === 'proxy' && $config['proxy_mode'] !== 'managed') throw new RuntimeException('Automatyczna konfiguracja proxy jest wyłączona.');
             if (in_array($action, ['deploy', 'sync-deploy'], true) && !Modules_KitsuneservBridge_Config::hasSecret('bootstrap_password')) {
                 throw new RuntimeException('Ustaw hasło pierwszego administratora przed wdrożeniem.');
-            }
-            if (in_array($action, ['deploy', 'sync-deploy'], true) && $config['auth_mode'] !== 'independent'
-                && ($config['plesk_url'] === '' || $config['connector_id'] === '' || !Modules_KitsuneservBridge_Config::hasSecret('shared_secret'))) {
-                throw new RuntimeException('Dla logowania Plesk/hybrydowego uzupełnij adres panelu Plesk, Connector ID i wspólny sekret.');
             }
             $runtime = Modules_KitsuneservBridge_Config::createRuntimeConfig($action);
             $task = new Modules_KitsuneservBridge_Task_Operate();
@@ -211,7 +211,7 @@ class IndexController extends pm_Controller_Action
         }
 
         if (!in_array((string) ($values['auth_mode'] ?? ''), ['independent', 'plesk', 'hybrid'], true)) throw new RuntimeException('Nieprawidłowy tryb uwierzytelniania.');
-        if (($values['connector_id'] ?? '') !== '' && !preg_match('/^[A-Za-z0-9._:-]{3,120}$/', (string) $values['connector_id'])) throw new RuntimeException('Connector ID może zawierać 3–120 liter, cyfr oraz znaki . _ : -.');
+        if (($values['connector_id'] ?? '') !== '' && !preg_match('/^[A-Za-z0-9_-]{2,120}$/', (string) $values['connector_id'])) throw new RuntimeException('Connector ID może zawierać 2–120 liter, cyfr, podkreśleń i myślników.');
         if (($values['plesk_url'] ?? '') !== '') {
             $values['plesk_url'] = rtrim((string) $values['plesk_url'], '/');
             $plesk = parse_url($values['plesk_url']);
@@ -247,7 +247,7 @@ class IndexController extends pm_Controller_Action
         $isSsh = strpos($config['repository_url'], 'ssh://') === 0 || strpos($config['repository_url'], 'git@') === 0;
         if ($config['deployment_mode'] === 'managed' && $isSsh && $config['git_ssh_known_hosts'] === '') $warnings[] = ['critical', 'Repozytorium SSH wymaga zweryfikowanej zawartości known_hosts.'];
         if ($config['proxy_mode'] === 'manual') $warnings[] = ['info', 'Publikacja jest ręczna — skopiuj konfigurację nginx z zakładki Instrukcja.'];
-        if ($config['auth_mode'] !== 'independent' && ($config['plesk_url'] === '' || $config['connector_id'] === '' || !Modules_KitsuneservBridge_Config::hasSecret('shared_secret'))) $warnings[] = ['warning', 'Plesk SSO nie zadziała, dopóki nie skonfigurujesz adresu panelu Plesk, Connector ID i wspólnego sekretu.'];
+        if ($config['auth_mode'] !== 'independent' && ($config['plesk_url'] === '' || $config['connector_id'] === '' || !Modules_KitsuneservBridge_Config::hasSecret('shared_secret'))) $warnings[] = ['info', 'Brakujące ustawienia Plesk SSO zostaną wygenerowane automatycznie przy zapisie lub pierwszym wdrożeniu.'];
         if (!Modules_KitsuneservBridge_Config::hasSecret('device_token')) $warnings[] = ['info', 'Ten Plesk nie jest jeszcze sparowany jako węzeł Kitsune Hub.'];
         if ($config['update_manifest_url'] !== '' && $config['update_public_key'] === '') $warnings[] = ['critical', 'Skonfigurowano kanał aktualizacji bez klucza publicznego do weryfikacji podpisu.'];
         if ($statusError) $warnings[] = ['warning', 'Nie udało się odświeżyć stanu usługi: ' . $statusError];
@@ -357,6 +357,17 @@ class IndexController extends pm_Controller_Action
     private function operationLabel($action)
     {
         return ['check' => 'sprawdź', 'sync' => 'pobierz kod', 'deploy' => 'wdrożenie', 'sync-deploy' => 'pobierz i wdróż', 'start' => 'uruchom', 'stop' => 'zatrzymaj', 'restart' => 'restart', 'proxy' => 'skonfiguruj proxy'][$action] ?? $action;
+    }
+
+    private function currentPleskOrigin()
+    {
+        $host = trim((string) ($_SERVER['HTTP_HOST'] ?? ''));
+        if ($host === '' || preg_match('/[\r\n\0\/\\@]/', $host)) return '';
+        $parts = parse_url('https://' . $host);
+        if (!is_array($parts) || empty($parts['host']) || isset($parts['user']) || isset($parts['pass']) || isset($parts['path']) || isset($parts['query']) || isset($parts['fragment'])) return '';
+        $origin = 'https://' . (strpos((string) $parts['host'], ':') !== false ? '[' . $parts['host'] . ']' : strtolower((string) $parts['host']));
+        if (isset($parts['port']) && (int) $parts['port'] !== 443) $origin .= ':' . (int) $parts['port'];
+        return $origin;
     }
 
     private function client()

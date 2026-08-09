@@ -8,6 +8,6 @@ Repository access supports public HTTPS, HTTPS credentials through a temporary `
 
 Passwords, tokens, private keys, SSO secrets and device credentials use Plesk encrypted settings. Temporary operation files are mode `0600`, secrets are redacted from state/log output, the managed server binds only to loopback, and updates preserve persistent data plus the previous deployment for rollback.
 
-Signed one-use Plesk SSO maps administrator, reseller and customer roles to KitsuneServ. The extension can automatically provision Kitsune accounts, enroll Plesk as a revocable Hub node and synchronize a redacted domain/capability inventory. Plesk passwords never leave Plesk.
+Signed one-use Plesk SSO maps administrator, reseller and customer roles to KitsuneServ. Hybrid password login verifies credentials through a signed, replay-protected HTTPS request to this Plesk server; neither the Hub nor Bridge stores or logs the submitted password. Matching local usernames are linked to the same Hub profile without replacing local roles, MFA or password. The extension can also enroll Plesk as a revocable Hub node and synchronize a redacted domain/capability inventory.
 
 DNS records and trusted certificates remain administrator-controlled because issuing them can require an installed SSL/DNS provider and external account authority.

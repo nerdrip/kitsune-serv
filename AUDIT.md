@@ -8,8 +8,8 @@ Wydanie 3.0.0 przeszło lokalny gate, pełny build oraz smoke-testy Windows i Li
 
 | Kontrola | Wynik |
 |---|---|
-| testy Node.js na Windows | 123/123 |
-| testy Node.js w builderze Linux | 122 OK, 1 pominięty wyłącznie z powodu braku PHP w obrazie |
+| testy Node.js na Windows | 124/124 |
+| testy Node.js w builderze Linux | 123 OK, 1 pominięty wyłącznie z powodu braku PHP w obrazie |
 | PHP lint rozszerzenia Plesk na Windows | OK |
 | kontrola składni, odwołań DOM i duplikatów ID | OK; 471 odwołań DOM, 1000 unikalnych ID |
 | pełny `npm audit` | 0 podatności produkcyjnych i deweloperskich |
@@ -32,7 +32,8 @@ Wydanie 3.0.0 przeszło lokalny gate, pełny build oraz smoke-testy Windows i Li
 - Gateway obsługuje płaskie subdomeny pod jedną domeną panelu, HTTP i WebSocket, polityki public/session/bearer, walidację targetów i separację kanałów aktualizacji desktop/server/Plesk.
 - Parowanie urządzeń używa krótkotrwałych kodów, heartbeatów i odwoływalnych tokenów. Synchronizacja projektów, laboratoriów, API Flow, środowisk, snapshotów, profili wdrożeń i polityk jest wersjonowana, redaguje sekrety, wykrywa konflikty, zachowuje historię, rollback oraz tombstones.
 - Synchronizacja dwóch Hubów jest idempotentna, śledzi rewizje, nie nadpisuje rozbieżnych zmian i opcjonalnie przypina certyfikat TLS po SHA-256. Workflow wdrożeń obsługuje approval, replace, blue-green, canary, preview, health i rollback states.
-- Plesk Bridge release 3 ma poprawny entry point zarządzany przez Plesk SDK, minimalną wersję Plesk 18.0.41, wybór aktywnej domeny z inventory Pleska, automatyczny/ręczny URL i reverse proxy, tryb zarządzanego lub zewnętrznego Huba, szyfrowane ustawienia, parowanie, heartbeat, redagowany inventory domen, service-plan permission i wpisy menu dla Service Provider/Reseller/Power User.
+- Plesk Bridge release 4 ma poprawny entry point zarządzany przez Plesk SDK, minimalną wersję Plesk 18.0.41, wybór aktywnej domeny z inventory Pleska, automatyczny/ręczny URL i reverse proxy, tryb zarządzanego lub zewnętrznego Huba, szyfrowane ustawienia, parowanie, heartbeat, redagowany inventory domen, service-plan permission i wpisy menu dla Service Provider/Reseller/Power User. Brakujące ID konektora, sekret i adres Pleska generują się przy zapisie lub wdrożeniu, a start/restart bezpiecznie odświeża zmienne uwierzytelniania bez pełnego redeployu.
+- Tryb hybrydowy sprawdza hasło w Plesku przed hasłem lokalnym. Podpisany, jednorazowy protokół do publicznego endpointu Pleska ma 60-sekundowe okno, ochronę nonce/replay, limit rozmiaru oraz ścisły HTTPS; hasło nie jest zapisywane ani logowane. Zbieżna nazwa użytkownika łączy tożsamość Pleska z istniejącym lokalnym profilem, zachowując jego ID, role, MFA i lokalne hasło.
 - Zarządzane wdrożenie Plesk obsługuje Git HTTPS przez tymczasowy `GIT_ASKPASS`, SSH ze ścisłym `known_hosts`, rozdzielone katalogi kodu/wydania/danych, staging, rollback kodu oraz konfiguracji systemd, zarządzany oznaczony blok nginx, kontrolę zdrowia i logi. Automatycznie przekazuje domenę, tryb kont i konektor Pleska do uruchamianego Huba.
 - Sekrety projektów, połączeń, laboratoriów, integracji i Hubów nie trafiają do zwykłych plików konfiguracyjnych. Logi, ślady, synchronizacja i raport wsparcia redagują tokeny, hasła, nagłówki authorization i lokalne ścieżki.
 - Dziennik audytowy tworzy łańcuch SHA-256 i wykrywa zmianę historycznego wpisu. Aktualizacje wymagają zgodnej sumy SHA-256 oraz podpisu manifestu Ed25519.
@@ -41,12 +42,12 @@ Wydanie 3.0.0 przeszło lokalny gate, pełny build oraz smoke-testy Windows i Li
 
 | Plik | Rozmiar | SHA-256 |
 |---|---:|---|
-| `artifacts/windows/KitsuneServ-3.0.0-x64-setup.exe` | 108 741 857 B | `9d15abf5f0b248de9e6068033b299093e12deb51d42ef18ffc81cb9a83a7b702` |
-| `artifacts/windows/KitsuneServ-3.0.0-x64-portable.exe` | 108 428 688 B | `6a2fdf88d2443dc2d9c430954370269ed16f9658dd38f68807b5f9d26cacc89c` |
-| `artifacts/linux/KitsuneServ-3.0.0-x86_64.AppImage` | 94 161 111 B | `4868dca7a7b47c85d552e46f762947161194b0d79160a18c2ad40bd5a1eafcad` |
-| `artifacts/linux/KitsuneServ-3.0.0-amd64.deb` | 95 614 052 B | `4b8fb9319c45999e048378299a8b4ec2eb7af8b28f1b9285b92c6c93ec51d401` |
-| `artifacts/linux/KitsuneServ-3.0.0-x86_64.rpm` | 84 101 337 B | `057b71da3789e111914d9eb9a48cd53f83f6c7f26f6ede37c739c1651a13c618` |
-| `artifacts/plesk/kitsuneserv-bridge-3.0.0-r3.zip` | 602 720 B | `56a1f37f7c6caf913fbc39734210826de0265a46eacad040c73276982a6b6849` |
+| `artifacts/windows/KitsuneServ-3.0.0-x64-setup.exe` | 108 743 750 B | `cc64a764e52846f9b8797736524e085d1c5b8448f7f2974b12b623c958965b53` |
+| `artifacts/windows/KitsuneServ-3.0.0-x64-portable.exe` | 108 430 582 B | `ea22a5d3d951cc66202106daa184688bf854c7215436b05aa85adef6cd1ed0d2` |
+| `artifacts/linux/KitsuneServ-3.0.0-x86_64.AppImage` | 94 165 284 B | `d1f18c69ceaf7dfff1eb0d35b499fd4173f8ef8b736cb5a06b76d7e95b4da8e7` |
+| `artifacts/linux/KitsuneServ-3.0.0-amd64.deb` | 95 616 180 B | `1534ae7ead98392a51f1ae3254bcee7183c5965e5c453eb67d3c6c4e3b55acc7` |
+| `artifacts/linux/KitsuneServ-3.0.0-x86_64.rpm` | 84 116 141 B | `3cbb0650aeb6018a70266e758d569f8aa25306dc615c7087121024991a553e7c` |
+| `artifacts/plesk/kitsuneserv-bridge-3.0.0-r4.zip` | 606 101 B | `0dc58cd247514d9471d1046a57f240c4bab131bee0da842149e17ae085c55123` |
 
 Pakiety serwerowe ZIP/TAR zawierają ten raport, dlatego ich końcowe rozmiary i sumy są zapisywane po spakowaniu wyłącznie w zewnętrznych `artifacts/release-manifest.json` i `artifacts/SHA256SUMS.txt`. Pozwala to uniknąć samoodwołującej się sumy pliku znajdującego się we własnym archiwum. Te dwa pliki oraz `artifacts/SBOM.cdx.json` stanowią kanoniczny indeks wydania.
 

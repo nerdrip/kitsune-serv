@@ -2,6 +2,7 @@
 
 ## 3.0.0 — 2026-08-09
 
+- Plesk package release 4 removes the hybrid-auth bootstrap deadlock, auto-generates the connector settings, adds signed Plesk password verification and applies Plesk-first password checks while merging matching usernames into the existing local Hub profile.
 - Plesk package release 3 adds Plesk-domain selection, automatic/manual publication, managed/external Hub modes, configurable Git credentials and deploy keys, atomic systemd deployments, nginx rollback, live health/log state and a complete responsive management UI.
 - Plesk package release 2 fixes the panel entry point and exposes Kitsune Hub in Service Provider, Reseller and Power User navigation plus Tools & Settings.
 - Added Kitsune Hub: persistent multi-user accounts, owner/admin/operator/developer/auditor/viewer RBAC, scoped memberships, encrypted TOTP MFA, recovery codes, invitations, persistent sessions and revocable, permission-bounded device/API tokens.
@@ -11,7 +12,7 @@
 - Added deployment records with approval, replace/blue-green/canary/preview strategies, health results and rollback states.
 - Added a complete Hub & Servers control panel for status, nodes, routes, sync inventory, users/MFA, deployments, Plesk connectors, policies and remote Hubs.
 - Replaced server mode's single in-memory login with durable multi-account authentication while retaining first-run `KITSUNE_USER`/`KITSUNE_PASS` bootstrap compatibility and legacy bearer-token support.
-- Added signed, one-use Plesk SSO with role mapping and automatic account provisioning. Plesk credentials never leave Plesk.
+- Added signed, one-use Plesk SSO with role mapping and automatic account provisioning. Hybrid password checks are sent only to the configured Plesk endpoint over verified HTTPS and are never persisted or logged.
 - Added the separately installable KitsuneServ Bridge for Plesk extension with encrypted connector/device secrets, service-plan permission, custom panel buttons, pairing and redacted domain inventory synchronization.
 - Added integration and security tests for live gateway proxying, enrollment, Plesk SSO, RBAC denial, remote conflict preservation and Plesk package structure/PHP syntax.
 
