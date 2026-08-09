@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.0.0-10
+
+- Replaced the unreliable generated-`location /` heuristic with the Plesk `--show-web-server-settings` value when detecting per-domain nginx Proxy Mode.
+- Proxy Mode updates now use the documented Plesk subscription utility; generated nginx inspection remains only a conservative compatibility fallback.
+- Fixed false rollback after Plesk successfully disabled Proxy Mode but retained a root location in the generated configuration.
+
 ## 3.0.0-9
 
 - Fixed managed publication on domains where Plesk nginx Proxy Mode already generates `location /`.

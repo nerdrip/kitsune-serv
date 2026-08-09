@@ -1,7 +1,7 @@
 #!/usr/bin/env php
 <?php
 
-const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.0.0-r9';
+const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.0.0-r10';
 
 final class KitsuneServBridgeManager
 {
@@ -325,7 +325,7 @@ final class KitsuneServBridgeManager
         $path = $confDir . '/vhost_nginx.conf';
         $original = is_file($path) ? (string) file_get_contents($path) : '';
         $alreadyManaged = strpos($original, '# BEGIN KITSUNESERV BRIDGE MANAGED') !== false;
-        $currentPleskProxyMode = $this->detectPleskProxyMode($vhost);
+        $currentPleskProxyMode = $this->detectPleskProxyMode($domain, $vhost);
         $storedProxyState = (array) ($this->state['proxy'] ?? []);
         $previousPleskProxyMode = $alreadyManaged && array_key_exists('pleskProxyModeBefore', $storedProxyState)
             ? (bool) $storedProxyState['pleskProxyModeBefore']
@@ -344,7 +344,7 @@ final class KitsuneServBridgeManager
         try {
             if ($currentPleskProxyMode) {
                 $this->setPleskProxyMode($domain, false);
-                if ($this->detectPleskProxyMode($vhost)) throw new RuntimeException('Plesk did not disable nginx Proxy mode for the selected domain.');
+                if ($this->detectPleskProxyMode($domain, $vhost)) throw new RuntimeException('Plesk reports that nginx Proxy mode is still enabled for the selected domain.');
                 $this->log('Wyłączono Plesk nginx Proxy mode dla dedykowanej domeny Huba.');
             }
             $this->writeAtomicFile($path, $next, 0640);
@@ -362,18 +362,32 @@ final class KitsuneServBridgeManager
         $this->log('Skonfigurowano zarządzany reverse proxy dla ' . $domain . '.');
     }
 
-    private function detectPleskProxyMode($vhost)
+    private function detectPleskProxyMode($domain, $vhost)
     {
+        $domainUtility = $this->productRoot . '/bin/domain';
+        if ($this->isExecutableBinary($domainUtility)) {
+            $result = $this->run([$domainUtility, '--show-web-server-settings', $this->validatedDomain($domain)], null, [], false);
+            if ($result['code'] === 0) {
+                $output = trim((string) ($result['stdout'] . "\n" . $result['stderr']));
+                $pattern = '/(?:^|\R)\s*nginx-proxy-mode\s*(?:(?:[:=]\s*)|\R\s*)(true|false|on|off|yes|no|1|0)\s*(?:\R|$)/i';
+                if (preg_match($pattern, $output, $matches)) {
+                    return in_array(strtolower($matches[1]), ['true', 'on', 'yes', '1'], true);
+                }
+            }
+        }
+
         $path = rtrim($vhost, '/') . '/conf/last_nginx.conf';
         if (!is_file($path) || !is_readable($path)) throw new RuntimeException('Cannot inspect the generated Plesk nginx configuration: ' . $path);
         $contents = (string) file_get_contents($path);
-        return preg_match('/location\s+(?:=\s*)?\/\s*\{/', $contents) === 1;
+        if (preg_match('/location\s+(?:=\s*)?\/\s*\{[^{}]*proxy_pass\s+https?:\/\/[^;]*(?::7080|:7081)(?:\/|;)/s', $contents)) return true;
+        if (!preg_match('/location\s+(?:=\s*)?\/\s*\{/', $contents)) return false;
+        throw new RuntimeException('Cannot determine nginx Proxy mode from Plesk CLI or generated configuration for ' . $domain . '.');
     }
 
     private function setPleskProxyMode($domain, $enabled, $throw = true)
     {
-        $utility = $this->productRoot . '/bin/domain';
-        if (!$this->isExecutableBinary($utility)) throw new RuntimeException('Plesk domain utility is unavailable: ' . $utility);
+        $utility = $this->productRoot . '/bin/subscription';
+        if (!$this->isExecutableBinary($utility)) throw new RuntimeException('Plesk subscription utility is unavailable: ' . $utility);
         return $this->run([$utility, '--update-web-server-settings', $this->validatedDomain($domain), '-nginx-proxy-mode', $enabled ? 'true' : 'false'], null, [], $throw);
     }
 
@@ -742,7 +756,7 @@ final class KitsuneServBridgeManager
 
 function kitsuneConfigPath(array $arguments)
 {
-    if (count($arguments) !== 3 || $arguments[1] !== '--config') throw new RuntimeException('Usage: kitsuneserv-bridge-r9 --config /secure/operation.json');
+    if (count($arguments) !== 3 || $arguments[1] !== '--config') throw new RuntimeException('Usage: kitsuneserv-bridge-r10 --config /secure/operation.json');
     return (string) $arguments[2];
 }
 

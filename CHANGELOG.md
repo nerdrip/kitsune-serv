@@ -2,6 +2,7 @@
 
 ## 3.0.0 — 2026-08-09
 
+- Plesk package release 10 reads nginx Proxy Mode from Plesk web-server settings and updates it through the documented subscription CLI, eliminating the false rollback caused by treating every generated `location /` as active Apache proxying.
 - Plesk package release 9 coordinates managed Hub publication with the domain's Plesk nginx Proxy Mode, preventing duplicate root locations and rolling back both domain settings and custom directives on failure.
 - Plesk package release 8 verifies its protected executor through an official privileged `callSbin` self-check instead of reading the root-owned file from the unprivileged post-install process.
 - Plesk package release 7 uses a versioned privileged executor and verifies it during installation, preventing Plesk from reusing a stale release-5 `sbin` copy after an extension upgrade.
