@@ -264,7 +264,7 @@ class IndexController extends pm_Controller_Action
         $runtime = null;
         try {
             $runtime = Modules_KitsuneservBridge_Config::createRuntimeConfig('status');
-            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r10', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
+            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r11', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
             if ((int) ($result['code'] ?? 1) !== 0) {
                 $detail = trim((string) ($result['stderr'] ?? $result['stdout'] ?? ''));
                 return mb_substr($detail !== '' ? $detail : 'Narzędzie statusu zakończyło się błędem.', -2000);
@@ -311,8 +311,11 @@ class IndexController extends pm_Controller_Action
     {
         $port = max(1024, min(65535, (int) ($config['hub_port'] ?: 10000)));
         return "# Dodatkowe dyrektywy nginx dla wybranej domeny Pleska\n"
-            . "location / {\n"
-            . "    proxy_pass http://127.0.0.1:" . $port . ";\n"
+            . "# Działa równolegle z Plesk Proxy Mode i zachowuje /.well-known.\n"
+            . "rewrite ^/(?!\\.well-known(?:/|$)|__kitsuneserv_bridge_internal__$).* /__kitsuneserv_bridge_internal__ last;\n\n"
+            . "location = /__kitsuneserv_bridge_internal__ {\n"
+            . "    internal;\n"
+            . "    proxy_pass http://127.0.0.1:" . $port . "\$request_uri;\n"
             . "    proxy_http_version 1.1;\n"
             . "    proxy_set_header Host \$host;\n"
             . "    proxy_set_header X-Real-IP \$remote_addr;\n"

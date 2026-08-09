@@ -1,7 +1,7 @@
 #!/usr/bin/env php
 <?php
 
-const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.0.0-r10';
+const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.0.0-r11';
 
 final class KitsuneServBridgeManager
 {
@@ -324,12 +324,7 @@ final class KitsuneServBridgeManager
         $this->ensureDirectory($confDir, 0750);
         $path = $confDir . '/vhost_nginx.conf';
         $original = is_file($path) ? (string) file_get_contents($path) : '';
-        $alreadyManaged = strpos($original, '# BEGIN KITSUNESERV BRIDGE MANAGED') !== false;
-        $currentPleskProxyMode = $this->detectPleskProxyMode($domain, $vhost);
         $storedProxyState = (array) ($this->state['proxy'] ?? []);
-        $previousPleskProxyMode = $alreadyManaged && array_key_exists('pleskProxyModeBefore', $storedProxyState)
-            ? (bool) $storedProxyState['pleskProxyModeBefore']
-            : $currentPleskProxyMode;
         $next = $this->managedProxyContents($original, $this->validatedPort());
         $backup = $path . '.kitsuneserv-backup';
         if ($original !== '') $this->writeAtomicFile($backup, $original, 0640);
@@ -337,58 +332,22 @@ final class KitsuneServBridgeManager
         $this->state['proxy'] = array_replace($storedProxyState, [
             'domain' => $domain,
             'path' => $path,
-            'pleskProxyModeBefore' => $previousPleskProxyMode,
+            'strategy' => 'server-rewrite',
             'transition' => true,
         ]);
         $this->saveState();
         try {
-            if ($currentPleskProxyMode) {
-                $this->setPleskProxyMode($domain, false);
-                if ($this->detectPleskProxyMode($domain, $vhost)) throw new RuntimeException('Plesk reports that nginx Proxy mode is still enabled for the selected domain.');
-                $this->log('Wyłączono Plesk nginx Proxy mode dla dedykowanej domeny Huba.');
-            }
             $this->writeAtomicFile($path, $next, 0640);
             $this->run([$httpdmng, '--reconfigure-domain', $domain]);
         } catch (Throwable $exception) {
             if ($original === '') @unlink($path); else $this->writeAtomicFile($path, $original, 0640);
-            $rollback = $currentPleskProxyMode
-                ? $this->setPleskProxyMode($domain, true, false)
-                : $this->run([$httpdmng, '--reconfigure-domain', $domain], null, [], false);
+            $rollback = $this->run([$httpdmng, '--reconfigure-domain', $domain], null, [], false);
             $this->state['proxy']['transition'] = false;
             $rollbackError = $rollback['code'] === 0 ? '' : ' Przywrócenie ustawień Pleska także nie powiodło się: ' . trim((string) ($rollback['stderr'] ?: $rollback['stdout']));
             throw new RuntimeException($exception->getMessage() . $rollbackError, 0, $exception);
         }
-        $this->state['proxy'] = ['mode' => 'managed', 'domain' => $domain, 'configuredAt' => gmdate('c'), 'path' => $path, 'pleskProxyModeBefore' => $previousPleskProxyMode, 'transition' => false];
-        $this->log('Skonfigurowano zarządzany reverse proxy dla ' . $domain . '.');
-    }
-
-    private function detectPleskProxyMode($domain, $vhost)
-    {
-        $domainUtility = $this->productRoot . '/bin/domain';
-        if ($this->isExecutableBinary($domainUtility)) {
-            $result = $this->run([$domainUtility, '--show-web-server-settings', $this->validatedDomain($domain)], null, [], false);
-            if ($result['code'] === 0) {
-                $output = trim((string) ($result['stdout'] . "\n" . $result['stderr']));
-                $pattern = '/(?:^|\R)\s*nginx-proxy-mode\s*(?:(?:[:=]\s*)|\R\s*)(true|false|on|off|yes|no|1|0)\s*(?:\R|$)/i';
-                if (preg_match($pattern, $output, $matches)) {
-                    return in_array(strtolower($matches[1]), ['true', 'on', 'yes', '1'], true);
-                }
-            }
-        }
-
-        $path = rtrim($vhost, '/') . '/conf/last_nginx.conf';
-        if (!is_file($path) || !is_readable($path)) throw new RuntimeException('Cannot inspect the generated Plesk nginx configuration: ' . $path);
-        $contents = (string) file_get_contents($path);
-        if (preg_match('/location\s+(?:=\s*)?\/\s*\{[^{}]*proxy_pass\s+https?:\/\/[^;]*(?::7080|:7081)(?:\/|;)/s', $contents)) return true;
-        if (!preg_match('/location\s+(?:=\s*)?\/\s*\{/', $contents)) return false;
-        throw new RuntimeException('Cannot determine nginx Proxy mode from Plesk CLI or generated configuration for ' . $domain . '.');
-    }
-
-    private function setPleskProxyMode($domain, $enabled, $throw = true)
-    {
-        $utility = $this->productRoot . '/bin/subscription';
-        if (!$this->isExecutableBinary($utility)) throw new RuntimeException('Plesk subscription utility is unavailable: ' . $utility);
-        return $this->run([$utility, '--update-web-server-settings', $this->validatedDomain($domain), '-nginx-proxy-mode', $enabled ? 'true' : 'false'], null, [], $throw);
+        $this->state['proxy'] = ['mode' => 'managed', 'strategy' => 'server-rewrite', 'domain' => $domain, 'configuredAt' => gmdate('c'), 'path' => $path, 'transition' => false];
+        $this->log('Skonfigurowano zarządzany reverse proxy dla ' . $domain . ' bez zmiany Plesk nginx Proxy Mode.');
     }
 
     private function managedProxyContents($contents, $port)
@@ -397,11 +356,15 @@ final class KitsuneServBridgeManager
         $end = '# END KITSUNESERV BRIDGE MANAGED';
         $pattern = '/\n?' . preg_quote($begin, '/') . '.*?' . preg_quote($end, '/') . '\n?/s';
         $base = trim((string) preg_replace($pattern, "\n", $contents));
-        if (preg_match('/location\s+(?:\^~\s+|=\s*)?\/\s*\{/', $base)) {
-            throw new RuntimeException('The selected domain already contains a catch-all nginx location. Use manual mode or remove the conflict.');
+        if (strpos($base, '__kitsuneserv_bridge_internal__') !== false) {
+            throw new RuntimeException('The selected domain already uses the reserved KitsuneServ internal nginx route.');
         }
-        $block = $begin . "\nlocation ^~ / {\n"
-            . '    proxy_pass http://127.0.0.1:' . $port . ";\n"
+        $block = $begin . "\n"
+            . "# Preserve Plesk/ACME routes while routing every other request before location selection.\n"
+            . "rewrite ^/(?!\\.well-known(?:/|$)|__kitsuneserv_bridge_internal__$).* /__kitsuneserv_bridge_internal__ last;\n\n"
+            . "location = /__kitsuneserv_bridge_internal__ {\n"
+            . "    internal;\n"
+            . '    proxy_pass http://127.0.0.1:' . $port . "\$request_uri;\n"
             . "    proxy_http_version 1.1;\n"
             . "    proxy_set_header Host \$host;\n"
             . "    proxy_set_header X-Real-IP \$remote_addr;\n"
@@ -756,7 +719,7 @@ final class KitsuneServBridgeManager
 
 function kitsuneConfigPath(array $arguments)
 {
-    if (count($arguments) !== 3 || $arguments[1] !== '--config') throw new RuntimeException('Usage: kitsuneserv-bridge-r10 --config /secure/operation.json');
+    if (count($arguments) !== 3 || $arguments[1] !== '--config') throw new RuntimeException('Usage: kitsuneserv-bridge-r11 --config /secure/operation.json');
     return (string) $arguments[2];
 }
 

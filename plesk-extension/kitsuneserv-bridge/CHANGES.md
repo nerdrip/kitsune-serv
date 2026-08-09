@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.0.0-11
+
+- Replaced Proxy Mode detection and mutation with a server-rewrite plus an internal named path that safely coexists with Plesk's generated `location /` and static-file locations.
+- The managed and manual proxy variants preserve the original method, body, URI, query string and WebSocket headers while leaving `/.well-known` to Plesk for ACME/certificate handling.
+- Unified the hosting-panel navigation entry with the other Kitsune managers under `SECTION_NAV_SERVER_MANAGEMENT`, removing the isolated bottom-of-menu item.
+
 ## 3.0.0-10
 
 - Replaced the unreliable generated-`location /` heuristic with the Plesk `--show-web-server-settings` value when detecting per-domain nginx Proxy Mode.
