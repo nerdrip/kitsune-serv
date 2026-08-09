@@ -2,7 +2,7 @@
 
 class Modules_KitsuneservBridge_Config
 {
-    public const EXTENSION_VERSION = '3.0.0-r5';
+    public const EXTENSION_VERSION = '3.0.0-r8';
 
     private const SECRET_FIELDS = [
         'git_token' => 'secret_git_token',
@@ -29,8 +29,8 @@ class Modules_KitsuneservBridge_Config
             'data_path' => '/var/lib/kitsuneserv',
             'git_username' => 'x-access-token',
             'git_ssh_known_hosts' => '',
-            'node_binary' => '/usr/bin/node',
-            'npm_binary' => '/usr/bin/npm',
+            'node_binary' => 'auto',
+            'npm_binary' => 'auto',
             'service_user' => 'root',
             'bind_address' => '127.0.0.1',
             'hub_port' => '10000',
@@ -118,6 +118,7 @@ class Modules_KitsuneservBridge_Config
             'lastSuccess' => null,
             'lastError' => null,
             'repository' => ['branch' => null, 'localCommit' => null, 'remoteCommit' => null, 'dirty' => null, 'updateAvailable' => null],
+            'runtime' => ['node' => null, 'nodeVersion' => null, 'npm' => null, 'detectedAt' => null],
             'deployment' => ['version' => null, 'commit' => null, 'path' => null, 'deployedAt' => null],
             'service' => ['installed' => false, 'active' => false, 'enabled' => false, 'health' => null, 'pid' => null],
             'proxy' => ['mode' => null, 'domain' => null, 'configuredAt' => null, 'path' => null],

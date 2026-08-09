@@ -1,6 +1,8 @@
 #!/usr/bin/env php
 <?php
 
+const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.0.0-r8';
+
 final class KitsuneServBridgeManager
 {
     private $config;
@@ -45,6 +47,7 @@ final class KitsuneServBridgeManager
             throw new RuntimeException('Repository operations are disabled in external Hub mode.');
         }
         $this->acquireLock($action === 'status' ? 2 : 15, $action === 'status' ? 'status.lock' : 'operation.lock');
+        $this->log('Executor KitsuneServ Bridge ' . KITSUNESERV_BRIDGE_EXECUTOR_RELEASE . '.');
         $this->state['lastOperation'] = $action;
         $this->state['lastError'] = null;
         try {
@@ -73,7 +76,10 @@ final class KitsuneServBridgeManager
                     break;
                 case 'start':
                 case 'restart':
+                    $this->resolveNodeRuntime();
                     $this->refreshAuthenticationEnvironment();
+                    $this->writeSystemdUnit();
+                    $this->run(['systemctl', 'daemon-reload']);
                     $this->controlService($action);
                     $this->refreshState();
                     break;
@@ -101,16 +107,11 @@ final class KitsuneServBridgeManager
     {
         $this->validatedRepositoryUrl();
         $this->validatedBranch();
-        $node = $this->validatedBinary('node_binary');
-        $npm = $this->validatedBinary('npm_binary');
-        $nodeVersion = trim($this->run([$node, '--version'])['stdout']);
-        if (!preg_match('/^v(\d+)\.(\d+)\./', $nodeVersion, $matches) || (int) $matches[1] < 22 || ((int) $matches[1] === 22 && (int) $matches[2] < 19)) {
-            throw new RuntimeException('KitsuneServ requires Node.js 22.19 or newer; detected ' . ($nodeVersion ?: 'unknown') . '.');
-        }
+        [$node, $npm, $nodeVersion] = $this->resolveNodeRuntime();
         $this->run([$npm, '--version']);
         $this->run(['git', '--version']);
         $this->run(['systemctl', '--version']);
-        $this->log('Node.js, npm, Git i systemd są dostępne.');
+        $this->log('Node.js ' . $nodeVersion . ' (' . $node . '), npm (' . $npm . '), Git i systemd są dostępne.');
     }
 
     private function synchronizeRepository()
@@ -224,7 +225,9 @@ final class KitsuneServBridgeManager
         $domain = $this->validatedDomain((string) ($this->config['panel_domain'] ?? ''));
         $authMode = (string) ($this->config['auth_mode'] ?? 'hybrid');
         if (!in_array($authMode, ['independent', 'plesk', 'hybrid'], true)) throw new RuntimeException('Invalid Hub authentication mode.');
+        $node = $this->validatedBinary('node_binary');
         $values = [
+            'PATH' => dirname($node) . ':/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
             'NODE_ENV' => 'production',
             'KITSUNE_HOST' => $this->validatedBindAddress(),
             'KITSUNE_PORT' => (string) $this->validatedPort(),
@@ -258,6 +261,7 @@ final class KitsuneServBridgeManager
         $authMode = (string) ($this->config['auth_mode'] ?? 'hybrid');
         if (!in_array($authMode, ['independent', 'plesk', 'hybrid'], true)) throw new RuntimeException('Invalid Hub authentication mode.');
         $updates = [
+            'PATH' => dirname($this->validatedBinary('node_binary')) . ':/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
             'KITSUNE_HUB_AUTH_MODE' => $authMode,
             'KITSUNE_HUB_AUTO_PROVISION' => ($this->config['auto_provision'] ?? '1') === '1' ? '1' : '0',
             'KITSUNE_ALLOW_LOCAL_LOGIN' => $authMode === 'plesk' ? '0' : '1',
@@ -424,7 +428,9 @@ final class KitsuneServBridgeManager
         foreach ($command as $argument) if (!is_scalar($argument) || strpos((string) $argument, "\0") !== false) throw new RuntimeException('Invalid process argument.');
         $line = implode(' ', array_map('escapeshellarg', array_map('strval', $command)));
         $environment = getenv(); if (!is_array($environment)) $environment = [];
-        $environment['PATH'] = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+        $basePath = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+        $configuredNode = trim((string) ($this->config['node_binary'] ?? ''));
+        $environment['PATH'] = $this->isExecutableBinary($configuredNode) ? dirname($configuredNode) . ':' . $basePath : $basePath;
         foreach ($extraEnvironment as $key => $value) $environment[$key] = (string) $value;
         $descriptor = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
         $process = proc_open($line, $descriptor, $pipes, $cwd, $environment);
@@ -460,6 +466,61 @@ final class KitsuneServBridgeManager
         $value = trim((string) ($this->config[$field] ?? ''));
         if (!preg_match('#^/[A-Za-z0-9._/-]+$#', $value) || strpos($value, '..') !== false || !is_file($value) || !is_executable($value)) throw new RuntimeException('Invalid or non-executable ' . $field . ': ' . $value);
         return $value;
+    }
+
+    private function resolveNodeRuntime()
+    {
+        $configuredNode = trim((string) ($this->config['node_binary'] ?? 'auto'));
+        $nodeCandidates = [];
+        if ($configuredNode !== '' && $configuredNode !== 'auto') $nodeCandidates[] = $configuredNode;
+        foreach ((array) glob('/opt/plesk/node/*/bin/node') as $candidate) $nodeCandidates[] = $candidate;
+        foreach (['/usr/local/bin/node', '/usr/bin/node', '/snap/bin/node'] as $candidate) $nodeCandidates[] = $candidate;
+
+        $compatible = [];
+        foreach (array_values(array_unique($nodeCandidates)) as $candidate) {
+            if (!$this->isExecutableBinary($candidate)) continue;
+            $result = $this->run([$candidate, '--version'], null, [], false);
+            $versionOutput = trim((string) ($result['stdout'] ?: $result['stderr']));
+            if ($result['code'] !== 0 || !preg_match('/^v?(\d+)\.(\d+)\.(\d+)/', $versionOutput, $matches)) continue;
+            $version = (int) $matches[1] . '.' . (int) $matches[2] . '.' . (int) $matches[3];
+            if (version_compare($version, '22.19.0', '<')) continue;
+            $compatible[] = ['path' => $candidate, 'version' => $version, 'configured' => $candidate === $configuredNode];
+        }
+        if (!$compatible) {
+            throw new RuntimeException('Nie znaleziono zgodnego Node.js 22.19 lub nowszego. Zainstaluj Node.js 22+ w Plesk: Narzędzia i ustawienia > Aktualizacje > Dodaj/usuń komponenty > Node.js support, albo podaj poprawną ścieżkę ręcznie.');
+        }
+        usort($compatible, function ($left, $right) {
+            if ($left['configured'] !== $right['configured']) return $left['configured'] ? -1 : 1;
+            return version_compare($right['version'], $left['version']);
+        });
+        $selectedNode = $compatible[0];
+        $this->config['node_binary'] = $selectedNode['path'];
+
+        $configuredNpm = trim((string) ($this->config['npm_binary'] ?? 'auto'));
+        $npmCandidates = [];
+        if ($selectedNode['path'] === $configuredNode && $configuredNpm !== '' && $configuredNpm !== 'auto') $npmCandidates[] = $configuredNpm;
+        $npmCandidates[] = dirname($selectedNode['path']) . '/npm';
+        if ($configuredNpm !== '' && $configuredNpm !== 'auto') $npmCandidates[] = $configuredNpm;
+        foreach (['/usr/local/bin/npm', '/usr/bin/npm'] as $candidate) $npmCandidates[] = $candidate;
+        $selectedNpm = '';
+        foreach (array_values(array_unique($npmCandidates)) as $candidate) {
+            if (!$this->isExecutableBinary($candidate)) continue;
+            $result = $this->run([$candidate, '--version'], null, [], false);
+            if ($result['code'] === 0 && preg_match('/^\d+\.\d+\.\d+/', trim((string) $result['stdout']))) { $selectedNpm = $candidate; break; }
+        }
+        if ($selectedNpm === '') throw new RuntimeException('Znaleziono Node.js ' . $selectedNode['version'] . ', ale nie znaleziono działającego npm. Zainstaluj lub napraw komponent Node.js support w Plesku.');
+        $this->config['npm_binary'] = $selectedNpm;
+        $this->state['runtime'] = ['node' => $selectedNode['path'], 'nodeVersion' => $selectedNode['version'], 'npm' => $selectedNpm, 'detectedAt' => gmdate('c')];
+        if ($configuredNode !== $selectedNode['path'] || $configuredNpm !== $selectedNpm) {
+            $this->log('Automatycznie wybrano runtime: Node.js ' . $selectedNode['path'] . ', npm ' . $selectedNpm . '.');
+        }
+        return [$selectedNode['path'], $selectedNpm, $selectedNode['version']];
+    }
+
+    private function isExecutableBinary($value)
+    {
+        $value = trim((string) $value);
+        return preg_match('#^/[A-Za-z0-9._/-]+$#', $value) && strpos($value, '..') === false && is_file($value) && is_executable($value);
     }
 
     private function validatedPort()
@@ -615,7 +676,7 @@ final class KitsuneServBridgeManager
 
     private function readState()
     {
-        $empty = ['updatedAt' => null, 'lastOperation' => null, 'lastSuccess' => null, 'lastError' => null, 'repository' => [], 'deployment' => [], 'service' => [], 'proxy' => [], 'log' => []];
+        $empty = ['updatedAt' => null, 'lastOperation' => null, 'lastSuccess' => null, 'lastError' => null, 'repository' => [], 'runtime' => [], 'deployment' => [], 'service' => [], 'proxy' => [], 'log' => []];
         if (!is_file($this->statePath)) return $empty;
         $decoded = json_decode((string) file_get_contents($this->statePath), true);
         return is_array($decoded) ? array_replace_recursive($empty, $decoded) : $empty;
@@ -644,11 +705,15 @@ final class KitsuneServBridgeManager
 
 function kitsuneConfigPath(array $arguments)
 {
-    if (count($arguments) !== 3 || $arguments[1] !== '--config') throw new RuntimeException('Usage: kitsuneserv-bridge --config /secure/operation.json');
+    if (count($arguments) !== 3 || $arguments[1] !== '--config') throw new RuntimeException('Usage: kitsuneserv-bridge-r8 --config /secure/operation.json');
     return (string) $arguments[2];
 }
 
 umask(0077);
+if (count($argv) === 2 && $argv[1] === '--self-check') {
+    fwrite(STDOUT, KITSUNESERV_BRIDGE_EXECUTOR_RELEASE . PHP_EOL);
+    exit(0);
+}
 try {
     (new KitsuneServBridgeManager(kitsuneConfigPath($argv)))->execute();
     exit(0);

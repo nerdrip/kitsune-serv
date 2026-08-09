@@ -2,6 +2,9 @@
 
 ## 3.0.0 — 2026-08-09
 
+- Plesk package release 8 verifies its protected executor through an official privileged `callSbin` self-check instead of reading the root-owned file from the unprivileged post-install process.
+- Plesk package release 7 uses a versioned privileged executor and verifies it during installation, preventing Plesk from reusing a stale release-5 `sbin` copy after an extension upgrade.
+- Plesk package release 6 automatically discovers Plesk-managed Node.js 22.19+ and its matching npm, propagates the runtime through task/systemd `PATH`, and repairs stale service units during start or restart.
 - Plesk package release 5 forces Unix LF for its privileged PHP entry point and prevents Windows-built packages from invoking the invalid interpreter name `php\r`.
 - Plesk package release 4 removes the hybrid-auth bootstrap deadlock, auto-generates the connector settings, adds signed Plesk password verification and applies Plesk-first password checks while merging matching usernames into the existing local Hub profile.
 - Plesk package release 3 adds Plesk-domain selection, automatic/manual publication, managed/external Hub modes, configurable Git credentials and deploy keys, atomic systemd deployments, nginx rollback, live health/log state and a complete responsive management UI.

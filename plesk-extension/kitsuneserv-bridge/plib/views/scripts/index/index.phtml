@@ -6,6 +6,7 @@ $e = static function ($value) { return htmlspecialchars((string) $value, ENT_QUO
 $url = static function ($action) { return pm_Context::getActionUrl('index', $action); };
 $service = (array) ($state['service'] ?? []);
 $repository = (array) ($state['repository'] ?? []);
+$runtime = (array) ($state['runtime'] ?? []);
 $deployment = (array) ($state['deployment'] ?? []);
 $proxy = (array) ($state['proxy'] ?? []);
 $serviceActive = !empty($service['active']);
@@ -68,6 +69,7 @@ $shortCommit = static function ($value) { return $value ? substr((string) $value
             <div><dt>Adres publiczny</dt><dd><?php echo $c['url_mode'] === 'automatic' ? 'Automatycznie z domeny' : 'Wpisany ręcznie'; ?></dd></div>
             <div><dt>Reverse proxy</dt><dd><?php echo $c['proxy_mode'] === 'managed' ? 'Automatyczny blok nginx' : 'Konfiguracja ręczna'; ?></dd></div>
             <div><dt>Uwierzytelnianie</dt><dd><?php echo $c['auth_mode'] === 'hybrid' ? 'Plesk + konta niezależne' : ($c['auth_mode'] === 'plesk' ? 'Tylko Plesk' : 'Tylko konta niezależne'); ?></dd></div>
+            <div><dt>Runtime Node.js</dt><dd><?php echo $e(($runtime['nodeVersion'] ?? '') ? 'v' . $runtime['nodeVersion'] . ' · ' . ($runtime['node'] ?? '') : 'Automatyczny — jeszcze niewykryty'); ?></dd></div>
           </dl>
         </article>
         <article class="ks-card">
@@ -146,8 +148,8 @@ $shortCommit = static function ($value) { return $value ? substr((string) $value
               <label class="ks-field"><span>Katalog aktywnego wdrożenia</span><input name="deploy_path" value="<?php echo $e($c['deploy_path']); ?>"></label>
               <label class="ks-field"><span>Katalog trwałych danych</span><input name="data_path" value="<?php echo $e($c['data_path']); ?>"></label>
               <label class="ks-field"><span>Użytkownik usługi Linux</span><input name="service_user" value="<?php echo $e($c['service_user']); ?>"><small>Użytkownik musi istnieć na serwerze. Pełna integracja systemowa zwykle wymaga root.</small></label>
-              <label class="ks-field"><span>Plik wykonywalny Node.js</span><input name="node_binary" value="<?php echo $e($c['node_binary']); ?>"></label>
-              <label class="ks-field"><span>Plik wykonywalny npm</span><input name="npm_binary" value="<?php echo $e($c['npm_binary']); ?>"></label>
+              <label class="ks-field"><span>Node.js</span><input name="node_binary" value="<?php echo $e($c['node_binary']); ?>" placeholder="auto"><small>„auto” wybiera zgodny Node.js ≥22.19, najpierw z instalacji Pleska w /opt/plesk/node/*/bin/node, potem z systemu.</small></label>
+              <label class="ks-field"><span>npm</span><input name="npm_binary" value="<?php echo $e($c['npm_binary']); ?>" placeholder="auto"><small>„auto” dobiera npm z tego samego katalogu co wybrany Node.js.</small></label>
               <label class="ks-field"><span>Adres nasłuchu</span><select name="bind_address"><option value="127.0.0.1" <?php echo $c['bind_address'] === '127.0.0.1' ? 'selected' : ''; ?>>127.0.0.1 (IPv4 loopback)</option><option value="::1" <?php echo $c['bind_address'] === '::1' ? 'selected' : ''; ?>>::1 (IPv6 loopback)</option></select></label>
               <label class="ks-field"><span>Port lokalny Hub</span><input type="number" name="hub_port" min="1024" max="65535" value="<?php echo $e($c['hub_port']); ?>"></label>
             </div>

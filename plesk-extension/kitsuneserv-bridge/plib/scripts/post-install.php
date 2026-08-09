@@ -10,7 +10,15 @@ if (!is_dir($varDir)) mkdir($varDir, 0700, true);
 foreach (Modules_KitsuneservBridge_Config::defaults() as $key => $value) {
     if (pm_Settings::get($key) === null) pm_Settings::set($key, (string) $value);
 }
+foreach (['node_binary' => '/usr/bin/node', 'npm_binary' => '/usr/bin/npm'] as $key => $legacyDefault) {
+    if (trim((string) pm_Settings::get($key, '')) === $legacyDefault) pm_Settings::set($key, 'auto');
+}
 
-$productRoot = defined('PRODUCT_ROOT_D') ? PRODUCT_ROOT_D : '/usr/local/psa';
-$utility = $productRoot . '/admin/bin/modules/kitsuneserv-bridge/kitsuneserv-bridge';
-if (is_file($utility)) @chmod($utility, 0750);
+try {
+    $selfCheck = pm_ApiCli::callSbin('kitsuneserv-bridge-r8', ['--self-check'], pm_ApiCli::RESULT_FULL);
+} catch (Throwable $exception) {
+    throw new RuntimeException('Nie udało się uruchomić uprzywilejowanego executora KitsuneServ Bridge r8 przez Plesk.', 0, $exception);
+}
+if ((int) ($selfCheck['code'] ?? 1) !== 0 || trim((string) ($selfCheck['stdout'] ?? '')) !== '3.0.0-r8') {
+    throw new RuntimeException('Executor KitsuneServ Bridge r8 nie przeszedł kontroli wersji przez Plesk.');
+}

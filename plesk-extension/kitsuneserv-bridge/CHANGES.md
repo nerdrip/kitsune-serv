@@ -1,5 +1,24 @@
 # Changelog
 
+## 3.0.0-8
+
+- Replaced the invalid direct read/executable check of the protected Plesk utility with an official privileged `pm_ApiCli::callSbin()` self-check.
+- Added a side-effect-free `--self-check` operation to `kitsuneserv-bridge-r8`, avoiding permission warnings from the unprivileged post-install process.
+
+## 3.0.0-7
+
+- Versioned the privileged executor as `kitsuneserv-bridge-r7` so an older Plesk-managed `sbin` copy cannot be reused after an extension upgrade.
+- Added a post-install integrity/executability check and an executor release marker in every operation log.
+- Generalized package-time Unix LF normalization to every privileged utility in the extension.
+
+## 3.0.0-6
+
+- Added automatic discovery of compatible Node.js 22.19+ installations managed by Plesk under `/opt/plesk/node/*/bin/node`, with system paths as fallbacks.
+- Paired npm with the selected Node.js installation and propagated its directory through task and systemd `PATH` values.
+- Start and restart now repair an older systemd unit that still points to `/usr/bin/node`; manual absolute runtime paths remain supported.
+- Extension upgrades migrate the former `/usr/bin/node` and `/usr/bin/npm` defaults to automatic discovery, and the overview reports the selected runtime.
+- Replaced the opaque non-executable-binary failure with actionable Plesk Node.js component guidance.
+
 ## 3.0.0-5
 
 - Fixed the privileged `sbin/kitsuneserv-bridge` entry point in packages built on Windows by enforcing Unix LF line endings, preventing `/usr/bin/env: 'php\r': No such file or directory`.

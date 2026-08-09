@@ -200,7 +200,11 @@ class IndexController extends pm_Controller_Action
             if ($this->pathsOverlap($values['repository_path'], $values['deploy_path']) || $this->pathsOverlap($values['repository_path'], $values['data_path']) || $this->pathsOverlap($values['deploy_path'], $values['data_path'])) {
                 throw new RuntimeException('Katalog repozytorium, katalog wdrożenia i katalog danych nie mogą się pokrywać ani zawierać jeden w drugim.');
             }
-            foreach (['node_binary', 'npm_binary'] as $field) if (!preg_match('#^/[A-Za-z0-9._/-]+$#', (string) ($values[$field] ?? '')) || strpos((string) $values[$field], '..') !== false) throw new RuntimeException('Podaj bezpieczną, absolutną ścieżkę dla ' . $field . '.');
+            foreach (['node_binary', 'npm_binary'] as $field) {
+                $runtime = trim((string) ($values[$field] ?? 'auto'));
+                if ($runtime !== 'auto' && (!preg_match('#^/[A-Za-z0-9._/-]+$#', $runtime) || strpos($runtime, '..') !== false)) throw new RuntimeException('Wpisz „auto” albo bezpieczną, absolutną ścieżkę dla ' . $field . '.');
+                $values[$field] = $runtime;
+            }
             if (!preg_match('/^[a-z_][a-z0-9_-]{0,31}$/', (string) ($values['service_user'] ?? ''))) throw new RuntimeException('Nieprawidłowy użytkownik usługi Linux.');
             if (!in_array((string) ($values['bind_address'] ?? ''), ['127.0.0.1', '::1'], true)) throw new RuntimeException('Zarządzany Hub może nasłuchiwać wyłącznie na interfejsie loopback.');
             $port = filter_var($values['hub_port'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1024, 'max_range' => 65535]]);
@@ -260,7 +264,7 @@ class IndexController extends pm_Controller_Action
         $runtime = null;
         try {
             $runtime = Modules_KitsuneservBridge_Config::createRuntimeConfig('status');
-            $result = pm_ApiCli::callSbin('kitsuneserv-bridge', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
+            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r8', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
             if ((int) ($result['code'] ?? 1) !== 0) {
                 $detail = trim((string) ($result['stderr'] ?? $result['stdout'] ?? ''));
                 return mb_substr($detail !== '' ? $detail : 'Narzędzie statusu zakończyło się błędem.', -2000);
