@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, clipboard, Tray, Menu, nativeImage, dialog, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, clipboard, Tray, Menu, nativeImage, dialog, safeStorage, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -34,16 +34,41 @@ const HubManager = require('./hub-manager');
 const { initializeDesktopDataRoot } = require('./runtime-paths');
 const { isPathInside, resolveInside, assertProjectSection, assertProjectName } = require('./path-utils');
 const { PathManager } = require('./path-manager');
+const RemoteDevOpsManager = require('./remote-devops-manager');
+const WorkspaceSuiteManager = require('./workspace-suite-manager');
+const AdvancedOpsManager = require('./advanced-ops-manager');
+const IncidentManager = require('./incident-manager');
+const ResilienceManager = require('./resilience-manager');
+const OperationsFabricManager = require('./operations-fabric-manager');
+const EnterpriseOpsManager = require('./enterprise-ops-manager');
+const NextgenOpsManager = require('./nextgen-ops-manager');
+const OperationsWorkspaceManager = require('./operations-workspace-manager');
+const TerminalFileProManager = require('./terminal-file-pro-manager');
+const { TerminalFileVisionManager } = require('./terminal-file-vision-manager');
+const { TerminalFileRuntimeManager } = require('./terminal-file-runtime-manager');
+const { TerminalFileDeepManager } = require('./terminal-file-deep-manager');
 
 const SAFE_MODE = process.argv.includes('--safe-mode') || process.env.KITSUNE_SAFE_MODE === '1';
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) app.quit();
-app.on('second-instance', () => {
+function requestedPanel(argv = process.argv) {
+  if (argv.includes('--open-file-manager')) return 'file-manager';
+  if (argv.includes('--open-terminal')) return 'terminal';
+  return '';
+}
+
+function showPanel(panel) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
+  if (panel) mainWindow.webContents.send('app:open-panel', panel);
+}
+
+app.on('second-instance', (_event, argv) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  showPanel(requestedPanel(argv));
 });
 
 // Keep mutable services, databases and projects outside the installed application.
@@ -79,6 +104,24 @@ let automationManager;
 let auditManager;
 let identityManager;
 let hubManager;
+let remoteAccessManager;
+let remoteOperationsManager;
+let portableToolsManager;
+let cloudStorageManager;
+let remoteDevOpsManager;
+let workspaceSuiteManager;
+let advancedOpsManager;
+let incidentManager;
+let resilienceManager;
+let operationsFabricManager;
+let enterpriseOpsManager;
+let nextgenOpsManager;
+let operationsWorkspaceManager;
+let terminalFileProManager;
+let terminalFileVisionManager;
+let terminalFileRuntimeManager;
+let terminalFileDeepManager;
+let nodePty;
 let quitInProgress = false;
 let servicesStoppedForQuit = false;
 
@@ -87,9 +130,11 @@ async function auditOperation(action, target, operation, details = {}) {
   try {
     const result = await operation();
     auditManager?.record({ source: 'desktop-ipc', action, target, success: result?.success !== false, durationMs: Date.now() - started, details });
+    nextgenOpsManager?.blackBoxRecord({ kind: 'desktop-operation', action, target, success: result?.success !== false, durationMs: Date.now() - started });
     return result;
   } catch (error) {
     auditManager?.record({ source: 'desktop-ipc', action, target, success: false, durationMs: Date.now() - started, details: { ...details, error: error.message } });
+    nextgenOpsManager?.blackBoxRecord({ kind: 'desktop-operation', action, target, success: false, durationMs: Date.now() - started });
     throw error;
   }
 }
@@ -119,6 +164,8 @@ async function quitAfterStoppingServices() {
   quitInProgress = true;
   try {
     commandManager?.stopAll();
+    remoteAccessManager?.stopAll();
+    terminalFileDeepManager?.stopAll();
     tunnelManager?.stopAll();
     labManager?.stopAll();
     if (apiFlowManager) await apiFlowManager.stopAll();
@@ -160,6 +207,8 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   mainWindow.once('ready-to-show', () => {
     if (!general.startMinimized && !process.argv.includes('--hidden')) mainWindow.show();
+    const panel = requestedPanel();
+    if (panel) showPanel(panel);
   });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     try {
@@ -174,6 +223,11 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  const RemoteAccessManager = require('./remote-access-manager');
+  const RemoteOperationsManager = require('./remote-operations-manager');
+  const PortableToolsManager = require('./portable-tools-manager');
+  const CloudStorageManager = require('./cloud-storage-manager');
+  nodePty = require('node-pty');
   downloadManager = new DownloadManager({ appRoot: _appRoot, catalogRoot: _defaultsRoot });
   serviceManager = new ServiceManager(downloadManager, configManager);
   pathManager = new PathManager(downloadManager, configManager, {
@@ -220,17 +274,39 @@ app.whenReady().then(async () => {
     decrypt: value => safeStorage.decryptString(Buffer.from(value, 'base64'))
   });
   integrationManager = new IntegrationManager(_appRoot, secretStore);
+  remoteAccessManager = new RemoteAccessManager(_appRoot, secretStore);
+  remoteOperationsManager = new RemoteOperationsManager(_appRoot, remoteAccessManager);
+  remoteDevOpsManager = new RemoteDevOpsManager(remoteOperationsManager);
+  workspaceSuiteManager = new WorkspaceSuiteManager(_appRoot, secretStore, remoteOperationsManager, remoteAccessManager);
+  portableToolsManager = new PortableToolsManager(app.isPackaged ? path.join(process.resourcesPath, 'portable-tools', 'windows') : path.join(__dirname, '..', 'vendor', 'portable-tools', 'windows'));
+  cloudStorageManager = new CloudStorageManager(_appRoot, secretStore);
+  advancedOpsManager = new AdvancedOpsManager(_appRoot, remoteAccessManager, remoteOperationsManager, workspaceSuiteManager, cloudStorageManager);
+  incidentManager = new IncidentManager(_appRoot, secretStore, remoteAccessManager, remoteOperationsManager, advancedOpsManager, workspaceSuiteManager);
+  resilienceManager = new ResilienceManager(_appRoot, secretStore, remoteAccessManager, remoteOperationsManager);
   auditManager = new AuditManager(_appRoot);
   projectManager.setSecretStore(secretStore);
   projectManager.setHookRunner((projectId, commandName, options) => commandManager.runAndWait(projectId, commandName, options));
   commandManager.setIntegrationEnvironmentProvider(() => integrationManager.buildEnvironment());
   global.dbViewer = new DbViewer(downloadManager, configManager, serviceManager, secretStore);
+  operationsFabricManager = new OperationsFabricManager(_appRoot, secretStore, remoteAccessManager, remoteOperationsManager, advancedOpsManager, incidentManager, resilienceManager, cloudStorageManager, global.dbViewer);
+  enterpriseOpsManager = new EnterpriseOpsManager(_appRoot, { secretStore, remoteAccess: remoteAccessManager, remoteOperations: remoteOperationsManager, advanced: advancedOpsManager, fabric: operationsFabricManager, dbViewer: global.dbViewer });
+  nextgenOpsManager = new NextgenOpsManager(_appRoot, { secretStore, remoteAccess: remoteAccessManager, remoteOperations: remoteOperationsManager, advanced: advancedOpsManager, resilience: resilienceManager, enterprise: enterpriseOpsManager });
+  operationsWorkspaceManager = new OperationsWorkspaceManager(_appRoot, { remoteAccess: remoteAccessManager, remoteOperations: remoteOperationsManager, advanced: advancedOpsManager, fabric: operationsFabricManager, incidents: incidentManager, nextgen: nextgenOpsManager, resilience: resilienceManager });
+  terminalFileProManager = new TerminalFileProManager(_appRoot, { remoteAccess: remoteAccessManager, remoteOperations: remoteOperationsManager, advanced: advancedOpsManager, operationsWorkspace: operationsWorkspaceManager, nextgen: nextgenOpsManager, secretStore });
+  terminalFileVisionManager = new TerminalFileVisionManager(_appRoot, { remoteAccess: remoteAccessManager, remoteOperations: remoteOperationsManager, sshTunnel: tunnelManager, advanced: advancedOpsManager, secretStore });
+  terminalFileRuntimeManager = new TerminalFileRuntimeManager(_appRoot, { remoteAccess: remoteAccessManager, portableTools: portableToolsManager, secretStore });
+  terminalFileDeepManager = new TerminalFileDeepManager(_appRoot, { remoteAccess: remoteAccessManager, remoteOperations: remoteOperationsManager, cloudStorage: cloudStorageManager, terminalFilePro: terminalFileProManager, portableTools: portableToolsManager, secretStore, allowMount: true });
+  const ephemeralCleanupTimer = setInterval(() => { if (!incidentManager?.hasActive()) operationsFabricManager.cleanupEphemeral(); }, 60_000);
+  if (typeof ephemeralCleanupTimer.unref === 'function') ephemeralCleanupTimer.unref();
+  if (!SAFE_MODE) { const syntheticTimer = setInterval(() => { if (!incidentManager?.hasActive()) operationsFabricManager.runDueSynthetics().catch(error => console.warn('Synthetic monitor warning:', error.message)); }, 60_000); if (typeof syntheticTimer.unref === 'function') syntheticTimer.unref(); }
   backupManager = new BackupManager(_appRoot, configManager, downloadManager, global.dbViewer, activityManager);
   supportManager = new SupportManager(_appRoot, { configManager, downloadManager, serviceManager, diagnosticsManager, projectManager, activityManager, environmentManager, pluginManager, platformManager });
   if (!SAFE_MODE) {
-    const backupTimer = setInterval(() => backupManager.runDue().catch(error => console.warn('Scheduled backup warning:', error.message)), 60_000);
+    const backupTimer = setInterval(() => { if (!incidentManager?.hasActive()) backupManager.runDue().catch(error => console.warn('Scheduled backup warning:', error.message)); }, 60_000);
     if (typeof backupTimer.unref === 'function') backupTimer.unref();
-    setTimeout(() => backupManager.runDue().catch(error => console.warn('Scheduled backup warning:', error.message)), 5_000);
+    setTimeout(() => { if (!incidentManager?.hasActive()) backupManager.runDue().catch(error => console.warn('Scheduled backup warning:', error.message)); }, 5_000);
+    const workspaceScheduleTimer = setInterval(() => { if (!incidentManager?.hasActive()) workspaceSuiteManager.runDue().catch(error => console.warn('Workspace schedule warning:', error.message)); }, 60_000); if (typeof workspaceScheduleTimer.unref === 'function') workspaceScheduleTimer.unref();
+    setTimeout(() => { if (!incidentManager?.hasActive()) workspaceSuiteManager.runDue().catch(error => console.warn('Workspace schedule warning:', error.message)); }, 7_500);
   }
   appStoreManager = new AppStoreManager(downloadManager, configManager, global.dbViewer, serviceManager);
   labManager = new LabManager(_appRoot, { appStoreManager, serviceManager, configManager, downloadManager, pathManager, secretStore, activityManager });
@@ -247,7 +323,7 @@ app.whenReady().then(async () => {
   automationManager.onChanged = payload => { try { mainWindow?.webContents.send('automation:changed', payload); } catch {} };
   if (!SAFE_MODE) {
     observabilityManager.start();
-    const automationTimer = setInterval(() => automationManager.runDue().catch(error => console.warn('Automation warning:', error.message)), 30000);
+    const automationTimer = setInterval(() => { if (!incidentManager?.hasActive()) automationManager.runDue().catch(error => console.warn('Automation warning:', error.message)); }, 30000);
     automationTimer.unref?.();
   }
 
@@ -262,12 +338,25 @@ app.whenReady().then(async () => {
     } catch {}
   };
 
+  if (process.argv.includes('--smoke-test') || process.env.KITSUNE_SMOKE_TEST === '1') {
+    const probeExecutable = process.platform === 'win32' ? (process.env.COMSPEC || 'cmd.exe') : '/bin/sh';
+    const probeArgs = process.platform === 'win32' ? ['/d', '/s', '/c', 'exit 0'] : ['-c', 'true'];
+    const probe = nodePty.spawn(probeExecutable, probeArgs, { name: 'xterm-256color', cols: 20, rows: 4, cwd: _appRoot, env: buildTerminalEnv(), useConpty: process.platform === 'win32' });
+    probe.onExit(() => {});
+  }
+
   createWindow();
   createTray();
+  globalShortcut.register('CommandOrControl+Alt+T', () => showPanel('terminal'));
+  globalShortcut.register('CommandOrControl+Alt+F', () => showPanel('file-manager'));
+  globalShortcut.register('CommandOrControl+Alt+O', () => showPanel('operations-center'));
   // Deterministic packaged-app probe used by release verification.
   if (process.argv.includes('--smoke-test') || process.env.KITSUNE_SMOKE_TEST === '1') {
-    setTimeout(() => app.quit(), 1500);
+    setTimeout(() => { servicesStoppedForQuit = true; app.quit(); }, 1500);
   }
+}).catch(error => {
+  console.error('KitsuneServ startup failed:', error);
+  app.exit(1);
 });
 
 function createTray() {
@@ -284,6 +373,8 @@ function createTray() {
 
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Show KitsuneServ', click: () => { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } } },
+    { label: 'File Manager', click: () => showPanel('file-manager') },
+    { label: 'Terminal', click: () => showPanel('terminal') },
     { type: 'separator' },
     { label: 'Start All', click: () => { if (mainWindow) mainWindow.webContents.send('tray:start-all'); } },
     { label: 'Stop All', click: async () => { if (serviceManager) await serviceManager.stopAll(); } },
@@ -495,7 +586,7 @@ ipcMain.handle('download:remove', async (_event, service, version) => {
 });
 ipcMain.handle('app:getInfo', () => ({
   name: app.getName(), version: app.getVersion(), dataRoot: _appRoot, platform: process.platform, mode: 'desktop', safeMode: SAFE_MODE,
-  migration: configManager.getMigrationInfo(), recovery: projectManager?.getRecoveryReport()
+  initialPanel: requestedPanel(), migration: configManager.getMigrationInfo(), recovery: projectManager?.getRecoveryReport()
 }));
 
 // ===== Service IPC =====
@@ -767,39 +858,82 @@ function buildTerminalEnv() {
   return pathManager.buildEnvironment(process.env);
 }
 
-ipcMain.handle('terminal:create', () => {
+function localShellProfiles() {
+  const profiles = [];
+  const add = (id, name, executable, args = []) => {
+    try { const resolved = process.platform === 'win32' ? execFileSync('where.exe', [executable], { encoding: 'utf8', windowsHide: true }).split(/\r?\n/)[0].trim() : executable; if (resolved) profiles.push({ id, name, executable: resolved, args }); } catch {}
+  };
+  if (process.platform === 'win32') {
+    add('powershell', 'Windows PowerShell', 'powershell.exe', ['-NoLogo']);
+    add('pwsh', 'PowerShell 7', 'pwsh.exe', ['-NoLogo']);
+    add('cmd', 'Command Prompt', 'cmd.exe');
+    add('wsl', 'WSL', 'wsl.exe');
+    const gitBash = ['C:\\Program Files\\Git\\bin\\bash.exe', 'C:\\Program Files (x86)\\Git\\bin\\bash.exe'].find(fs.existsSync);
+    if (gitBash) profiles.push({ id: 'git-bash', name: 'Git Bash', executable: gitBash, args: ['--login', '-i'] });
+  } else {
+    for (const [id, name, executable] of [['shell', 'Default shell', process.env.SHELL || '/bin/bash'], ['bash', 'Bash', '/bin/bash'], ['zsh', 'Zsh', '/bin/zsh']]) if (fs.existsSync(executable)) profiles.push({ id, name, executable, args: ['-l'] });
+  }
+  return profiles;
+}
+
+ipcMain.handle('terminal:profiles', () => localShellProfiles().map(({ executable, ...profile }) => profile));
+
+ipcMain.handle('terminal:create', async (_event, connection = null) => {
   const id = ++terminalIdCounter;
-  const env = buildTerminalEnv();
-  const isWin = process.platform === 'win32';
-  const shell = isWin ? (process.env.COMSPEC || 'cmd.exe') : (process.env.SHELL || '/bin/bash');
-  const child = spawn(shell, [], {
-    env,
-    cwd: path.resolve('.'),
-    stdio: ['pipe', 'pipe', 'pipe'],
-    ...(isWin ? { windowsHide: true } : {})
-  });
-
-  terminals.set(id, { process: child, id });
-
-  child.stdout.on('data', (data) => {
-    mainWindow?.webContents.send('terminal:data', { id, data: data.toString() });
-  });
-  child.stderr.on('data', (data) => {
-    mainWindow?.webContents.send('terminal:data', { id, data: data.toString() });
-  });
-  child.on('exit', (code) => {
+  if (connection?.host || connection?.id) {
+    try {
+      const resolvedSession = remoteAccessManager.resolve(connection);
+      if (resolvedSession.type === 'telnet' || resolvedSession.type === 'serial') {
+        let executable; let args;
+        if (resolvedSession.type === 'telnet') {
+          if (process.platform === 'win32') { try { executable = execFileSync('where.exe', ['telnet.exe'], { encoding: 'utf8', windowsHide: true }).split(/\r?\n/)[0].trim(); args = [resolvedSession.host, String(resolvedSession.port || 23)]; } catch { const bundled = portableToolsManager.verify('plink'); if (!bundled.valid) throw new Error('Bundled Plink failed SHA-256 verification'); executable = bundled.file; args = ['-telnet', resolvedSession.host, '-P', String(resolvedSession.port || 23)]; } }
+          else { executable = fs.existsSync('/usr/bin/telnet') ? '/usr/bin/telnet' : '/usr/bin/nc'; args = [resolvedSession.host, String(resolvedSession.port || 23)]; }
+        } else if (process.platform === 'win32') {
+          if (!/^COM\d{1,3}$/i.test(resolvedSession.host)) throw new Error('Serial device must use a COM port such as COM3');
+          executable = execFileSync('where.exe', ['powershell.exe'], { encoding: 'utf8', windowsHide: true }).split(/\r?\n/)[0].trim();
+          const script = `$p=New-Object System.IO.Ports.SerialPort '${resolvedSession.host.toUpperCase()}',${resolvedSession.baudRate || 115200},'None',8,'One';$p.Open();try{while($true){if($p.BytesToRead -gt 0){[Console]::Write($p.ReadExisting())};while([Console]::KeyAvailable){$k=[Console]::ReadKey($true);$p.Write([string]$k.KeyChar)};Start-Sleep -Milliseconds 10}}finally{$p.Close()}`;
+          args = ['-NoLogo', '-NoProfile', '-Command', script];
+        } else {
+          if (!/^\/dev\/[A-Za-z0-9._/-]+$/.test(resolvedSession.host)) throw new Error('Invalid serial TTY device'); executable = '/usr/bin/picocom'; args = ['--baud', String(resolvedSession.baudRate || 115200), resolvedSession.host];
+        }
+        if (!executable || !fs.existsSync(executable)) throw new Error(`${resolvedSession.type === 'serial' ? 'picocom' : 'telnet'} client is not installed`);
+        const child = nodePty.spawn(executable, args, { name: 'xterm-256color', cols: 120, rows: 32, cwd: path.resolve('.'), env: buildTerminalEnv(), useConpty: process.platform === 'win32' }); terminals.set(id, { process: child, id, localPty: true }); child.onData(data => { workspaceSuiteManager?.appendRecording(id, data); mainWindow?.webContents.send('terminal:data', { id, data }); }); child.onExit(({ exitCode }) => { terminals.delete(id); mainWindow?.webContents.send('terminal:exit', { id, code: exitCode }); });
+        return { id, name: resolvedSession.name, remote: true, pty: true, sessionId: resolvedSession.id, protocol: resolvedSession.type };
+      }
+      const { client, session, release } = await remoteAccessManager.lease(connection, 'terminal');
+      let stream; try { stream = await new Promise((resolve, reject) => client.shell({ term: 'xterm-256color', cols: 120, rows: 32 }, (error, value) => error ? reject(error) : resolve(value))); } catch (error) { release(); throw error; }
+      terminals.set(id, { process: stream, client, release, id, remote: true });
+      stream.on('data', data => { workspaceSuiteManager?.appendRecording(id, data.toString()); mainWindow?.webContents.send('terminal:data', { id, data: data.toString() }); });
+      stream.stderr?.on('data', data => { workspaceSuiteManager?.appendRecording(id, data.toString()); mainWindow?.webContents.send('terminal:data', { id, data: data.toString() }); });
+      stream.on('close', () => {
+        terminals.delete(id);
+        release();
+        mainWindow?.webContents.send('terminal:exit', { id, code: 0 });
+      });
+      if (session.tmuxSession) stream.write(`tmux new-session -A -s ${session.tmuxSession}\r`);
+      return { id, name: session.name, remote: true, pty: true, sessionId: session.id };
+    } catch (error) { return { success: false, error: error.message }; }
+  }
+  const profileId = connection?.localProfile || '';
+  const profiles = localShellProfiles();
+  const profile = profiles.find(item => item.id === profileId) || profiles.find(item => item.id === 'pwsh') || profiles[0];
+  if (!profile) return { success: false, error: 'No local shell is available' };
+  const child = nodePty.spawn(profile.executable, profile.args, { name: 'xterm-256color', cols: 120, rows: 32, cwd: path.resolve('.'), env: buildTerminalEnv(), useConpty: process.platform === 'win32' });
+  terminals.set(id, { process: child, id, localPty: true });
+  child.onData(data => { workspaceSuiteManager?.appendRecording(id, data); mainWindow?.webContents.send('terminal:data', { id, data }); });
+  child.onExit(({ exitCode }) => {
     terminals.delete(id);
-    mainWindow?.webContents.send('terminal:exit', { id, code });
+    mainWindow?.webContents.send('terminal:exit', { id, code: exitCode });
   });
-
-  return { id };
+  return { id, name: profile.name, pty: true, profileId: profile.id };
 });
 
 ipcMain.handle('terminal:write', (_event, id, data) => {
   const term = terminals.get(id);
   if (!term) return { success: false, error: 'Terminal not found' };
   if (typeof data !== 'string' || data.length > 65536) return { success: false, error: 'Invalid terminal input' };
-  term.process.stdin.write(data);
+  if (term.remote || term.localPty) term.process.write(data);
+  else term.process.stdin.write(data);
   return { success: true };
 });
 
@@ -807,13 +941,413 @@ ipcMain.handle('terminal:kill', (_event, id) => {
   const term = terminals.get(id);
   if (!term) return { success: false };
   try { term.process.kill(); } catch {}
+  try { term.release?.(); } catch {}
   terminals.delete(id);
   return { success: true };
 });
 
 ipcMain.handle('terminal:resize', (_event, id, cols, rows) => {
-  // Not applicable for cmd.exe pipe-based terminals, but accept for API compatibility
+  const term = terminals.get(id);
+  if (term?.remote && Number.isFinite(cols) && Number.isFinite(rows)) term.process.setWindow(rows, cols, 0, 0);
+  if (term?.localPty && Number.isFinite(cols) && Number.isFinite(rows)) term.process.resize(cols, rows);
   return { success: true };
+});
+app.on('will-quit', () => globalShortcut.unregisterAll());
+ipcMain.handle('update:rollback', () => { const result = updateManager.rollback(); if (result.success && result.launched) setTimeout(() => void quitAfterStoppingServices(), 750); return result; });
+ipcMain.handle('terminal:record-start', (_event, id, metadata) => auditOperation('terminal.record-start', id, () => workspaceSuiteManager.startRecording(id, metadata)));
+ipcMain.handle('terminal:record-stop', (_event, id) => auditOperation('terminal.record-stop', id, () => workspaceSuiteManager.stopRecording(id)));
+ipcMain.handle('terminal:record-list', () => workspaceSuiteManager.listRecordings());
+ipcMain.handle('terminal:record-export', async (_event, id, format) => { const exported = workspaceSuiteManager.exportRecording(id, format); const result = await dialog.showSaveDialog(mainWindow, { defaultPath: `terminal-${id}.${exported.extension}` }); if (result.canceled || !result.filePath) return { success: false, canceled: true }; fs.writeFileSync(result.filePath, exported.content, { mode: 0o600 }); return { success: true, filePath: result.filePath }; });
+
+// ===== Remote sessions / two-pane file manager =====
+ipcMain.handle('remote:list', () => remoteAccessManager.list());
+ipcMain.handle('remote:save', (_event, input, secrets) => auditOperation('remote.save', input?.id || input?.host || 'new', () => remoteAccessManager.save(input, secrets)));
+ipcMain.handle('remote:remove', (_event, id) => auditOperation('remote.remove', id, () => remoteAccessManager.remove(id)));
+ipcMain.handle('remote:duplicate', (_event, id) => auditOperation('remote.duplicate', id, () => remoteAccessManager.duplicate(id)));
+ipcMain.handle('remote:importProfiles', async () => { const result = await dialog.showOpenDialog(mainWindow, { title: 'Import OpenSSH, WinSCP or KitsuneServ profiles', properties: ['openFile'], filters: [{ name: 'Connection profiles', extensions: ['ini', 'conf', 'config', 'txt', 'json'] }] }); if (result.canceled || !result.filePaths[0]) return { success: false, canceled: true, imported: [] }; const file = result.filePaths[0]; return auditOperation('remote.import-profiles', path.basename(file), () => remoteAccessManager.importProfiles(fs.readFileSync(file, 'utf8'), path.extname(file).toLowerCase() === '.ini' ? 'winscp' : 'auto')); });
+ipcMain.handle('remote:exportProfiles', async () => { const result = await dialog.showSaveDialog(mainWindow, { title: 'Export portable session bundle', defaultPath: 'kitsuneserv-sessions.json', filters: [{ name: 'KitsuneServ sessions', extensions: ['json'] }] }); if (result.canceled || !result.filePath) return { success: false, canceled: true }; fs.writeFileSync(result.filePath, remoteAccessManager.exportProfiles(), { mode: 0o600 }); auditManager?.record({ source: 'desktop-ipc', action: 'remote.export-profiles', target: path.basename(result.filePath), success: true }); return { success: true, filePath: result.filePath }; });
+ipcMain.handle('portable:list', () => portableToolsManager.list());
+ipcMain.handle('portable:launch', (_event, id) => auditOperation('portable.launch', id, () => portableToolsManager.launch(id, [])));
+ipcMain.handle('remote:openWinScp', (_event, input) => auditOperation('portable.winscp', input?.id || input?.host || 'remote', () => { const session = remoteAccessManager.resolve(input); const host = session.host.includes(':') && !session.host.startsWith('[') ? `[${session.host}]` : session.host; const username = session.username ? `${encodeURIComponent(session.username)}@` : ''; const url = `sftp://${username}${host}:${session.port || 22}${session.remotePath || '/'}`; const args = ['/ini=nul', '/newinstance', url]; if (session.privateKeyPath) args.push(`/privatekey=${path.resolve(session.privateKeyPath)}`); if (session.hostFingerprint) args.push(`/hostkey=${session.hostFingerprint}`); return portableToolsManager.launch('winscp', args); }));
+ipcMain.handle('remote:openPuTTY', (_event, input) => auditOperation('portable.putty', input?.id || input?.host || 'remote', () => { const session = remoteAccessManager.resolve(input); const target = session.username ? `${session.username}@${session.host}` : session.host; const args = ['-ssh', target, '-P', String(session.port || 22)]; if (session.privateKeyPath) args.push('-i', path.resolve(session.privateKeyPath)); return portableToolsManager.launch('putty', args); }));
+ipcMain.handle('remote:resetHostKey', (_event, id) => auditOperation('remote.reset-host-key', id, () => remoteAccessManager.resetHostKey(id)));
+ipcMain.handle('remote:test', async (_event, input) => {
+  try { const { client } = await remoteAccessManager.connect(input); client.end(); return { success: true }; }
+  catch (error) { return { success: false, error: error.message }; }
+});
+ipcMain.handle('remote:diagnose', (_event, input) => auditOperation('remote.diagnose', input?.id || input?.host || 'remote', () => remoteAccessManager.diagnose(input)));
+ipcMain.handle('remote:inspect', (_event, input, kind) => remoteOperationsManager.inspect(input, kind));
+ipcMain.handle('remote:docker', (_event, input, action, target) => auditOperation(`remote.docker-${action}`, target, () => remoteOperationsManager.docker(input, action, target)));
+ipcMain.handle('remote:systemd', (_event, input, action, unit) => auditOperation(`remote.systemd-${action}`, unit, () => remoteOperationsManager.systemd(input, action, unit)));
+ipcMain.handle('remote:signal', (_event, input, pid, signal) => auditOperation(`remote.signal-${signal}`, String(pid), () => remoteOperationsManager.signal(input, pid, signal)));
+ipcMain.handle('remote:archive', (_event, input, action, source, destination) => auditOperation(`remote.archive-${action}`, source, () => remoteOperationsManager.archive(input, action, source, destination)));
+ipcMain.handle('remote:wake', (_event, mac, address, port) => auditOperation('remote.wake-on-lan', mac, () => remoteOperationsManager.wake(mac, address, port)));
+ipcMain.handle('remote:deploy', (event, input, options) => auditOperation('remote.deploy', options?.remoteDirectory || '', () => remoteOperationsManager.deploy(input, options, progress => { if (!event.sender.isDestroyed()) event.sender.send('remote:deploy-progress', progress); })));
+ipcMain.handle('devops:git', (_event, input, repository, action, options) => auditOperation(`devops.git-${action}`, repository, () => remoteDevOpsManager.git(input, repository, action, options)));
+ipcMain.handle('devops:compose', (_event, input, directory, action, service) => auditOperation(`devops.compose-${action}`, directory, () => remoteDevOpsManager.compose(input, directory, action, service)));
+ipcMain.handle('devops:kubernetes', (_event, input, action, options) => auditOperation(`devops.kubernetes-${action}`, options?.pod || options?.namespace || '', () => remoteDevOpsManager.kubernetes(input, action, options)));
+ipcMain.handle('devops:metrics', (_event, input) => remoteDevOpsManager.metrics(input));
+ipcMain.handle('devops:alerts', (_event, input, thresholds) => remoteDevOpsManager.alerts(input, thresholds));
+ipcMain.handle('devops:http', (_event, request) => auditOperation('devops.http', request?.url || '', () => remoteDevOpsManager.httpRequest(request), { method: request?.method || 'GET' }));
+ipcMain.handle('suite:capabilities', () => workspaceSuiteManager.capabilities());
+ipcMain.handle('suite:vault-import', (_event, provider, reference, sessionId, options) => auditOperation('suite.vault-import', `${provider}:${sessionId}`, () => workspaceSuiteManager.importVaultSecret(provider, reference, sessionId, options)));
+ipcMain.handle('suite:keys', () => workspaceSuiteManager.listKeys());
+ipcMain.handle('suite:key-generate', (_event, input) => auditOperation('suite.key-generate', input?.name || 'new', () => workspaceSuiteManager.generateKey(input)));
+ipcMain.handle('suite:key-remove', (_event, id) => auditOperation('suite.key-remove', id, () => workspaceSuiteManager.removeKey(id)));
+ipcMain.handle('suite:key-install', (_event, connection, id) => auditOperation('suite.key-install', id, () => workspaceSuiteManager.installKey(connection, id)));
+ipcMain.handle('suite:key-rotate', (_event, connection, id, passphrase) => auditOperation('suite.key-rotate', id, () => workspaceSuiteManager.rotateKey(connection, id, passphrase)));
+ipcMain.handle('suite:snapshot', (_event, file) => auditOperation('suite.snapshot', file, () => workspaceSuiteManager.snapshotLocal(file)));
+ipcMain.handle('suite:snapshots', () => workspaceSuiteManager.listSnapshots());
+ipcMain.handle('suite:snapshot-restore', (_event, id) => auditOperation('suite.snapshot-restore', id, () => workspaceSuiteManager.restoreSnapshot(id)));
+ipcMain.handle('suite:merge3', (_event, base, local, remote) => workspaceSuiteManager.merge3(base, local, remote));
+ipcMain.handle('suite:state', () => workspaceSuiteManager.listState());
+ipcMain.handle('suite:run-due', () => auditOperation('suite.run-due', 'schedules', () => workspaceSuiteManager.runDue()));
+ipcMain.handle('suite:item-save', (_event, collection, input) => auditOperation(`suite.${collection}-save`, input?.id || input?.name || 'new', () => workspaceSuiteManager.saveItem(collection, input)));
+ipcMain.handle('suite:item-remove', (_event, collection, id) => auditOperation(`suite.${collection}-remove`, id, () => workspaceSuiteManager.removeItem(collection, id)));
+ipcMain.handle('suite:handoff-create', (_event, sessionId, recipient, ttl) => auditOperation('suite.handoff-create', sessionId, () => workspaceSuiteManager.createHandoff(sessionId, recipient, ttl)));
+ipcMain.handle('suite:handoff-consume', (_event, id, token) => auditOperation('suite.handoff-consume', id, () => workspaceSuiteManager.consumeHandoff(id, token)));
+ipcMain.handle('advanced:graph', () => advancedOpsManager.graph());
+ipcMain.handle('advanced:commands', () => advancedOpsManager.commandCatalog());
+ipcMain.handle('advanced:configuration', () => advancedOpsManager.configuration());
+ipcMain.handle('advanced:workspaces', () => advancedOpsManager.listSmartWorkspaces());
+ipcMain.handle('advanced:workspace-save', (_event, input) => auditOperation('advanced.workspace-save', input?.name || 'new', () => advancedOpsManager.saveSmartWorkspace(input)));
+ipcMain.handle('advanced:search', (_event, query, options) => advancedOpsManager.globalSearch(query, options));
+ipcMain.handle('advanced:replace-preview', (_event, query, replacement, options) => advancedOpsManager.replacePreview(query, replacement, options));
+ipcMain.handle('advanced:replace-apply', (_event, preview, approved) => auditOperation('advanced.replace-apply', `${approved?.length || 0} files`, () => advancedOpsManager.replaceApply(preview, approved)));
+ipcMain.handle('advanced:replace-rollback', (_event, id) => auditOperation('advanced.replace-rollback', id, () => advancedOpsManager.replaceRollback(id)));
+ipcMain.handle('advanced:secret-scan', (_event, content, label) => advancedOpsManager.secretScan(content, label));
+ipcMain.handle('advanced:preflight', (_event, input, options) => advancedOpsManager.preflight(input, options));
+ipcMain.handle('advanced:infrastructure-capture', (_event, input) => advancedOpsManager.captureInfrastructure(input));
+ipcMain.handle('advanced:infrastructure-diff', (_event, left, right) => advancedOpsManager.diffInfrastructure(left, right));
+ipcMain.handle('advanced:baseline-set', (_event, input) => auditOperation('advanced.baseline-set', input?.id || input?.host || '', () => advancedOpsManager.setBaseline(input)));
+ipcMain.handle('advanced:drift', (_event, input) => advancedOpsManager.checkDrift(input));
+ipcMain.handle('advanced:blast-radius', (_event, input) => advancedOpsManager.blastRadius(input));
+ipcMain.handle('advanced:digital-twin', (_event, capture, operation) => advancedOpsManager.digitalTwin(capture, operation));
+ipcMain.handle('advanced:timeline', (_event, sessionId) => advancedOpsManager.timelineList(sessionId));
+ipcMain.handle('advanced:timeline-record', (_event, input) => advancedOpsManager.timelineRecord(input));
+ipcMain.handle('advanced:time-machine-capture', (_event, input, options) => auditOperation('advanced.time-machine-capture', input?.id || '', () => advancedOpsManager.timeMachineCapture(input, options)));
+ipcMain.handle('advanced:time-machine-list', (_event, sessionId) => advancedOpsManager.listTimeMachine(sessionId));
+ipcMain.handle('advanced:time-machine-restore', (_event, id, input, paths) => auditOperation('advanced.time-machine-restore', id, () => advancedOpsManager.timeMachineRestore(id, input, paths)));
+ipcMain.handle('advanced:shadow-deploy', (event, input, options) => auditOperation('advanced.shadow-deploy', options?.liveLink || '', () => advancedOpsManager.shadowDeploy(input, options, progress => { if (!event.sender.isDestroyed()) event.sender.send('remote:deploy-progress', progress); })));
+ipcMain.handle('advanced:shadow-promote', (_event, input, shadow) => auditOperation('advanced.shadow-promote', shadow?.releasePath || '', () => advancedOpsManager.promoteShadow(input, shadow)));
+ipcMain.handle('advanced:replay-save', (_event, input) => advancedOpsManager.saveReplay(input));
+ipcMain.handle('advanced:replay-run', (_event, id, input) => auditOperation('advanced.replay-run', id, () => advancedOpsManager.runReplay(id, input, { runbook: (session, runbookId, parameters) => remoteOperationsManager.runRunbook(session, runbookId, parameters) })));
+ipcMain.handle('advanced:logs-correlate', (_event, sources) => advancedOpsManager.logCorrelate(sources));
+ipcMain.handle('advanced:anomaly', (_event, samples) => advancedOpsManager.anomaly(samples));
+ipcMain.handle('advanced:metric-record', (_event, sessionId, metrics) => advancedOpsManager.recordMetric(sessionId, metrics));
+ipcMain.handle('advanced:anomaly-baseline', (_event, sessionId) => advancedOpsManager.anomalyBaseline(sessionId));
+ipcMain.handle('advanced:explain', (_event, value) => advancedOpsManager.explainError(value));
+ipcMain.handle('advanced:safe-command', (_event, kind, input) => advancedOpsManager.safeCommand(kind, input));
+ipcMain.handle('advanced:health-save', (_event, input) => advancedOpsManager.saveHealthContract(input));
+ipcMain.handle('advanced:health-evaluate', (_event, id) => advancedOpsManager.evaluateHealthContract(id));
+ipcMain.handle('advanced:maintenance-save', (_event, input) => advancedOpsManager.saveMaintenanceWindow(input));
+ipcMain.handle('advanced:maintenance-check', (_event, sessionId, operation, at) => advancedOpsManager.maintenanceAllowed(sessionId, operation, at ? new Date(at) : new Date()));
+ipcMain.handle('advanced:dns', (_event, hostname) => advancedOpsManager.dnsInspect(hostname));
+ipcMain.handle('advanced:dns-propagation', (_event, hostname, type) => advancedOpsManager.dnsPropagation(hostname, type));
+ipcMain.handle('advanced:certificate', (_event, hostname, port) => advancedOpsManager.certificateInspect(hostname, port));
+ipcMain.handle('incident:list', () => incidentManager.list());
+ipcMain.handle('incident:start', (_event, input) => auditOperation('incident.start', input?.title || '', () => incidentManager.start(input)));
+ipcMain.handle('incident:update', (_event, id, patch) => auditOperation('incident.update', id, () => incidentManager.update(id, patch)));
+ipcMain.handle('incident:collect', (_event, id, input) => auditOperation('incident.collect', id, () => incidentManager.collect(id, input)));
+ipcMain.handle('incident:capsule', (_event, id) => auditOperation('incident.capsule', id, () => incidentManager.capsule(id)));
+ipcMain.handle('incident:suggest-runbook', (_event, id) => incidentManager.suggestRunbook(id));
+ipcMain.handle('collab:start', (_event, input) => incidentManager.collaborationStart(input));
+ipcMain.handle('collab:join', (_event, id, participant) => incidentManager.collaborationJoin(id, participant));
+ipcMain.handle('collab:control', (_event, id, participantId, actorId) => incidentManager.transferControl(id, participantId, actorId));
+ipcMain.handle('collab:lock', (_event, sessionId, filePath, participantId) => incidentManager.lockFile(sessionId, filePath, participantId));
+ipcMain.handle('collab:event', (_event, id, participantId, value) => incidentManager.collaborationEvent(id, participantId, value));
+ipcMain.handle('collab:events', (_event, id, since) => incidentManager.collaborationEvents(id, since));
+ipcMain.handle('resilience:capabilities', () => resilienceManager.capabilities());
+ipcMain.handle('resilience:ssh-ca-create', (_event, name, passphrase) => auditOperation('resilience.ssh-ca-create', name, () => resilienceManager.createSshCa(name, passphrase)));
+ipcMain.handle('resilience:ssh-sign', (_event, caId, publicKeyPath, identity, principals, validity) => auditOperation('resilience.ssh-sign', identity, () => resilienceManager.signSshKey(caId, publicKeyPath, identity, principals, validity)));
+ipcMain.handle('resilience:ssh-ca-install', (_event, input, caId) => auditOperation('resilience.ssh-ca-install', caId, () => resilienceManager.installSshCa(input, caId)));
+ipcMain.handle('resilience:mosh', (_event, input) => auditOperation('resilience.mosh', input?.id || '', () => resilienceManager.openMosh(input)));
+ipcMain.handle('resilience:ports', (_event, input) => resilienceManager.portInspect(input));
+ipcMain.handle('resilience:db-tunnel', (_event, input, options) => auditOperation('resilience.db-tunnel', String(options?.remotePort || ''), () => resilienceManager.databaseTunnel(input, options)));
+ipcMain.handle('resilience:cron', (_event, input, action, options) => auditOperation(`resilience.cron-${action}`, input?.id || '', () => resilienceManager.cron(input, action, options)));
+ipcMain.handle('resilience:timer', (_event, input, action, options) => auditOperation(`resilience.timer-${action}`, options?.name || '', () => resilienceManager.systemdTimer(input, action, options)));
+ipcMain.handle('resilience:firewall', async (_event, input, action, rule, execute) => { const plan = await resilienceManager.firewall(input, action, rule); if (action === 'status' || !execute) return action === 'status' ? plan : { success: true, preview: plan.preview }; return auditOperation(`resilience.firewall-${action}`, String(rule?.port || ''), () => plan.execute()); });
+ipcMain.handle('resilience:certificate-renew', (_event, input, provider, domain) => auditOperation('resilience.certificate-renew', domain, () => resilienceManager.certificateRenew(input, provider, domain)));
+ipcMain.handle('resilience:cache-put', (_event, file) => resilienceManager.cachePut(file));
+ipcMain.handle('resilience:cache-restore', (_event, hash, target) => resilienceManager.cacheRestore(hash, target));
+ipcMain.handle('resilience:transfer-limited', (_event, input, direction, local, remote, rate) => auditOperation('resilience.transfer-limited', remote, () => resilienceManager.transferLimited(input, direction, local, remote, rate)));
+ipcMain.handle('resilience:backup', (_event, source, name) => auditOperation('resilience.deduplicated-backup', source, () => resilienceManager.deduplicatedBackup(source, name)));
+ipcMain.handle('resilience:backup-restore', (_event, id, target) => auditOperation('resilience.deduplicated-restore', id, () => resilienceManager.restoreDeduplicated(id, target)));
+ipcMain.handle('resilience:offline-vault', (_event, input) => auditOperation('resilience.offline-vault', 'export', () => resilienceManager.offlineVaultCreate(input)));
+ipcMain.handle('resilience:break-glass-create', (_event, input) => auditOperation('resilience.break-glass-create', input?.sessionId || '', () => resilienceManager.breakGlassCreate(input)));
+ipcMain.handle('resilience:break-glass-consume', (_event, id, code, authentication) => auditOperation('resilience.break-glass-consume', id, () => { const verified = identityManager.authenticate(authentication?.username, authentication?.password, authentication?.secondFactor); if (!verified.success) throw new Error(verified.error); return resilienceManager.breakGlassConsume(id, code, true); }));
+ipcMain.handle('fabric:summary', () => operationsFabricManager.summary());
+ipcMain.handle('fabric:policy-save', (_event, input) => auditOperation('fabric.policy-save', input?.name || 'new', () => operationsFabricManager.savePolicy(input)));
+ipcMain.handle('fabric:policy-evaluate', (_event, context) => operationsFabricManager.evaluatePolicy(context));
+ipcMain.handle('fabric:access-request', (_event, input = {}) => auditOperation('fabric.access-request', input.sessionId || '', () => { const authentication = input.authentication || {}; const verified = identityManager.authenticate(authentication.username, authentication.password, authentication.secondFactor); if (!verified.success) throw new Error(verified.error || 'Authentication failed'); return operationsFabricManager.requestAccess({ ...input, authentication: undefined, mfaVerified: true, approvals: 1, approvedBy: [authentication.username] }); }));
+ipcMain.handle('fabric:access-begin', (_event, input) => auditOperation('fabric.access-begin', input?.sessionId || '', () => operationsFabricManager.beginAccessRequest(input)));
+ipcMain.handle('fabric:access-approve', (_event, requestId, authentication = {}) => auditOperation('fabric.access-approve', requestId, () => { const verified = identityManager.authenticate(authentication.username, authentication.password, authentication.secondFactor); if (!verified.success) throw new Error(verified.error || 'Authentication failed'); return operationsFabricManager.approveAccessRequest(requestId, authentication.username, true); }));
+ipcMain.handle('fabric:access-consume', (_event, token, scope) => auditOperation('fabric.access-consume', scope, () => operationsFabricManager.consumeAccess(token, scope)));
+ipcMain.handle('fabric:secret-lease-create', (_event, input) => auditOperation('fabric.secret-lease-create', input?.reference || '', () => operationsFabricManager.createSecretLease(input), { scopes: input?.scopes || [] }));
+ipcMain.handle('fabric:secret-lease-use', (_event, leaseId, input, environmentName, command) => auditOperation('fabric.secret-lease-use', leaseId, () => {
+  const variable = String(environmentName || 'KITSUNE_SECRET'); if (!/^[A-Z_][A-Z0-9_]{0,63}$/.test(variable)) throw new Error('Invalid environment variable name'); const bounded = String(command || '').trim().slice(0, 8000); if (!bounded || /[\0\r\n]/.test(bounded)) throw new Error('A single-line remote command is required');
+  return operationsFabricManager.consumeSecretLease(leaseId, 'remote-env', secret => { const encoded = Buffer.from(secret).toString('base64'); return remoteOperationsManager.exec(input, `${variable}=$(printf %s '${encoded}' | base64 -d); export ${variable}; (${bounded}); unset ${variable}`, 300000); });
+}));
+ipcMain.handle('fabric:service-map', (_event, input) => operationsFabricManager.serviceMap(input));
+ipcMain.handle('fabric:gitops-export', (_event, capture, format, target) => auditOperation('fabric.gitops-export', target, () => operationsFabricManager.gitOpsExport(capture, format, target)));
+ipcMain.handle('fabric:gitops-plan', (_event, observed, desired) => operationsFabricManager.gitOpsPlan(observed, desired));
+ipcMain.handle('fabric:synthetic-save', (_event, input) => auditOperation('fabric.synthetic-save', input?.name || '', () => operationsFabricManager.saveSynthetic(input)));
+ipcMain.handle('fabric:synthetic-run', (_event, id) => auditOperation('fabric.synthetic-run', id, () => operationsFabricManager.runSynthetic(id)));
+ipcMain.handle('fabric:synthetic-run-due', () => operationsFabricManager.runDueSynthetics());
+ipcMain.handle('fabric:canary-save', (_event, input) => auditOperation('fabric.canary-save', input?.name || '', () => operationsFabricManager.saveCanary(input)));
+ipcMain.handle('fabric:canary-advance', (_event, id, metrics) => auditOperation('fabric.canary-advance', id, () => operationsFabricManager.advanceCanary(id, metrics)));
+ipcMain.handle('fabric:network-record', (_event, input, options) => auditOperation('fabric.network-record', input?.id || '', () => operationsFabricManager.networkFlightRecorder(input, options)));
+ipcMain.handle('fabric:offline-mount-save', (_event, input) => auditOperation('fabric.offline-mount-save', input?.name || '', () => operationsFabricManager.saveOfflineMount(input)));
+ipcMain.handle('fabric:offline-stage', (_event, id, relativePath, content, baseHash) => operationsFabricManager.stageOfflineChange(id, relativePath, content, baseHash));
+ipcMain.handle('fabric:offline-reconcile', (_event, id) => auditOperation('fabric.offline-reconcile', id, () => operationsFabricManager.reconcileOfflineMount(id)));
+ipcMain.handle('fabric:db-schema-diff', (_event, left, right) => operationsFabricManager.databaseSchemaDiff(left, right));
+ipcMain.handle('fabric:db-erd', (_event, schema) => operationsFabricManager.databaseErd(schema));
+ipcMain.handle('fabric:db-mask', (_event, rows, rules) => operationsFabricManager.maskRows(rows, rules));
+ipcMain.handle('fabric:db-schema-capture', (_event, connection, database) => operationsFabricManager.captureDatabaseSchema(connection, database));
+ipcMain.handle('fabric:db-masked-export', (_event, connection, database, target, limit) => auditOperation('fabric.db-masked-export', database, () => operationsFabricManager.exportMaskedDatabase(connection, database, target, limit)));
+ipcMain.handle('fabric:dr-simulate', (_event, backupId) => auditOperation('fabric.dr-simulate', backupId, () => operationsFabricManager.simulateDisaster(backupId)));
+ipcMain.handle('fabric:ephemeral-save', (_event, input) => auditOperation('fabric.ephemeral-save', input?.name || '', () => operationsFabricManager.saveEphemeral(input)));
+ipcMain.handle('fabric:ephemeral-cleanup', () => auditOperation('fabric.ephemeral-cleanup', 'expired', () => operationsFabricManager.cleanupEphemeral()));
+ipcMain.handle('fabric:fleet-run', (_event, sessionIds, template, parameters, options) => auditOperation('fabric.fleet-run', `${sessionIds?.length || 0} servers`, () => operationsFabricManager.fleetRun(sessionIds, template, parameters, options), { template, batchSize: options?.batchSize }));
+ipcMain.handle('fabric:remote-desktop-save', (_event, input) => auditOperation('fabric.remote-desktop-save', input?.name || '', () => operationsFabricManager.saveRemoteDesktop(input)));
+ipcMain.handle('fabric:rescue-create', (_event, input) => auditOperation('fabric.rescue-create', input?.target || '', () => operationsFabricManager.rescueEnvironment(input)));
+ipcMain.handle('fabric:evidence-seal', (_event, payload) => auditOperation('fabric.evidence-seal', payload?.kind || '', () => operationsFabricManager.sealEvidence(payload)));
+ipcMain.handle('fabric:evidence-verify', (_event, id) => operationsFabricManager.verifyEvidence(id));
+ipcMain.handle('fabric:copilot', (_event, context) => operationsFabricManager.localCopilot(context));
+ipcMain.handle('fabric:replay-create', (_event, file) => auditOperation('fabric.replay-create', file, () => operationsFabricManager.createReplayLab(file)));
+ipcMain.handle('fabric:replay-simulate', (_event, id, action) => operationsFabricManager.simulateReplay(id, action));
+
+// ===== Enterprise operations / Kitsune Agent =====
+ipcMain.handle('enterprise:summary', () => enterpriseOpsManager.summary());
+ipcMain.handle('enterprise:configuration', () => enterpriseOpsManager.configuration());
+ipcMain.handle('enterprise:agent-list', () => enterpriseOpsManager.listAgents());
+ipcMain.handle('enterprise:agent-enroll', (_event, input) => auditOperation('enterprise.agent-enroll', input?.name || input?.endpoint || '', () => enterpriseOpsManager.enrollAgent(input)));
+ipcMain.handle('enterprise:agent-remove', (_event, id) => auditOperation('enterprise.agent-remove', id, () => enterpriseOpsManager.removeAgent(id)));
+ipcMain.handle('enterprise:agent-probe', (_event, id) => enterpriseOpsManager.probeAgent(id));
+ipcMain.handle('enterprise:agent-bootstrap', (_event, input) => enterpriseOpsManager.agentBootstrap(input));
+ipcMain.handle('enterprise:slo-save', (_event, input) => auditOperation('enterprise.slo-save', input?.name || '', () => enterpriseOpsManager.saveSlo(input)));
+ipcMain.handle('enterprise:slo-record', (_event, id, sample) => enterpriseOpsManager.recordSlo(id, sample));
+ipcMain.handle('enterprise:slo-evaluate', () => enterpriseOpsManager.evaluateSlos());
+ipcMain.handle('enterprise:capacity-record', (_event, resource, value, at) => enterpriseOpsManager.recordCapacity(resource, value, at));
+ipcMain.handle('enterprise:capacity-forecast', (_event, resource, limit) => enterpriseOpsManager.forecastCapacity(resource, limit));
+ipcMain.handle('enterprise:patch-save', (_event, input) => auditOperation('enterprise.patch-save', input?.name || '', () => enterpriseOpsManager.savePatchPlan(input)));
+ipcMain.handle('enterprise:patch-run', (_event, id, options) => auditOperation('enterprise.patch-run', id, () => enterpriseOpsManager.runPatchPlan(id, options)));
+ipcMain.handle('enterprise:reboot-plan', (_event, input) => enterpriseOpsManager.planReboots(input));
+ipcMain.handle('enterprise:reboot-run', (_event, id, options) => auditOperation('enterprise.reboot-run', id, () => enterpriseOpsManager.runReboots(id, options)));
+ipcMain.handle('enterprise:compliance-save', (_event, input) => enterpriseOpsManager.saveComplianceBaseline(input));
+ipcMain.handle('enterprise:compliance-scan', (_event, id, sessions) => auditOperation('enterprise.compliance-scan', id, () => enterpriseOpsManager.scanCompliance(id, sessions)));
+ipcMain.handle('enterprise:supply-chain-scan', (_event, input) => enterpriseOpsManager.scanSupplyChain(input));
+ipcMain.handle('enterprise:image-promote', (_event, input) => auditOperation('enterprise.image-promote', input?.digest || '', () => enterpriseOpsManager.promoteImage(input)));
+ipcMain.handle('enterprise:airgap-create', (_event, input) => auditOperation('enterprise.airgap-create', input?.destination || '', () => enterpriseOpsManager.createAirgapBackup(input)));
+ipcMain.handle('enterprise:airgap-verify', (_event, id) => enterpriseOpsManager.verifyAirgap(id));
+ipcMain.handle('enterprise:oidc-save', (_event, input) => enterpriseOpsManager.saveOidcProfile(input));
+ipcMain.handle('enterprise:oidc-login', (_event, id) => auditOperation('enterprise.oidc-login', id, () => enterpriseOpsManager.loginOidc(id)));
+ipcMain.handle('enterprise:chaos-save', (_event, input) => enterpriseOpsManager.saveChaosExperiment(input));
+ipcMain.handle('enterprise:chaos-run', (_event, id, options) => auditOperation('enterprise.chaos-run', id, () => enterpriseOpsManager.runChaos(id, options)));
+ipcMain.handle('enterprise:remediation-save', (_event, input) => enterpriseOpsManager.saveRemediationRule(input));
+ipcMain.handle('enterprise:autonomous-sandbox', (_event, context) => enterpriseOpsManager.autonomousSandbox(context));
+ipcMain.handle('enterprise:migration-rehearse', (_event, connection, database, sql) => auditOperation('enterprise.migration-rehearse', database, () => enterpriseOpsManager.rehearseMigration(connection, database, sql)));
+ipcMain.handle('enterprise:config-validate', (_event, input) => enterpriseOpsManager.validateConfig(input));
+ipcMain.handle('enterprise:cloud-init', (_event, input) => auditOperation('enterprise.cloud-init', input?.hostname || '', () => enterpriseOpsManager.generateCloudInit(input)));
+ipcMain.handle('enterprise:region-save', (_event, input) => enterpriseOpsManager.saveRegion(input));
+ipcMain.handle('enterprise:failover-plan', (_event, fromId, toId) => enterpriseOpsManager.failoverPlan(fromId, toId));
+ipcMain.handle('enterprise:marketplace-install', (_event, input) => auditOperation('enterprise.marketplace-install', input?.payload?.name || '', () => enterpriseOpsManager.installMarketplacePack(input)));
+
+// ===== Next-generation operations =====
+ipcMain.handle('nextgen:summary', () => nextgenOpsManager.summary());
+ipcMain.handle('nextgen:configuration', () => nextgenOpsManager.configuration());
+ipcMain.handle('nextgen:relay-save', (_event, input) => nextgenOpsManager.saveRelayNode(input));
+ipcMain.handle('nextgen:relay-route', (_event, fromId, toId) => nextgenOpsManager.routeRelay(fromId, toId));
+ipcMain.handle('nextgen:relay-bootstrap', (_event, input) => nextgenOpsManager.relayBootstrap(input));
+ipcMain.handle('nextgen:capability-issue', (_event, input) => auditOperation('nextgen.capability-issue', input?.resource || '', () => nextgenOpsManager.issueCapability(input)));
+ipcMain.handle('nextgen:capability-use', (_event, id, parameters) => auditOperation('nextgen.capability-use', id, () => nextgenOpsManager.useCapability(id, parameters)));
+ipcMain.handle('nextgen:shell-parse', (_event, transcript) => nextgenOpsManager.parseShellTranscript(transcript));
+ipcMain.handle('nextgen:delta-signature', (_event, file, blockSize) => nextgenOpsManager.deltaSignature(file, blockSize));
+ipcMain.handle('nextgen:delta-plan', (_event, file, signature) => nextgenOpsManager.deltaPlan(file, signature));
+ipcMain.handle('nextgen:delta-apply', (_event, source, destination, plan) => auditOperation('nextgen.delta-apply', destination, () => nextgenOpsManager.deltaApply(source, destination, plan)));
+ipcMain.handle('nextgen:snapshot-create', (_event, input) => auditOperation('nextgen.snapshot-create', input?.source || '', () => nextgenOpsManager.createFilesystemSnapshot(input)));
+ipcMain.handle('nextgen:snapshot-browse', (_event, id, prefix) => nextgenOpsManager.browseSnapshot(id, prefix));
+ipcMain.handle('nextgen:snapshot-restore', (_event, id, relative, target) => auditOperation('nextgen.snapshot-restore', target, () => nextgenOpsManager.restoreSnapshotFile(id, relative, target)));
+ipcMain.handle('nextgen:ransomware-baseline', (_event, root) => nextgenOpsManager.ransomwareBaseline(root));
+ipcMain.handle('nextgen:ransomware-scan', (_event, root, thresholds) => nextgenOpsManager.ransomwareScan(root, thresholds));
+ipcMain.handle('nextgen:desktop-save', (_event, input) => nextgenOpsManager.saveDesktopGateway(input));
+ipcMain.handle('nextgen:ssh-policy-save', (_event, input) => nextgenOpsManager.saveSshCertificatePolicy(input));
+ipcMain.handle('nextgen:ssh-certificate-issue', (_event, policyId, publicKey, identity, authentication = {}) => auditOperation('nextgen.ssh-certificate-issue', identity, () => { const verified = identityManager.authenticate(authentication.username, authentication.password, authentication.secondFactor); if (!verified.success) throw new Error(verified.error || 'Fresh MFA authentication failed'); return nextgenOpsManager.issueSshCertificate(policyId, publicKey, identity, true); }));
+ipcMain.handle('nextgen:ebpf', (_event, input, kind) => nextgenOpsManager.ebpfDiagnostics(input, kind));
+ipcMain.handle('nextgen:network-twin', (_event, input) => nextgenOpsManager.networkDigitalTwin(input));
+ipcMain.handle('nextgen:transaction', (_event, input, steps, options) => auditOperation('nextgen.remote-transaction', input?.id || '', () => nextgenOpsManager.remoteTransaction(input, steps, options)));
+ipcMain.handle('nextgen:pair-create', (_event, input) => nextgenOpsManager.pairSession(input));
+ipcMain.handle('nextgen:pair-propose', (_event, id, action, actor) => nextgenOpsManager.pairPropose(id, action, actor));
+ipcMain.handle('nextgen:pair-approve', (_event, id, actor) => nextgenOpsManager.pairApprove(id, actor));
+ipcMain.handle('nextgen:mobile-create', (_event, input) => nextgenOpsManager.createMobileApproval(input));
+ipcMain.handle('nextgen:mobile-resolve', (_event, id, challenge, decision, authentication = {}) => { const verified = identityManager.authenticate(authentication.username, authentication.password, authentication.secondFactor); if (!verified.success) throw new Error(verified.error || 'Fresh MFA authentication failed'); return nextgenOpsManager.resolveMobileApproval(id, challenge, decision, { verified: true, username: authentication.username }); });
+ipcMain.handle('nextgen:wasm-run', (_event, input) => auditOperation('nextgen.wasm-run', input?.file || '', () => nextgenOpsManager.runWasm(input)));
+ipcMain.handle('nextgen:blackbox-record', (_event, event) => nextgenOpsManager.blackBoxRecord(event));
+ipcMain.handle('nextgen:blackbox-export', (_event, minutes) => nextgenOpsManager.exportBlackBox(minutes));
+ipcMain.handle('nextgen:dna-capture', (_event, input) => nextgenOpsManager.captureServerDna(input));
+ipcMain.handle('nextgen:dna-compare', (_event, left, right) => nextgenOpsManager.compareServerDna(left, right));
+ipcMain.handle('nextgen:connectivity-heal', (_event, input) => nextgenOpsManager.selfHealConnectivity(input));
+ipcMain.handle('nextgen:intent-plan', (_event, input) => nextgenOpsManager.planIntent(input));
+ipcMain.handle('nextgen:simulator-create', (_event, input) => nextgenOpsManager.createFlightSimulator(input));
+ipcMain.handle('nextgen:simulator-run', (_event, id, response) => nextgenOpsManager.runFlightSimulator(id, response));
+
+// ===== Terminal & File Manager Operations Workspace =====
+ipcMain.handle('opsWorkspace:summary', () => operationsWorkspaceManager.summary());
+ipcMain.handle('opsWorkspace:configuration', () => operationsWorkspaceManager.configuration());
+ipcMain.handle('opsWorkspace:save', (_event, input) => operationsWorkspaceManager.saveUniversalWorkspace(input));
+ipcMain.handle('opsWorkspace:resume', (_event, id) => operationsWorkspaceManager.resumeWorkspace(id));
+ipcMain.handle('opsWorkspace:timelineRecord', (_event, input) => operationsWorkspaceManager.recordCommandEffect(input));
+ipcMain.handle('opsWorkspace:timeline', (_event, sessionId, options) => operationsWorkspaceManager.timeline(sessionId, options));
+ipcMain.handle('opsWorkspace:undoPlan', (_event, id) => operationsWorkspaceManager.undoPlan(id));
+ipcMain.handle('opsWorkspace:undoExecute', (_event, id, approved) => auditOperation('ops-workspace.undo', id, () => operationsWorkspaceManager.undoExecute(id, approved)));
+ipcMain.handle('opsWorkspace:connectionDoctor', (_event, id) => operationsWorkspaceManager.connectionDoctor(id));
+ipcMain.handle('opsWorkspace:smartTransfer', (_event, input) => operationsWorkspaceManager.smartTransferPlan(input));
+ipcMain.handle('opsWorkspace:fleetPreview', (_event, ids, template, parameters, options) => operationsWorkspaceManager.fleetPreview(ids, template, parameters, options));
+ipcMain.handle('opsWorkspace:fleetExecute', (_event, preview, approved) => auditOperation('ops-workspace.fleet', `${preview?.sessions?.length || 0} servers`, () => operationsWorkspaceManager.fleetExecute(preview, approved)));
+ipcMain.handle('opsWorkspace:environmentDiff', (_event, left, right) => operationsWorkspaceManager.environmentDiff(left, right));
+ipcMain.handle('opsWorkspace:disposableRescue', (_event, input) => operationsWorkspaceManager.createDisposableRescue(input));
+ipcMain.handle('opsWorkspace:portableRescue', (_event, input) => operationsWorkspaceManager.createPortableRescueKit(input));
+ipcMain.handle('opsWorkspace:memoryRecord', (_event, input) => operationsWorkspaceManager.recordMemory(input));
+ipcMain.handle('opsWorkspace:memorySearch', (_event, query, sessionId) => operationsWorkspaceManager.searchMemory(query, sessionId));
+ipcMain.handle('opsWorkspace:multiplexerSave', (_event, input) => operationsWorkspaceManager.saveMultiplexer(input));
+ipcMain.handle('opsWorkspace:autocomplete', (_event, input) => operationsWorkspaceManager.policyAutocomplete(input));
+ipcMain.handle('opsWorkspace:incidentRoom', (_event, input) => auditOperation('ops-workspace.incident-room', input?.title || '', () => operationsWorkspaceManager.createIncidentRoom(input)));
+ipcMain.handle('opsWorkspace:collaborativeChange', (_event, input) => operationsWorkspaceManager.collaborativeFileChange(input));
+ipcMain.handle('opsWorkspace:movie', (_event, sessionId, options) => operationsWorkspaceManager.infrastructureMovie(sessionId, options));
+ipcMain.handle('opsWorkspace:blastRadius', (_event, sessionId, operation) => operationsWorkspaceManager.liveBlastRadius(sessionId, operation));
+ipcMain.handle('opsWorkspace:networkReplayCreate', (_event, input) => operationsWorkspaceManager.createNetworkReplay(input));
+ipcMain.handle('opsWorkspace:networkReplayRun', (_event, id, response) => operationsWorkspaceManager.runNetworkReplay(id, response));
+ipcMain.handle('opsWorkspace:palettePlan', (_event, input) => operationsWorkspaceManager.commandPalettePlan(input));
+ipcMain.handle('opsWorkspace:secretless', (_event, sessionId) => operationsWorkspaceManager.secretlessReadiness(sessionId));
+
+// ===== Terminal & File Manager Pro =====
+ipcMain.handle('terminalFilePro:summary', () => terminalFileProManager.summary());
+ipcMain.handle('terminalFilePro:configuration', () => terminalFileProManager.configuration());
+ipcMain.handle('terminalFilePro:notebookSave', (_event, input) => terminalFileProManager.saveNotebook(input));
+ipcMain.handle('terminalFilePro:notebook', (_event, id) => terminalFileProManager.notebook(id));
+ipcMain.handle('terminalFilePro:pasteAnalyze', (_event, value) => terminalFileProManager.analyzePaste(value));
+ipcMain.handle('terminalFilePro:translate', (_event, input) => terminalFileProManager.translateShell(input));
+ipcMain.handle('terminalFilePro:sidecar', (_event, sessionId) => terminalFileProManager.sidecar(sessionId));
+ipcMain.handle('terminalFilePro:shadow', (_event, sessionId, template, parameters, options) => auditOperation('terminal.shadow', sessionId, () => terminalFileProManager.shadowCommand(sessionId, template, parameters, options)));
+ipcMain.handle('terminalFilePro:checkpointSave', (_event, input) => terminalFileProManager.saveCheckpoint(input));
+ipcMain.handle('terminalFilePro:checkpointRestore', (_event, id) => terminalFileProManager.restoreCheckpoint(id));
+ipcMain.handle('terminalFilePro:resultMatrix', (_event, results) => terminalFileProManager.resultMatrix(results));
+ipcMain.handle('terminalFilePro:outputActions', (_event, output) => terminalFileProManager.outputActions(output));
+ipcMain.handle('terminalFilePro:recordingStudio', (_event, input) => terminalFileProManager.recordingStudio(input));
+ipcMain.handle('terminalFilePro:protocolSave', (_event, input) => terminalFileProManager.saveProtocolConsole(input));
+ipcMain.handle('terminalFilePro:multiFilePreview', (_event, sessionId, changes) => terminalFileProManager.multiFilePreview(sessionId, changes));
+ipcMain.handle('terminalFilePro:multiFileApply', (_event, preview, approved) => auditOperation('files.multi-edit', preview?.sessionId || '', () => terminalFileProManager.multiFileApply(preview, approved)));
+ipcMain.handle('terminalFilePro:containerFiles', (_event, sessionId, input) => terminalFileProManager.containerFiles(sessionId, input));
+ipcMain.handle('terminalFilePro:gitFiles', (_event, sessionId, input) => terminalFileProManager.gitFiles(sessionId, input));
+ipcMain.handle('terminalFilePro:archiveFiles', (_event, sessionId, input) => auditOperation(`files.archive-${input?.action || 'list'}`, input?.archive || '', () => terminalFileProManager.archiveFiles(sessionId, input)));
+ipcMain.handle('terminalFilePro:hugeFile', (_event, sessionId, input) => terminalFileProManager.hugeFile(sessionId, input));
+ipcMain.handle('terminalFilePro:indexBuild', (_event, sessionId, root, options) => terminalFileProManager.buildIndex(sessionId, root, options));
+ipcMain.handle('terminalFilePro:indexSearch', (_event, id, query) => terminalFileProManager.searchIndex(id, query));
+ipcMain.handle('terminalFilePro:provenanceRecord', (_event, input) => terminalFileProManager.recordProvenance(input));
+ipcMain.handle('terminalFilePro:provenance', (_event, sha256) => terminalFileProManager.provenance(sha256));
+ipcMain.handle('terminalFilePro:crossProtocolPlan', (_event, input) => terminalFileProManager.crossProtocolPlan(input));
+ipcMain.handle('terminalFilePro:duplicates', (_event, sessionId, root) => terminalFileProManager.duplicates(sessionId, root));
+ipcMain.handle('terminalFilePro:heatmap', (_event, sessionId, root) => terminalFileProManager.heatmap(sessionId, root));
+ipcMain.handle('terminalFilePro:causality', (_event, sessionId, file) => terminalFileProManager.causality(sessionId, file));
+ipcMain.handle('terminalFilePro:splitContext', (_event, input) => terminalFileProManager.updateSplitContext(input));
+ipcMain.handle('terminalFilePro:pipelineSave', (_event, input) => terminalFileProManager.savePipeline(input));
+ipcMain.handle('terminalFilePro:pipelinePlan', (_event, id, context) => terminalFileProManager.pipelinePlan(id, context));
+ipcMain.handle('terminalFilePro:dropZoneCreate', (_event, input) => terminalFileProManager.createDropZone(input));
+ipcMain.handle('terminalFilePro:dropZoneInspect', (_event, id) => terminalFileProManager.inspectDropZone(id));
+ipcMain.handle('terminalFilePro:capsuleCreate', (_event, input) => terminalFileProManager.createConnectionCapsule(input));
+ipcMain.handle('terminalFilePro:capsuleOpen', (_event, target, passphrase) => terminalFileProManager.openConnectionCapsule(target, passphrase));
+ipcMain.handle('terminalFilePro:airDropCreate', (_event, input) => terminalFileProManager.createAirDrop(input));
+ipcMain.handle('terminalFilePro:airDropConsume', (_event, id, code, destination) => auditOperation('files.airdrop-consume', id, () => terminalFileProManager.consumeAirDrop(id, code, destination)));
+ipcMain.handle('terminalFilePro:clipboardPut', (_event, input) => terminalFileProManager.clipboardPut(input));
+ipcMain.handle('terminalFilePro:clipboardTake', (_event, id, sessionId) => terminalFileProManager.clipboardTake(id, sessionId));
+ipcMain.handle('terminalFilePro:filesystemWatch', (_event, input) => terminalFileProManager.filesystemWatch(input));
+ipcMain.handle('terminalFileVision:summary', () => terminalFileVisionManager.summary());
+ipcMain.handle('terminalFileVision:configuration', () => terminalFileVisionManager.configuration());
+ipcMain.handle('terminalFileVision:execute', (_event, feature, input) => auditOperation(`terminal-file-vision.${feature}`, input?.sessionId || input?.target || '', () => terminalFileVisionManager.execute(feature, input), { previewFirst: true }));
+ipcMain.handle('terminalFileRuntime:summary', () => terminalFileRuntimeManager.summary());
+ipcMain.handle('terminalFileRuntime:audit', (_event, input) => auditOperation('terminal-file-runtime.audit', 'runtime', () => terminalFileRuntimeManager.runtimeAudit(input)));
+ipcMain.handle('terminalFileRuntime:execute', (_event, capability, input) => auditOperation(`terminal-file-runtime.${capability}`, input?.sessionId || input?.id || '', () => terminalFileRuntimeManager.execute(capability, input), { governedRuntime: true }));
+ipcMain.handle('terminalFileDeep:summary', () => terminalFileDeepManager.summary());
+ipcMain.handle('terminalFileDeep:execute', (_event, capability, input) => auditOperation(`terminal-file-deep.${capability}`, input?.sessionId || input?.profileId || input?.id || '', () => terminalFileDeepManager.execute(capability, input), { governedRuntime: true, contextDrivenUx: true }));
+ipcMain.handle('fabric:clipboard-write', (_event, value, options = {}) => {
+  const bounded = String(value || '').slice(0, 2 * 1024 * 1024); const scan = advancedOpsManager.secretScan(bounded, 'secure-clipboard'); if (!scan.success && !options.allowSecrets) throw new Error(`Secure Clipboard blocked ${scan.findings.length} likely secret(s)`); const ttlSeconds = Math.max(5, Math.min(300, Number(options.ttlSeconds) || 30)); const digest = crypto.createHash('sha256').update(bounded).digest('hex'); clipboard.writeText(bounded); setTimeout(() => { try { if (crypto.createHash('sha256').update(clipboard.readText()).digest('hex') === digest) clipboard.clear(); } catch {} }, ttlSeconds * 1000).unref?.(); auditManager?.record({ source: 'desktop-ipc', action: 'fabric.clipboard-write', target: options.sessionId || 'local', success: true, details: { ttlSeconds, findings: scan.findings.length } }); return { success: true, ttlSeconds, findings: scan.findings };
+});
+ipcMain.handle('fabric:clipboard-clear', () => { clipboard.clear(); return { success: true }; });
+ipcMain.handle('runbook:list', () => remoteOperationsManager.listRunbooks());
+ipcMain.handle('runbook:save', (_event, input) => auditOperation('runbook.save', input?.id || input?.name || 'new', () => remoteOperationsManager.saveRunbook(input)));
+ipcMain.handle('runbook:remove', (_event, id) => auditOperation('runbook.remove', id, () => remoteOperationsManager.removeRunbook(id)));
+ipcMain.handle('runbook:run', (event, input, id, parameters) => auditOperation('runbook.run', id, () => remoteOperationsManager.runRunbook(input, id, parameters, progress => { if (!event.sender.isDestroyed()) event.sender.send('runbook:progress', progress); })));
+ipcMain.handle('files:localList', (_event, directory) => remoteAccessManager.localList(directory));
+ipcMain.handle('files:localMutate', (_event, operation, target, destination) => auditOperation(`files.local-${operation}`, target, () => { nextgenOpsManager.assertLocalWritable(target); if (destination) nextgenOpsManager.assertLocalWritable(destination); return remoteAccessManager.localMutate(operation, target, destination); }));
+ipcMain.handle('files:remoteList', (_event, input, directory) => remoteAccessManager.remoteList(input, directory));
+ipcMain.handle('files:transfer', (_event, input, direction, localPath, remotePath) => auditOperation(`files.${direction}`, remotePath, () => { if (direction === 'download') nextgenOpsManager.assertLocalWritable(localPath); return remoteAccessManager.transfer(input, direction, localPath, remotePath); }));
+ipcMain.handle('files:transferResumable', (event, input, direction, localPath, remotePath, transferId) => auditOperation(`files.${direction}-resumable`, remotePath, () => { if (direction === 'download') nextgenOpsManager.assertLocalWritable(localPath); return remoteAccessManager.transferResumable(input, direction, localPath, remotePath, progress => { if (!event.sender.isDestroyed()) event.sender.send('files:transfer-progress', { transferId, ...progress }); }); }));
+ipcMain.handle('files:transferRecursive', (event, input, direction, localPath, remotePath, transferId) => auditOperation(`files.${direction}-recursive`, remotePath, () => { if (direction === 'download') nextgenOpsManager.assertLocalWritable(localPath); return remoteAccessManager.transferRecursive(input, direction, localPath, remotePath, progress => {
+  if (!event.sender.isDestroyed()) event.sender.send('files:transfer-progress', { transferId, ...progress });
+}); }));
+ipcMain.handle('files:remoteMutate', (_event, input, operation, target, destination) => auditOperation(`files.${operation}`, target, () => remoteAccessManager.mutate(input, operation, target, destination)));
+ipcMain.handle('files:readLocal', (_event, target) => remoteAccessManager.readLocal(target));
+ipcMain.handle('files:previewLocal', (_event, target) => remoteAccessManager.previewLocal(target));
+ipcMain.handle('files:writeLocal', (_event, target, content) => auditOperation('files.local-write', target, () => { nextgenOpsManager.assertLocalWritable(target); return remoteAccessManager.writeLocal(target, content); }));
+ipcMain.handle('files:readRemote', (_event, input, target) => remoteAccessManager.readRemote(input, target));
+ipcMain.handle('files:previewRemote', (_event, input, target) => remoteAccessManager.previewRemote(input, target));
+ipcMain.handle('files:writeRemote', (_event, input, target, content) => auditOperation('files.remote-write', target, () => remoteAccessManager.writeRemote(input, target, content)));
+ipcMain.handle('files:searchLocal', (_event, directory, query) => remoteAccessManager.searchLocal(directory, query));
+ipcMain.handle('files:searchRemote', (_event, input, directory, query) => remoteAccessManager.searchRemote(input, directory, query));
+ipcMain.handle('files:diff', async (_event, input, localPath, remotePath) => { const remote = await remoteAccessManager.readRemote(input, remotePath); return remoteAccessManager.diffText(localPath, remote.content); });
+ipcMain.handle('files:syncPreview', (_event, input, localPath, remotePath, options) => remoteAccessManager.syncPreview(input, localPath, remotePath, options));
+ipcMain.handle('files:syncApply', (_event, input, preview, direction, selected) => auditOperation(`files.sync-${direction}`, preview?.remoteRoot || '', () => {
+  if (direction === 'download' && preview?.localRoot) nextgenOpsManager.assertLocalWritable(preview.localRoot);
+  return remoteAccessManager.syncApply(input, preview, direction, selected);
+}));
+ipcMain.handle('files:serverTransfer', (event, sourceInput, sourcePath, destinationInput, destinationPath, transferId) => auditOperation('files.server-to-server', `${sourcePath} -> ${destinationPath}`, () => remoteAccessManager.transferServerToServer(sourceInput, sourcePath, destinationInput, destinationPath, progress => { if (!event.sender.isDestroyed()) event.sender.send('files:transfer-progress', { transferId, ...progress }); })));
+ipcMain.handle('storage:list', () => cloudStorageManager.list());
+ipcMain.handle('storage:save', (_event, input, secrets) => auditOperation('storage.save', input?.id || input?.name || input?.type || 'new', () => cloudStorageManager.save(input, secrets)));
+ipcMain.handle('storage:remove', (_event, id) => auditOperation('storage.remove', id, () => cloudStorageManager.remove(id)));
+ipcMain.handle('storage:test', (_event, input) => cloudStorageManager.test(input));
+ipcMain.handle('storage:listFiles', (_event, input, directory) => cloudStorageManager.listFiles(input, directory));
+ipcMain.handle('storage:transfer', (_event, input, direction, localPath, remotePath) => auditOperation(`storage.${direction}`, remotePath, () => {
+  if (direction === 'download') nextgenOpsManager.assertLocalWritable(localPath);
+  return cloudStorageManager.transferLocal(input, direction, localPath, remotePath);
+}));
+ipcMain.handle('storage:transferRecursive', (event, input, direction, localPath, remotePath, transferId) => auditOperation(`storage.${direction}-recursive`, remotePath, () => {
+  if (direction === 'download') nextgenOpsManager.assertLocalWritable(localPath);
+  return cloudStorageManager.transferRecursive(input, direction, localPath, remotePath, progress => { if (!event.sender.isDestroyed()) event.sender.send('files:transfer-progress', { transferId, ...progress }); });
+}));
+ipcMain.handle('storage:mutate', (_event, input, operation, target, destination) => auditOperation(`storage.${operation}`, target, () => cloudStorageManager.mutate(input, operation, target, destination)));
+ipcMain.handle('storage:read', (_event, input, remotePath) => cloudStorageManager.read(input, remotePath));
+ipcMain.handle('storage:write', (_event, input, remotePath, content) => auditOperation('storage.write', remotePath, () => cloudStorageManager.write(input, remotePath, content)));
+ipcMain.handle('sshTunnel:list', () => remoteAccessManager.listTunnels());
+ipcMain.handle('sshTunnel:start', (_event, input, options) => auditOperation('tunnel.ssh-start', input?.id || input?.host || 'remote', () => remoteAccessManager.startTunnel(input, options)));
+ipcMain.handle('sshTunnel:stop', (_event, id) => auditOperation('tunnel.ssh-stop', id, () => remoteAccessManager.stopTunnel(id)));
+ipcMain.handle('remote:mountSftp', (_event, input, drive) => auditOperation('remote.mount-sftp', drive, () => remoteAccessManager.mountSftp(input, drive)));
+ipcMain.handle('remote:listMounts', () => remoteAccessManager.listMounts());
+ipcMain.handle('remote:unmountSftp', (_event, id) => auditOperation('remote.unmount-sftp', id, () => remoteAccessManager.unmountSftp(id)));
+ipcMain.handle('remote:openRdp', async (_event, input) => {
+  if (process.platform !== 'win32') return { success: false, error: 'RDP launcher is available on Windows' };
+  try {
+    const session = remoteAccessManager.resolve(input);
+    let target = `${session.host}:${session.port || 3389}`; let tunnelId = '';
+    if (session.type !== 'rdp') { const tunnel = await remoteAccessManager.startTunnel(session, { localPort: 0, remoteHost: '127.0.0.1', remotePort: Number(input?.rdpPort) || 3389 }); target = `127.0.0.1:${tunnel.localPort}`; tunnelId = tunnel.id; }
+    let args = [`/v:${target}`]; let policyFile = '';
+    if (input?.desktopPolicy) { const policy = input.desktopPolicy; const directory = path.join(_appRoot, 'remote-desktop'); fs.mkdirSync(directory, { recursive: true }); policyFile = path.join(directory, `${crypto.randomUUID()}.rdp`); const clipboardAllowed = policy.clipboardPolicy !== 'disabled'; const driveRedirect = policy.fileTransfer ? '*' : ''; fs.writeFileSync(policyFile, `full address:s:${target}\nredirectclipboard:i:${clipboardAllowed ? 1 : 0}\ndrivestoredirect:s:${driveRedirect}\nredirectprinters:i:0\nredirectcomports:i:0\nauthentication level:i:2\n`, { mode: 0o600 }); args = [policyFile]; }
+    const child = spawn('mstsc.exe', args, { detached: true, stdio: 'ignore', windowsHide: false });
+    auditManager?.record({ source: 'desktop-ipc', action: 'fabric.remote-desktop-launch', target: session.id, success: true, details: { protocol: 'rdp', clipboardPolicy: input?.desktopPolicy?.clipboardPolicy || 'default', fileTransfer: Boolean(input?.desktopPolicy?.fileTransfer) } });
+    if (policyFile) child.once('exit', () => { try { fs.unlinkSync(policyFile); } catch {} });
+    child.unref();
+    return { success: true, tunnelId, target };
+  } catch (error) { return { success: false, error: error.message }; }
+});
+ipcMain.handle('remote:openVnc', async (_event, input) => {
+  if (process.platform !== 'win32') return { success: false, error: 'VNC launcher is currently available on Windows' };
+  try {
+    const session = remoteAccessManager.resolve(input); let target = `${session.host}:${session.port || 5900}`; let tunnelId = '';
+    if (session.type !== 'vnc') { const tunnel = await remoteAccessManager.startTunnel(session, { localPort: 0, remoteHost: '127.0.0.1', remotePort: Number(input?.vncPort) || 5900 }); target = `127.0.0.1:${tunnel.localPort}`; tunnelId = tunnel.id; }
+    const bundled = portableToolsManager.verify('vncviewer'); if (!bundled.valid) throw new Error('Bundled TigerVNC Viewer failed SHA-256 verification'); const known = [bundled.file, 'C:\\Program Files\\RealVNC\\VNC Viewer\\vncviewer.exe', 'C:\\Program Files\\TightVNC\\tvnviewer.exe']; let viewer = known.find(fs.existsSync);
+    if (!viewer) { try { viewer = execFileSync('where.exe', ['vncviewer.exe'], { encoding: 'utf8', windowsHide: true }).split(/\r?\n/)[0].trim(); } catch {} }
+    if (!viewer) { if (tunnelId) remoteAccessManager.stopTunnel(tunnelId); return { success: false, error: 'Install RealVNC Viewer or TightVNC Viewer first' }; }
+    const child = spawn(viewer, [target], { detached: true, stdio: 'ignore', windowsHide: false }); child.unref(); return { success: true, tunnelId, target };
+  } catch (error) { return { success: false, error: error.message }; }
 });
 
 // ===== Composer IPC =====

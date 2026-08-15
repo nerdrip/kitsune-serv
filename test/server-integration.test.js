@@ -229,6 +229,11 @@ test('web mode authenticates and exposes a desktop-parity API', { timeout: 30000
 
   const home = await (await fetch(base, { headers: { cookie } })).text();
   assert.match(home, /web-preload\.js/);
+  assert.match(home, /Server Workspace/);
+  const xtermScript = await fetch(`${base}/node_modules/@xterm/xterm/lib/xterm.js`, { headers: { cookie } });
+  assert.equal(xtermScript.status, 200);
+  assert.match(xtermScript.headers.get('content-type'), /javascript/);
+  assert.match(await xtermScript.text(), /Terminal/);
 
   const terminal = await (await request('terminal/create')).json();
   assert.equal(typeof terminal.id, 'number');

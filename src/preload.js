@@ -96,7 +96,8 @@ contextBridge.exposeInMainWorld('kitsuneAPI', {
     }
   },
   terminal: {
-    create: () => ipcRenderer.invoke('terminal:create'),
+    create: (connection) => ipcRenderer.invoke('terminal:create', connection),
+    profiles: () => ipcRenderer.invoke('terminal:profiles'),
     write: (id, data) => ipcRenderer.invoke('terminal:write', id, data),
     kill: (id) => ipcRenderer.invoke('terminal:kill', id),
     resize: (id, cols, rows) => ipcRenderer.invoke('terminal:resize', id, cols, rows),
@@ -105,7 +106,146 @@ contextBridge.exposeInMainWorld('kitsuneAPI', {
     },
     onExit: (callback) => {
       ipcRenderer.on('terminal:exit', (_event, data) => callback(data));
-    }
+    },
+    recordStart: (id, metadata) => ipcRenderer.invoke('terminal:record-start', id, metadata), recordStop: (id) => ipcRenderer.invoke('terminal:record-stop', id), recordList: () => ipcRenderer.invoke('terminal:record-list'), recordExport: (id, format) => ipcRenderer.invoke('terminal:record-export', id, format)
+  },
+  remote: {
+    list: () => ipcRenderer.invoke('remote:list'),
+    save: (input, secrets) => ipcRenderer.invoke('remote:save', input, secrets),
+    remove: (id) => ipcRenderer.invoke('remote:remove', id),
+    duplicate: (id) => ipcRenderer.invoke('remote:duplicate', id),
+    importProfiles: () => ipcRenderer.invoke('remote:importProfiles'),
+    exportProfiles: () => ipcRenderer.invoke('remote:exportProfiles'),
+    mountSftp: (input, drive) => ipcRenderer.invoke('remote:mountSftp', input, drive), listMounts: () => ipcRenderer.invoke('remote:listMounts'), unmountSftp: (id) => ipcRenderer.invoke('remote:unmountSftp', id),
+    resetHostKey: (id) => ipcRenderer.invoke('remote:resetHostKey', id),
+    test: (input) => ipcRenderer.invoke('remote:test', input),
+    diagnose: (input) => ipcRenderer.invoke('remote:diagnose', input),
+    inspect: (input, kind) => ipcRenderer.invoke('remote:inspect', input, kind),
+    docker: (input, action, target) => ipcRenderer.invoke('remote:docker', input, action, target),
+    systemd: (input, action, unit) => ipcRenderer.invoke('remote:systemd', input, action, unit),
+    signal: (input, pid, signal) => ipcRenderer.invoke('remote:signal', input, pid, signal),
+    archive: (input, action, source, destination) => ipcRenderer.invoke('remote:archive', input, action, source, destination),
+    wake: (mac, address, port) => ipcRenderer.invoke('remote:wake', mac, address, port),
+    deploy: (connection, options) => ipcRenderer.invoke('remote:deploy', connection, options),
+    onDeployProgress: (callback) => ipcRenderer.on('remote:deploy-progress', (_event, data) => callback(data)),
+    openRdp: (input) => ipcRenderer.invoke('remote:openRdp', input),
+    openVnc: (input) => ipcRenderer.invoke('remote:openVnc', input),
+    openWinScp: (input) => ipcRenderer.invoke('remote:openWinScp', input), openPuTTY: (input) => ipcRenderer.invoke('remote:openPuTTY', input),
+    onOpenPanel: (callback) => ipcRenderer.on('app:open-panel', (_event, panel) => callback(panel))
+  },
+  files: {
+    localList: (directory) => ipcRenderer.invoke('files:localList', directory),
+    localMutate: (operation, target, destination) => ipcRenderer.invoke('files:localMutate', operation, target, destination),
+    remoteList: (connection, directory) => ipcRenderer.invoke('files:remoteList', connection, directory),
+    transfer: (connection, direction, localPath, remotePath) => ipcRenderer.invoke('files:transfer', connection, direction, localPath, remotePath),
+    transferResumable: (connection, direction, localPath, remotePath, transferId) => ipcRenderer.invoke('files:transferResumable', connection, direction, localPath, remotePath, transferId),
+    transferRecursive: (connection, direction, localPath, remotePath, transferId) => ipcRenderer.invoke('files:transferRecursive', connection, direction, localPath, remotePath, transferId),
+    remoteMutate: (connection, operation, target, destination) => ipcRenderer.invoke('files:remoteMutate', connection, operation, target, destination),
+    readLocal: (target) => ipcRenderer.invoke('files:readLocal', target), writeLocal: (target, content) => ipcRenderer.invoke('files:writeLocal', target, content),
+    previewLocal: (target) => ipcRenderer.invoke('files:previewLocal', target),
+    readRemote: (connection, target) => ipcRenderer.invoke('files:readRemote', connection, target), writeRemote: (connection, target, content) => ipcRenderer.invoke('files:writeRemote', connection, target, content),
+    previewRemote: (connection, target) => ipcRenderer.invoke('files:previewRemote', connection, target),
+    searchLocal: (directory, query) => ipcRenderer.invoke('files:searchLocal', directory, query), searchRemote: (connection, directory, query) => ipcRenderer.invoke('files:searchRemote', connection, directory, query),
+    diff: (connection, localPath, remotePath) => ipcRenderer.invoke('files:diff', connection, localPath, remotePath), syncPreview: (connection, localPath, remotePath, options) => ipcRenderer.invoke('files:syncPreview', connection, localPath, remotePath, options), syncApply: (connection, preview, direction, selected) => ipcRenderer.invoke('files:syncApply', connection, preview, direction, selected),
+    serverTransfer: (source, sourcePath, destination, destinationPath, transferId) => ipcRenderer.invoke('files:serverTransfer', source, sourcePath, destination, destinationPath, transferId),
+    onTransferProgress: (callback) => ipcRenderer.on('files:transfer-progress', (_event, data) => callback(data))
+  },
+  storage: {
+    list: () => ipcRenderer.invoke('storage:list'), save: (input, secrets) => ipcRenderer.invoke('storage:save', input, secrets), remove: (id) => ipcRenderer.invoke('storage:remove', id), test: (input) => ipcRenderer.invoke('storage:test', input), listFiles: (input, directory) => ipcRenderer.invoke('storage:listFiles', input, directory), transfer: (input, direction, localPath, remotePath) => ipcRenderer.invoke('storage:transfer', input, direction, localPath, remotePath), transferRecursive: (input, direction, localPath, remotePath, transferId) => ipcRenderer.invoke('storage:transferRecursive', input, direction, localPath, remotePath, transferId), mutate: (input, operation, target, destination) => ipcRenderer.invoke('storage:mutate', input, operation, target, destination), read: (input, remotePath) => ipcRenderer.invoke('storage:read', input, remotePath), write: (input, remotePath, content) => ipcRenderer.invoke('storage:write', input, remotePath, content)
+  },
+  sshTunnel: {
+    list: () => ipcRenderer.invoke('sshTunnel:list'), start: (connection, options) => ipcRenderer.invoke('sshTunnel:start', connection, options), stop: (id) => ipcRenderer.invoke('sshTunnel:stop', id)
+  },
+  runbook: {
+    list: () => ipcRenderer.invoke('runbook:list'), save: (input) => ipcRenderer.invoke('runbook:save', input), remove: (id) => ipcRenderer.invoke('runbook:remove', id), run: (connection, id, parameters) => ipcRenderer.invoke('runbook:run', connection, id, parameters), onProgress: (callback) => ipcRenderer.on('runbook:progress', (_event, data) => callback(data))
+  },
+  devops: {
+    git: (connection, repository, action, options) => ipcRenderer.invoke('devops:git', connection, repository, action, options),
+    compose: (connection, directory, action, service) => ipcRenderer.invoke('devops:compose', connection, directory, action, service),
+    kubernetes: (connection, action, options) => ipcRenderer.invoke('devops:kubernetes', connection, action, options),
+    metrics: (connection) => ipcRenderer.invoke('devops:metrics', connection), alerts: (connection, thresholds) => ipcRenderer.invoke('devops:alerts', connection, thresholds),
+    http: (request) => ipcRenderer.invoke('devops:http', request)
+  },
+  suite: {
+    capabilities: () => ipcRenderer.invoke('suite:capabilities'), vaultImport: (provider, reference, sessionId, options) => ipcRenderer.invoke('suite:vault-import', provider, reference, sessionId, options), keys: () => ipcRenderer.invoke('suite:keys'), keyGenerate: (input) => ipcRenderer.invoke('suite:key-generate', input), keyRemove: (id) => ipcRenderer.invoke('suite:key-remove', id), keyInstall: (connection, id) => ipcRenderer.invoke('suite:key-install', connection, id), keyRotate: (connection, id, passphrase) => ipcRenderer.invoke('suite:key-rotate', connection, id, passphrase),
+    snapshot: (file) => ipcRenderer.invoke('suite:snapshot', file), snapshots: () => ipcRenderer.invoke('suite:snapshots'), snapshotRestore: (id) => ipcRenderer.invoke('suite:snapshot-restore', id), merge3: (base, local, remote) => ipcRenderer.invoke('suite:merge3', base, local, remote),
+    state: () => ipcRenderer.invoke('suite:state'), runDue: () => ipcRenderer.invoke('suite:run-due'), saveItem: (collection, input) => ipcRenderer.invoke('suite:item-save', collection, input), removeItem: (collection, id) => ipcRenderer.invoke('suite:item-remove', collection, id), handoffCreate: (sessionId, recipient, ttl) => ipcRenderer.invoke('suite:handoff-create', sessionId, recipient, ttl), handoffConsume: (id, token) => ipcRenderer.invoke('suite:handoff-consume', id, token)
+  },
+  advanced: {
+    graph: () => ipcRenderer.invoke('advanced:graph'), commands: () => ipcRenderer.invoke('advanced:commands'), configuration: () => ipcRenderer.invoke('advanced:configuration'), workspaces: () => ipcRenderer.invoke('advanced:workspaces'), workspaceSave: input => ipcRenderer.invoke('advanced:workspace-save', input),
+    search: (query, options) => ipcRenderer.invoke('advanced:search', query, options), replacePreview: (query, replacement, options) => ipcRenderer.invoke('advanced:replace-preview', query, replacement, options), replaceApply: (preview, approved) => ipcRenderer.invoke('advanced:replace-apply', preview, approved), replaceRollback: id => ipcRenderer.invoke('advanced:replace-rollback', id), secretScan: (content, label) => ipcRenderer.invoke('advanced:secret-scan', content, label), preflight: (input, options) => ipcRenderer.invoke('advanced:preflight', input, options),
+    captureInfrastructure: input => ipcRenderer.invoke('advanced:infrastructure-capture', input), diffInfrastructure: (left, right) => ipcRenderer.invoke('advanced:infrastructure-diff', left, right), setBaseline: input => ipcRenderer.invoke('advanced:baseline-set', input), drift: input => ipcRenderer.invoke('advanced:drift', input), blastRadius: input => ipcRenderer.invoke('advanced:blast-radius', input), digitalTwin: (capture, operation) => ipcRenderer.invoke('advanced:digital-twin', capture, operation),
+    timeline: sessionId => ipcRenderer.invoke('advanced:timeline', sessionId), timelineRecord: input => ipcRenderer.invoke('advanced:timeline-record', input), timeMachineCapture: (input, options) => ipcRenderer.invoke('advanced:time-machine-capture', input, options), timeMachineList: sessionId => ipcRenderer.invoke('advanced:time-machine-list', sessionId), timeMachineRestore: (id, input, paths) => ipcRenderer.invoke('advanced:time-machine-restore', id, input, paths), shadowDeploy: (input, options) => ipcRenderer.invoke('advanced:shadow-deploy', input, options), shadowPromote: (input, shadow) => ipcRenderer.invoke('advanced:shadow-promote', input, shadow), replaySave: input => ipcRenderer.invoke('advanced:replay-save', input), replayRun: (id, input) => ipcRenderer.invoke('advanced:replay-run', id, input),
+    correlateLogs: sources => ipcRenderer.invoke('advanced:logs-correlate', sources), anomaly: samples => ipcRenderer.invoke('advanced:anomaly', samples), recordMetric: (sessionId, metrics) => ipcRenderer.invoke('advanced:metric-record', sessionId, metrics), anomalyBaseline: sessionId => ipcRenderer.invoke('advanced:anomaly-baseline', sessionId), explain: value => ipcRenderer.invoke('advanced:explain', value), safeCommand: (kind, input) => ipcRenderer.invoke('advanced:safe-command', kind, input), healthSave: input => ipcRenderer.invoke('advanced:health-save', input), healthEvaluate: id => ipcRenderer.invoke('advanced:health-evaluate', id), maintenanceSave: input => ipcRenderer.invoke('advanced:maintenance-save', input), maintenanceCheck: (sessionId, operation, at) => ipcRenderer.invoke('advanced:maintenance-check', sessionId, operation, at), dns: hostname => ipcRenderer.invoke('advanced:dns', hostname), dnsPropagation: (hostname, type) => ipcRenderer.invoke('advanced:dns-propagation', hostname, type), certificate: (hostname, port) => ipcRenderer.invoke('advanced:certificate', hostname, port)
+  },
+  incident: {
+    list: () => ipcRenderer.invoke('incident:list'), start: input => ipcRenderer.invoke('incident:start', input), update: (id, patch) => ipcRenderer.invoke('incident:update', id, patch), collect: (id, input) => ipcRenderer.invoke('incident:collect', id, input), capsule: id => ipcRenderer.invoke('incident:capsule', id), suggestRunbook: id => ipcRenderer.invoke('incident:suggest-runbook', id)
+  },
+  collaboration: {
+    start: input => ipcRenderer.invoke('collab:start', input), join: (id, participant) => ipcRenderer.invoke('collab:join', id, participant), transferControl: (id, participantId, actorId) => ipcRenderer.invoke('collab:control', id, participantId, actorId), lockFile: (sessionId, filePath, participantId) => ipcRenderer.invoke('collab:lock', sessionId, filePath, participantId), event: (id, participantId, value) => ipcRenderer.invoke('collab:event', id, participantId, value), events: (id, since) => ipcRenderer.invoke('collab:events', id, since)
+  },
+  resilience: {
+    capabilities: () => ipcRenderer.invoke('resilience:capabilities'), createSshCa: (name, passphrase) => ipcRenderer.invoke('resilience:ssh-ca-create', name, passphrase), signSshKey: (caId, publicKeyPath, identity, principals, validity) => ipcRenderer.invoke('resilience:ssh-sign', caId, publicKeyPath, identity, principals, validity), installSshCa: (input, caId) => ipcRenderer.invoke('resilience:ssh-ca-install', input, caId), openMosh: input => ipcRenderer.invoke('resilience:mosh', input), ports: input => ipcRenderer.invoke('resilience:ports', input), databaseTunnel: (input, options) => ipcRenderer.invoke('resilience:db-tunnel', input, options), cron: (input, action, options) => ipcRenderer.invoke('resilience:cron', input, action, options), timer: (input, action, options) => ipcRenderer.invoke('resilience:timer', input, action, options), firewall: (input, action, rule, execute) => ipcRenderer.invoke('resilience:firewall', input, action, rule, execute), certificateRenew: (input, provider, domain) => ipcRenderer.invoke('resilience:certificate-renew', input, provider, domain), cachePut: file => ipcRenderer.invoke('resilience:cache-put', file), cacheRestore: (hash, target) => ipcRenderer.invoke('resilience:cache-restore', hash, target), transferLimited: (input, direction, local, remote, rate) => ipcRenderer.invoke('resilience:transfer-limited', input, direction, local, remote, rate), backup: (source, name) => ipcRenderer.invoke('resilience:backup', source, name), backupRestore: (id, target) => ipcRenderer.invoke('resilience:backup-restore', id, target), offlineVault: input => ipcRenderer.invoke('resilience:offline-vault', input), breakGlassCreate: input => ipcRenderer.invoke('resilience:break-glass-create', input), breakGlassConsume: (id, code, authentication) => ipcRenderer.invoke('resilience:break-glass-consume', id, code, authentication)
+  },
+  fabric: {
+    summary: () => ipcRenderer.invoke('fabric:summary'), policySave: input => ipcRenderer.invoke('fabric:policy-save', input), policyEvaluate: context => ipcRenderer.invoke('fabric:policy-evaluate', context), accessRequest: input => ipcRenderer.invoke('fabric:access-request', input), accessBegin: input => ipcRenderer.invoke('fabric:access-begin', input), accessApprove: (id, authentication) => ipcRenderer.invoke('fabric:access-approve', id, authentication), accessConsume: (token, scope) => ipcRenderer.invoke('fabric:access-consume', token, scope),
+    secretLeaseCreate: input => ipcRenderer.invoke('fabric:secret-lease-create', input), secretLeaseUse: (id, session, environmentName, command) => ipcRenderer.invoke('fabric:secret-lease-use', id, session, environmentName, command), clipboardWrite: (value, options) => ipcRenderer.invoke('fabric:clipboard-write', value, options), clipboardClear: () => ipcRenderer.invoke('fabric:clipboard-clear'),
+    serviceMap: input => ipcRenderer.invoke('fabric:service-map', input), gitOpsExport: (capture, format, target) => ipcRenderer.invoke('fabric:gitops-export', capture, format, target), gitOpsPlan: (observed, desired) => ipcRenderer.invoke('fabric:gitops-plan', observed, desired), fleetRun: (sessionIds, template, parameters, options) => ipcRenderer.invoke('fabric:fleet-run', sessionIds, template, parameters, options), networkRecord: (input, options) => ipcRenderer.invoke('fabric:network-record', input, options),
+    syntheticSave: input => ipcRenderer.invoke('fabric:synthetic-save', input), syntheticRun: id => ipcRenderer.invoke('fabric:synthetic-run', id), syntheticRunDue: () => ipcRenderer.invoke('fabric:synthetic-run-due'), canarySave: input => ipcRenderer.invoke('fabric:canary-save', input), canaryAdvance: (id, metrics) => ipcRenderer.invoke('fabric:canary-advance', id, metrics),
+    offlineMountSave: input => ipcRenderer.invoke('fabric:offline-mount-save', input), offlineStage: (id, relativePath, content, baseHash) => ipcRenderer.invoke('fabric:offline-stage', id, relativePath, content, baseHash), offlineReconcile: id => ipcRenderer.invoke('fabric:offline-reconcile', id),
+    databaseSchemaDiff: (left, right) => ipcRenderer.invoke('fabric:db-schema-diff', left, right), databaseErd: schema => ipcRenderer.invoke('fabric:db-erd', schema), databaseMask: (rows, rules) => ipcRenderer.invoke('fabric:db-mask', rows, rules), databaseSchemaCapture: (connection, database) => ipcRenderer.invoke('fabric:db-schema-capture', connection, database), databaseMaskedExport: (connection, database, target, limit) => ipcRenderer.invoke('fabric:db-masked-export', connection, database, target, limit), disasterSimulate: backupId => ipcRenderer.invoke('fabric:dr-simulate', backupId),
+    ephemeralSave: input => ipcRenderer.invoke('fabric:ephemeral-save', input), ephemeralCleanup: () => ipcRenderer.invoke('fabric:ephemeral-cleanup'), remoteDesktopSave: input => ipcRenderer.invoke('fabric:remote-desktop-save', input), rescueCreate: input => ipcRenderer.invoke('fabric:rescue-create', input),
+    evidenceSeal: payload => ipcRenderer.invoke('fabric:evidence-seal', payload), evidenceVerify: id => ipcRenderer.invoke('fabric:evidence-verify', id), copilot: context => ipcRenderer.invoke('fabric:copilot', context), replayCreate: file => ipcRenderer.invoke('fabric:replay-create', file), replaySimulate: (id, action) => ipcRenderer.invoke('fabric:replay-simulate', id, action)
+  },
+  enterprise: {
+    summary: () => ipcRenderer.invoke('enterprise:summary'), configuration: () => ipcRenderer.invoke('enterprise:configuration'), agents: () => ipcRenderer.invoke('enterprise:agent-list'), agentEnroll: input => ipcRenderer.invoke('enterprise:agent-enroll', input), agentRemove: id => ipcRenderer.invoke('enterprise:agent-remove', id), agentProbe: id => ipcRenderer.invoke('enterprise:agent-probe', id), agentBootstrap: input => ipcRenderer.invoke('enterprise:agent-bootstrap', input),
+    sloSave: input => ipcRenderer.invoke('enterprise:slo-save', input), sloRecord: (id, sample) => ipcRenderer.invoke('enterprise:slo-record', id, sample), sloEvaluate: () => ipcRenderer.invoke('enterprise:slo-evaluate'), capacityRecord: (resource, value, at) => ipcRenderer.invoke('enterprise:capacity-record', resource, value, at), capacityForecast: (resource, limit) => ipcRenderer.invoke('enterprise:capacity-forecast', resource, limit),
+    patchSave: input => ipcRenderer.invoke('enterprise:patch-save', input), patchRun: (id, options) => ipcRenderer.invoke('enterprise:patch-run', id, options), rebootPlan: input => ipcRenderer.invoke('enterprise:reboot-plan', input), rebootRun: (id, options) => ipcRenderer.invoke('enterprise:reboot-run', id, options),
+    complianceSave: input => ipcRenderer.invoke('enterprise:compliance-save', input), complianceScan: (id, sessions) => ipcRenderer.invoke('enterprise:compliance-scan', id, sessions), supplyChainScan: input => ipcRenderer.invoke('enterprise:supply-chain-scan', input), imagePromote: input => ipcRenderer.invoke('enterprise:image-promote', input),
+    airgapCreate: input => ipcRenderer.invoke('enterprise:airgap-create', input), airgapVerify: id => ipcRenderer.invoke('enterprise:airgap-verify', id), oidcSave: input => ipcRenderer.invoke('enterprise:oidc-save', input), oidcLogin: id => ipcRenderer.invoke('enterprise:oidc-login', id),
+    chaosSave: input => ipcRenderer.invoke('enterprise:chaos-save', input), chaosRun: (id, options) => ipcRenderer.invoke('enterprise:chaos-run', id, options), remediationSave: input => ipcRenderer.invoke('enterprise:remediation-save', input), autonomousSandbox: context => ipcRenderer.invoke('enterprise:autonomous-sandbox', context), migrationRehearse: (connection, database, sql) => ipcRenderer.invoke('enterprise:migration-rehearse', connection, database, sql),
+    configValidate: input => ipcRenderer.invoke('enterprise:config-validate', input), cloudInit: input => ipcRenderer.invoke('enterprise:cloud-init', input), regionSave: input => ipcRenderer.invoke('enterprise:region-save', input), failoverPlan: (fromId, toId) => ipcRenderer.invoke('enterprise:failover-plan', fromId, toId), marketplaceInstall: input => ipcRenderer.invoke('enterprise:marketplace-install', input)
+  },
+  nextgen: {
+    summary: () => ipcRenderer.invoke('nextgen:summary'), configuration: () => ipcRenderer.invoke('nextgen:configuration'),
+    relaySave: input => ipcRenderer.invoke('nextgen:relay-save', input), relayRoute: (fromId, toId) => ipcRenderer.invoke('nextgen:relay-route', fromId, toId), relayBootstrap: input => ipcRenderer.invoke('nextgen:relay-bootstrap', input),
+    capabilityIssue: input => ipcRenderer.invoke('nextgen:capability-issue', input), capabilityUse: (id, parameters) => ipcRenderer.invoke('nextgen:capability-use', id, parameters), shellParse: transcript => ipcRenderer.invoke('nextgen:shell-parse', transcript),
+    deltaSignature: (file, blockSize) => ipcRenderer.invoke('nextgen:delta-signature', file, blockSize), deltaPlan: (file, signature) => ipcRenderer.invoke('nextgen:delta-plan', file, signature), deltaApply: (source, destination, plan) => ipcRenderer.invoke('nextgen:delta-apply', source, destination, plan),
+    snapshotCreate: input => ipcRenderer.invoke('nextgen:snapshot-create', input), snapshotBrowse: (id, prefix) => ipcRenderer.invoke('nextgen:snapshot-browse', id, prefix), snapshotRestore: (id, relative, target) => ipcRenderer.invoke('nextgen:snapshot-restore', id, relative, target),
+    ransomwareBaseline: root => ipcRenderer.invoke('nextgen:ransomware-baseline', root), ransomwareScan: (root, thresholds) => ipcRenderer.invoke('nextgen:ransomware-scan', root, thresholds), desktopSave: input => ipcRenderer.invoke('nextgen:desktop-save', input),
+    sshPolicySave: input => ipcRenderer.invoke('nextgen:ssh-policy-save', input), sshCertificateIssue: (policyId, publicKey, identity, authentication) => ipcRenderer.invoke('nextgen:ssh-certificate-issue', policyId, publicKey, identity, authentication), ebpf: (input, kind) => ipcRenderer.invoke('nextgen:ebpf', input, kind), networkTwin: input => ipcRenderer.invoke('nextgen:network-twin', input), transaction: (input, steps, options) => ipcRenderer.invoke('nextgen:transaction', input, steps, options),
+    pairCreate: input => ipcRenderer.invoke('nextgen:pair-create', input), pairPropose: (id, action, actor) => ipcRenderer.invoke('nextgen:pair-propose', id, action, actor), pairApprove: (id, actor) => ipcRenderer.invoke('nextgen:pair-approve', id, actor), mobileCreate: input => ipcRenderer.invoke('nextgen:mobile-create', input), mobileResolve: (id, challenge, decision, authentication) => ipcRenderer.invoke('nextgen:mobile-resolve', id, challenge, decision, authentication),
+    wasmRun: input => ipcRenderer.invoke('nextgen:wasm-run', input), blackBoxRecord: event => ipcRenderer.invoke('nextgen:blackbox-record', event), blackBoxExport: minutes => ipcRenderer.invoke('nextgen:blackbox-export', minutes), dnaCapture: input => ipcRenderer.invoke('nextgen:dna-capture', input), dnaCompare: (left, right) => ipcRenderer.invoke('nextgen:dna-compare', left, right), connectivityHeal: input => ipcRenderer.invoke('nextgen:connectivity-heal', input), intentPlan: input => ipcRenderer.invoke('nextgen:intent-plan', input), simulatorCreate: input => ipcRenderer.invoke('nextgen:simulator-create', input), simulatorRun: (id, response) => ipcRenderer.invoke('nextgen:simulator-run', id, response)
+  },
+  opsWorkspace: {
+    summary: () => ipcRenderer.invoke('opsWorkspace:summary'), configuration: () => ipcRenderer.invoke('opsWorkspace:configuration'), save: input => ipcRenderer.invoke('opsWorkspace:save', input), resume: id => ipcRenderer.invoke('opsWorkspace:resume', id),
+    timelineRecord: input => ipcRenderer.invoke('opsWorkspace:timelineRecord', input), timeline: (sessionId, options) => ipcRenderer.invoke('opsWorkspace:timeline', sessionId, options), undoPlan: id => ipcRenderer.invoke('opsWorkspace:undoPlan', id), undoExecute: (id, approved) => ipcRenderer.invoke('opsWorkspace:undoExecute', id, approved),
+    connectionDoctor: id => ipcRenderer.invoke('opsWorkspace:connectionDoctor', id), smartTransfer: input => ipcRenderer.invoke('opsWorkspace:smartTransfer', input), fleetPreview: (ids, template, parameters, options) => ipcRenderer.invoke('opsWorkspace:fleetPreview', ids, template, parameters, options), fleetExecute: (preview, approved) => ipcRenderer.invoke('opsWorkspace:fleetExecute', preview, approved),
+    environmentDiff: (left, right) => ipcRenderer.invoke('opsWorkspace:environmentDiff', left, right), disposableRescue: input => ipcRenderer.invoke('opsWorkspace:disposableRescue', input), portableRescue: input => ipcRenderer.invoke('opsWorkspace:portableRescue', input), memoryRecord: input => ipcRenderer.invoke('opsWorkspace:memoryRecord', input), memorySearch: (query, sessionId) => ipcRenderer.invoke('opsWorkspace:memorySearch', query, sessionId),
+    multiplexerSave: input => ipcRenderer.invoke('opsWorkspace:multiplexerSave', input), autocomplete: input => ipcRenderer.invoke('opsWorkspace:autocomplete', input), incidentRoom: input => ipcRenderer.invoke('opsWorkspace:incidentRoom', input), collaborativeChange: input => ipcRenderer.invoke('opsWorkspace:collaborativeChange', input), movie: (sessionId, options) => ipcRenderer.invoke('opsWorkspace:movie', sessionId, options), blastRadius: (sessionId, operation) => ipcRenderer.invoke('opsWorkspace:blastRadius', sessionId, operation),
+    networkReplayCreate: input => ipcRenderer.invoke('opsWorkspace:networkReplayCreate', input), networkReplayRun: (id, response) => ipcRenderer.invoke('opsWorkspace:networkReplayRun', id, response), palettePlan: input => ipcRenderer.invoke('opsWorkspace:palettePlan', input), secretless: sessionId => ipcRenderer.invoke('opsWorkspace:secretless', sessionId)
+  },
+  terminalFilePro: {
+    summary: () => ipcRenderer.invoke('terminalFilePro:summary'), configuration: () => ipcRenderer.invoke('terminalFilePro:configuration'), notebookSave: input => ipcRenderer.invoke('terminalFilePro:notebookSave', input), notebook: id => ipcRenderer.invoke('terminalFilePro:notebook', id), pasteAnalyze: value => ipcRenderer.invoke('terminalFilePro:pasteAnalyze', value), translate: input => ipcRenderer.invoke('terminalFilePro:translate', input), sidecar: sessionId => ipcRenderer.invoke('terminalFilePro:sidecar', sessionId), shadow: (sessionId, template, parameters, options) => ipcRenderer.invoke('terminalFilePro:shadow', sessionId, template, parameters, options), checkpointSave: input => ipcRenderer.invoke('terminalFilePro:checkpointSave', input), checkpointRestore: id => ipcRenderer.invoke('terminalFilePro:checkpointRestore', id), resultMatrix: results => ipcRenderer.invoke('terminalFilePro:resultMatrix', results), outputActions: output => ipcRenderer.invoke('terminalFilePro:outputActions', output), recordingStudio: input => ipcRenderer.invoke('terminalFilePro:recordingStudio', input), protocolSave: input => ipcRenderer.invoke('terminalFilePro:protocolSave', input),
+    multiFilePreview: (sessionId, changes) => ipcRenderer.invoke('terminalFilePro:multiFilePreview', sessionId, changes), multiFileApply: (preview, approved) => ipcRenderer.invoke('terminalFilePro:multiFileApply', preview, approved), containerFiles: (sessionId, input) => ipcRenderer.invoke('terminalFilePro:containerFiles', sessionId, input), gitFiles: (sessionId, input) => ipcRenderer.invoke('terminalFilePro:gitFiles', sessionId, input), archiveFiles: (sessionId, input) => ipcRenderer.invoke('terminalFilePro:archiveFiles', sessionId, input), hugeFile: (sessionId, input) => ipcRenderer.invoke('terminalFilePro:hugeFile', sessionId, input), indexBuild: (sessionId, root, options) => ipcRenderer.invoke('terminalFilePro:indexBuild', sessionId, root, options), indexSearch: (id, query) => ipcRenderer.invoke('terminalFilePro:indexSearch', id, query), provenanceRecord: input => ipcRenderer.invoke('terminalFilePro:provenanceRecord', input), provenance: sha256 => ipcRenderer.invoke('terminalFilePro:provenance', sha256), crossProtocolPlan: input => ipcRenderer.invoke('terminalFilePro:crossProtocolPlan', input), duplicates: (sessionId, root) => ipcRenderer.invoke('terminalFilePro:duplicates', sessionId, root), heatmap: (sessionId, root) => ipcRenderer.invoke('terminalFilePro:heatmap', sessionId, root), causality: (sessionId, file) => ipcRenderer.invoke('terminalFilePro:causality', sessionId, file), splitContext: input => ipcRenderer.invoke('terminalFilePro:splitContext', input),
+    pipelineSave: input => ipcRenderer.invoke('terminalFilePro:pipelineSave', input), pipelinePlan: (id, context) => ipcRenderer.invoke('terminalFilePro:pipelinePlan', id, context), dropZoneCreate: input => ipcRenderer.invoke('terminalFilePro:dropZoneCreate', input), dropZoneInspect: id => ipcRenderer.invoke('terminalFilePro:dropZoneInspect', id), capsuleCreate: input => ipcRenderer.invoke('terminalFilePro:capsuleCreate', input), capsuleOpen: (target, passphrase) => ipcRenderer.invoke('terminalFilePro:capsuleOpen', target, passphrase), airDropCreate: input => ipcRenderer.invoke('terminalFilePro:airDropCreate', input), airDropConsume: (id, code, destination) => ipcRenderer.invoke('terminalFilePro:airDropConsume', id, code, destination), clipboardPut: input => ipcRenderer.invoke('terminalFilePro:clipboardPut', input), clipboardTake: (id, sessionId) => ipcRenderer.invoke('terminalFilePro:clipboardTake', id, sessionId), filesystemWatch: input => ipcRenderer.invoke('terminalFilePro:filesystemWatch', input)
+  },
+  terminalFileVision: {
+    summary: () => ipcRenderer.invoke('terminalFileVision:summary'),
+    configuration: () => ipcRenderer.invoke('terminalFileVision:configuration'),
+    execute: (feature, input) => ipcRenderer.invoke('terminalFileVision:execute', feature, input)
+  },
+  terminalFileRuntime: {
+    summary: () => ipcRenderer.invoke('terminalFileRuntime:summary'),
+    audit: input => ipcRenderer.invoke('terminalFileRuntime:audit', input),
+    execute: (capability, input) => ipcRenderer.invoke('terminalFileRuntime:execute', capability, input)
+  },
+  terminalFileDeep: {
+    summary: () => ipcRenderer.invoke('terminalFileDeep:summary'),
+    execute: (capability, input) => ipcRenderer.invoke('terminalFileDeep:execute', capability, input)
+  },
+  portable: {
+    list: () => ipcRenderer.invoke('portable:list'), launch: (id) => ipcRenderer.invoke('portable:launch', id)
   },
   path: {
     getStatus: () => ipcRenderer.invoke('path:getStatus'),
@@ -232,7 +372,8 @@ contextBridge.exposeInMainWorld('kitsuneAPI', {
     status: () => ipcRenderer.invoke('update:status'),
     check: () => ipcRenderer.invoke('update:check'),
     download: () => ipcRenderer.invoke('update:download'),
-    install: () => ipcRenderer.invoke('update:install')
+    install: () => ipcRenderer.invoke('update:install'),
+    rollback: () => ipcRenderer.invoke('update:rollback')
   },
   support: { generate: () => ipcRenderer.invoke('support:generate') },
   identity: {
@@ -350,7 +491,7 @@ contextBridge.exposeInMainWorld('kitsuneAPI', {
   },
   // Cleanup to prevent memory leaks — call before re-subscribing
   removeAllListeners: (channel) => {
-    const allowed = ['download:progress', 'service:exited', 'terminal:data', 'terminal:exit', 'appStore:progress', 'tray:start-all', 'path:pythonManagerStatus', 'activity:changed', 'command:output', 'command:exit', 'tunnel:changed', 'lab:changed', 'lab:progress', 'apiFlow:changed', 'hub:changed'];
+    const allowed = ['download:progress', 'service:exited', 'terminal:data', 'terminal:exit', 'files:transfer-progress', 'runbook:progress', 'remote:deploy-progress', 'app:open-panel', 'appStore:progress', 'tray:start-all', 'path:pythonManagerStatus', 'activity:changed', 'command:output', 'command:exit', 'tunnel:changed', 'lab:changed', 'lab:progress', 'apiFlow:changed', 'hub:changed'];
     if (allowed.includes(channel)) ipcRenderer.removeAllListeners(channel);
   }
 });

@@ -21,6 +21,8 @@ function cdp(socketUrl) {
 }
 
 (async () => {
+  const requestedTab = process.argv[3] || 'overview';
+  if (!['overview', 'nodes', 'sync', 'routes', 'users', 'plesk', 'connections', 'settings'].includes(requestedTab)) throw new Error(`Unknown Hub QA tab: ${requestedTab}`);
   const serverPort = await freePort(); const debugPort = await freePort(); const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'kitsune-hub-qa-data-')); const browserRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'kitsune-hub-qa-edge-'));
   const server = spawn(process.execPath, ['src/server.js', '--port', String(serverPort)], { cwd: root, env: { ...process.env, KITSUNE_HOST: '127.0.0.1', KITSUNE_USER: 'admin', KITSUNE_PASS: 'visual-qa-password', KITSUNE_DATA_DIR: dataRoot, KITSUNE_DISABLE_SYSTEM_INTEGRATION: '1', KITSUNE_SAFE_MODE: '1' }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   let serverOutput = ''; server.stdout.on('data', chunk => { serverOutput += chunk; }); server.stderr.on('data', chunk => { serverOutput += chunk; });
@@ -32,8 +34,9 @@ function cdp(socketUrl) {
     await client.send('Page.navigate', { url: `http://127.0.0.1:${serverPort}/` }); await wait(400);
     await client.send('Runtime.evaluate', { awaitPromise: true, expression: `(async()=>{await fetch('/auth/login',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:'username=admin&password=visual-qa-password'});location.href='/';})()` }); await wait(1000);
     await client.send('Runtime.evaluate', { expression: `document.querySelector('[data-panel="hub"]').click()` }); await wait(1200);
-    const metrics = await client.send('Runtime.evaluate', { returnByValue: true, expression: `(()=>{const p=document.getElementById('panel-hub');const shell=p.querySelector('.hub-shell');return {panel:p.getBoundingClientRect().toJSON(),shell:shell.getBoundingClientRect().toJSON(),scrollWidth:p.scrollWidth,clientWidth:p.clientWidth,active:p.classList.contains('active'),title:document.getElementById('hub-domain-display').textContent}})()` });
-    if (!metrics.result.value.active || metrics.result.value.scrollWidth > metrics.result.value.clientWidth + 2) throw new Error(`Hub layout overflow: ${JSON.stringify(metrics.result.value)}`);
+    if (requestedTab !== 'overview') { await client.send('Runtime.evaluate', { expression: `document.querySelector('[data-hub-tab="${requestedTab}"]').click()` }); await wait(300); }
+    const metrics = await client.send('Runtime.evaluate', { returnByValue: true, expression: `(()=>{const p=document.getElementById('panel-hub');const shell=p.querySelector('.hub-shell');const view=p.querySelector('[data-hub-view="${requestedTab}"]');return {panel:p.getBoundingClientRect().toJSON(),shell:shell.getBoundingClientRect().toJSON(),view:view?.getBoundingClientRect().toJSON(),scrollWidth:p.scrollWidth,clientWidth:p.clientWidth,active:p.classList.contains('active'),activeTab:p.querySelector('[data-hub-tab].active')?.dataset.hubTab,title:document.getElementById('hub-domain-display').textContent}})()` });
+    if (!metrics.result.value.active || metrics.result.value.activeTab !== requestedTab || metrics.result.value.scrollWidth > metrics.result.value.clientWidth + 2) throw new Error(`Hub layout overflow: ${JSON.stringify(metrics.result.value)}`);
     const image = await client.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); const output = path.resolve(process.argv[2] || path.join(root, 'artifacts', 'qa', 'hub-1360x860.png')); fs.mkdirSync(path.dirname(output), { recursive: true }); fs.writeFileSync(output, Buffer.from(image.data, 'base64')); console.log(JSON.stringify({ output, metrics: metrics.result.value }, null, 2)); client.close();
   } finally {
     edge.kill(); server.kill(); await wait(500);

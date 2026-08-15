@@ -1,0 +1,11 @@
+{
+  "name": "KitsuneServ Operations",
+  "short_name": "KitsuneServ",
+  "description": "Offline-capable server operations and approval console",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f0f1a",
+  "theme_color": "#0f0f1a",
+  "categories": ["developer", "utilities", "productivity"]
+}

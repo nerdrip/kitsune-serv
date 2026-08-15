@@ -2,6 +2,74 @@
 
 ## 3.0.0 — 2026-08-09
 
+- Added the context-driven Deep Tools Dock with nine advanced Terminal/File workflows grouped into Inspect, Connect and Move & Prove, plus a compact visual result inspector instead of new data tables.
+- Added bounded binary/hex range inspection, cross-platform metadata fidelity maps, provider-native S3/Azure multipart checkpoints and version/Object Lock inspection.
+- Added approval-gated Remote Git staging, public-only OpenSSH Agent/Pageant/FIDO readiness and preview-first migration from MobaXterm, PuTTY, WinSCP, OpenSSH, Royal TS and Termius.
+- Added guarded OSC 8/52 handling, bounded Sixel/iTerm rendering through `@xterm/addon-image`, a bounded direct/chunked Kitty graphics canvas renderer, real SSHFS/rclone mounts and an 81-cell protocol certification matrix.
+- Added a reference-counted shared SSH transport for terminals, SFTP, commands, diagnostics, tunnels and server-to-server transfers with safe idle expiry.
+- Added a Worker Thread scale engine with cancellation, backpressure and a durable SQLite/WAL index behind the existing Huge File Workbench.
+- Added an approval-gated WinFsp bootstrap that pins the current security build hash, validates Authenticode and requests elevation only for driver install/repair.
+- Bundled official rclone 1.75.0 for Windows as a checksum-pinned MIT-licensed portable tool and wired it as the fallback cloud-mount engine.
+- Expanded Terminal & Files to 89 capabilities while preserving 55 workflow cards: 12 adaptive tools remain contextual, 12 production layers live in a collapsed three-lane Platform Foundation and 10 deep tools are organized as five focused Expert Workspaces.
+- Added Semantic Shell blocks, signed Command Reproducibility, configuration-aware Config Studio, disposable Shadow Host rehearsals, public-only Identity & Trust Center and encrypted Workspace Recovery Capsules.
+- Added policy-aware multi-monitor Remote Desktop Pro, a virtualized Process & Network graph, directed Cross-Host Data Pipelines and responsive deployment/debug/migration/recovery/incident layouts.
+- Added a ten-engine Production Runtime beneath the existing 89 workflows: identity-pinned connection leases, integrity-chained crash recovery, opt-in OSC shell packages, checkpointed real transfers and signed optimistic remote editing with verification/rollback.
+- Added Ed25519/SHA-256 staged portable-tool updates, disposable protocol/failure matrices, bounded 10k-server/1m-file profiling and an attack corpus that also fixed generic PKCS#8 private-key redaction.
+- Added a five-group, non-table Runtime Cockpit with a one-click bounded production audit and responsive health visualization.
+- Added a real signed Approved Execution lifecycle for whitelisted command templates and atomic file writes with distinct approval, idempotency, verification and rollback.
+- Added Unified Remote Session Canvas, adaptive RDP/VNC quality, guarded desktop file bridge, capability negotiation, optional signed Agent acceleration and declarative Adapter SDK v2.
+- Added bounded visual result renderers, contextual Action Orb, disposable failure Test Lab, keyboard/screen-reader/forced-color support and large-fleet virtualization/streaming strategies.
+- Added Execution Context Beacon, Connection Waterfall & Tuner, Data Boundary Guard, Live Output Privacy Shield, Executable Trust Inspector and resource-budgeted command plans.
+- Added detached jobs, a three-way Conflict Resolution Cockpit, isolated Remote Quarantine Lab, Branchable Terminal, verified SSH channel pooling and a distinct-approver Terminal & Files Review Inbox.
+- Added Cross-Server Command Matrix, resumable Transfer Control Center, encrypted direct server transfer plans, guarded Smart Sync Profiles and traversal-safe Archive Explorer workflows.
+- Added Atomic Remote Editor, redacted Session Time Machine, Filesystem Snapshot Diff, Remote Storage Fabric, Live Virtual Folders and a zoomable Disk Space Visualizer.
+- Added Process/Port/Container Navigator, expiring secret-aware Clipboard Bridge, Shell Resurrection and synchronized Terminal–File Manager Fusion.
+- Added Structured Output Canvas, File Relationship Graph, signed transfer receipts, local predictive cache, native filesystem event streams and semantic configuration history.
+- Added visual batch rename/transform previews, bounded Remote Data Inspector, transport continuity, server identity trust timeline and a reviewable command composer.
+- Added Terminal Focus Mode, Universal Staging Area, multi-monitor layouts, command/file bookmarks, contextual screen explanations, compact workspace health and Disposable Data Lens isolation plans.
+- Added cache-backed Remote Workspace Drive plans, delta block transfers, offline three-way reconciliation, local Remote Code Intelligence and private universal search.
+- Added topology graphs, reviewed ProxyJump/tunnel plans, one-use JIT secret leases, ephemeral SSH certificate requests and encrypted secret-free Context Teleport capsules.
+- Added policy-as-code guardrails, signed read-only forensics, canary fleet plans, Production Safety Lens and minimal-scope Remote Disaster Undo points.
+- Added local Digital Twin effect prediction, deterministic Intent Terminal, telemetry HUD, governed collaborative terminals, Visual Permission Studio, Living Runbooks and adaptive scheduling.
+- Added Terminal & File Manager Pro: structured notebooks, automatic Secure Paste Firewall, deterministic shell translation, isolated Shadow Mode, sidecar inspection, checkpoints, result matrices and sanitized recording workflows.
+- Added transactional multi-file editing with snapshot rollback, container/Kubernetes filesystem adapters, Git-aware files, archive browsing and bounded Huge File Studio streaming.
+- Added encrypted remote content indexes, provenance/causality records, remote duplicate hashing, filesystem heatmaps, OSC-7 context synchronization and cross-protocol transfer/pipeline plans.
+- Added safe drop-zone inventories, encrypted secret-free Connection Capsules, expiring one-use Server AirDrop, server-bound one-use Clipboard Vault and filesystem change explanation.
+- Added Terminal & File Operations Workspace with resumable multi-server contexts, OSC 133 command-effect timelines, snapshot-backed approved undo and governed collaborative file revisions.
+- Added Connection Doctor 2.0, secretless readiness, adaptive transfer planning, canary-first bounded Fleet Terminal and a confirmation-protected Visual SSH Multiplexer.
+- Added full secret-free Environment Diff, disposable and portable rescue manifests, local Operational Memory, policy-aware command completion and constrained intent planning.
+- Added Infrastructure Movie, live blast-radius overlays, four-eyes pair debugging, one-click terminal incident rooms and isolated degraded-network path replay.
+- Added Next-generation Operations: outbound-only Relay Mesh, signed single-use Privilege Broker capabilities and direct/Agent/Relay self-healing connectivity selection.
+- Added structured OSC 133 terminal blocks, atomic block-level delta transfer, content-addressed Filesystem Time Travel and File Manager-enforced Ransomware Guard freezes.
+- Added sandboxed Guacamole/noVNC workspaces, fresh-MFA SSH certificate policies, four-eyes Pair Operations and PWA-based mobile approvals.
+- Added bounded content-free eBPF diagnostics, Network Digital Twin, transactional remote changes with reverse rollback, Server DNA and an integrity-chained Operations Black Box.
+- Added encrypted Offline PWA Vault, import-free WASM Automation Sandbox, non-executable Intent Operations and an isolated scored Operations Flight Simulator.
+- Added Kitsune Agent with signed replay-resistant requests, bounded telemetry/files and allowlisted service controls, plus desktop and Web/Hub enrollment/probing.
+- Added SLO error budgets with deployment freezes, capacity forecasting, canary patch orchestration and quorum-aware reboot coordination.
+- Added host compliance scans, Syft/Trivy SBOM adapters, sequential digest-only image promotion, signed content-addressed air-gap backups and credentialless cloud CLI login.
+- Added non-production Chaos Lab with automatic rollback, simulation-only autonomous remediation, disposable-clone migration rehearsal and native configuration validators.
+- Added hardened cloud-init generation, multi-region failover plans, signed declarative Marketplace packs, global Operations shortcuts and a read-only/navigation voice console.
+- Added Web/Hub parity for saved remote sessions, two-pane files, cloud storage, Advanced Ops, Operations Fabric and Enterprise Ops.
+- Added Operations Fabric: Zero-Trust policies, authenticated multi-person approvals, signed short-lived one-use access grants, scoped one-time secret leases and an audited self-clearing clipboard.
+- Added a live Service Map, credential-free Ansible/OpenTofu/Compose exports, GitOps diff plans, canary-first bounded fleet execution and Network Flight Recorder PCAP evidence.
+- Added scheduled synthetic HTTP/SSH journeys with automatic incident creation, Canary Autopilot with real traffic commands and required rollback, and isolated checksum-verifying disaster recovery simulations.
+- Added Database Studio Pro schema capture, ERD/diff/migration planning and deterministic masked dataset export directly from the existing native database connections.
+- Added conflict-aware offline workspaces for SSH/SFTP, FTP/FTPS, WebDAV, S3 and Azure profiles, plus expiring isolated preview manifests and governed RDP workspaces.
+- Added HMAC-sealed chained Evidence Vault objects, deterministic local-only operations analysis, integrity-gated Operational Replay Labs and portable Rescue Environment exports without embedded credentials.
+- Added Operations Center with a live connection graph, universal command palette, global cross-server search/replace with preview and rollback, Smart Workspaces, infrastructure baselines/diffs/drift detection, blast-radius preview and a deterministic Digital Twin.
+- Added deployment preflight, secret scanning, maintenance gates, a deployment timeline, Time Machine snapshots, replayable safe workflows and shadow releases with health checks and atomic promotion.
+- Added Incident Mode/War Room with automatic diagnostic evidence, automation freeze, integrity-protected Session Capsules, collaborative terminal control, collaborative editor locks and runbook suggestions.
+- Added learned metric anomaly baselines, multi-log correlation, error explanations, safe command generation, Health Contracts, DNS propagation checks and certificate inspection/renewal.
+- Added SSH CA operations, ProxyCommand/Tor/SOCKS support, Mosh, database tunnels, port/process/container inspection, cron/systemd timers and preview-first firewall management.
+- Added content-addressed transfer cache, bandwidth limiting and remote hash skips, deduplicated backups, encrypted secret-free Offline Vault exports and MFA-bound single-use Break Glass grants.
+- Added a unified two-pane File Manager for SFTP, FTP/FTPS, WebDAV, S3-compatible storage and Azure Blob, including recursive transfers, server-to-server streaming, rename/delete, previews, editing, snapshots, undo and 3-way merge.
+- Added an xterm/PTY remote workspace with SSH jump hosts, agent forwarding, tunnels, tmux, RDP/VNC, session recording and text/HTML/asciinema export.
+- Added remote Git, Docker Compose, Kubernetes, HTTP/REST, live metrics, disk/RAM/load/TLS alerts and expanded DNS/SSH/network/firewall/runtime diagnostics.
+- Added managed SSH key generation, installation and rotation plus 1Password, Bitwarden, KeePassXC and Windows safeStorage credential integrations.
+- Added encrypted scheduled remote backups, scheduled synchronization/health checks, retention, workspace templates, team roles, one-use production approvals and expiring passwordless session handoffs.
+- Added a permission-gated declarative plugin SDK for protocol, preview and action extensions, signed update history/rollback and verified portable PuTTY, WinSCP and TigerVNC resources.
+- Added dedicated installer shortcuts for Terminal and File Manager alongside the tray launch actions.
+- Reorganized Hub settings into two explicit contexts: “this computer as the Hub server” and a separate “Hub connections” client view, with live status, field-level explanations, a three-step remote workflow and responsive visual QA coverage.
 - Plesk package release 11 no longer depends on reading or changing nginx Proxy Mode: a tested server-rewrite/internal-location strategy coexists with Plesk routes, preserves REST/WebSocket traffic and ACME, and the Hub menu now shares the server-management group with the other Kitsune plugins.
 - Plesk package release 10 reads nginx Proxy Mode from Plesk web-server settings and updates it through the documented subscription CLI, eliminating the false rollback caused by treating every generated `location /` as active Apache proxying.
 - Plesk package release 9 coordinates managed Hub publication with the domain's Plesk nginx Proxy Mode, preventing duplicate root locations and rolling back both domain settings and custom directives on failure.

@@ -18,6 +18,7 @@ class BackupManager {
     this.backupRoot = path.join(this.appRoot, 'backups', 'databases');
     this.metadataPath = path.join(this.appRoot, 'config', 'backups.json');
     this.schedulePath = path.join(this.appRoot, 'config', 'backup-schedules.json');
+    this.keyPath = path.join(this.appRoot, 'config', 'backup.key');
     this._runner = options.runner || this._runTool.bind(this);
     fs.mkdirSync(this.backupRoot, { recursive: true });
   }
@@ -41,6 +42,10 @@ class BackupManager {
     if (typeof value !== 'string' || !value.trim() || value.length > 128 || value.includes('\0') || /[\\/]/.test(value)) throw new Error('Invalid database name');
     return value.trim();
   }
+
+  _encryptionKey() { const configured = process.env.KITSUNE_BACKUP_KEY; if (configured) return crypto.createHash('sha256').update(configured).digest(); try { const key = Buffer.from(fs.readFileSync(this.keyPath, 'utf8').trim(), 'base64'); if (key.length === 32) return key; } catch {} const key = crypto.randomBytes(32); fs.mkdirSync(path.dirname(this.keyPath), { recursive: true }); fs.writeFileSync(this.keyPath, key.toString('base64'), { mode: 0o600, flag: 'wx' }); return key; }
+  _encryptFile(source) { const destination = `${source}.enc`; const iv = crypto.randomBytes(12); const cipher = crypto.createCipheriv('aes-256-gcm', this._encryptionKey(), iv); const data = fs.readFileSync(source); const encrypted = Buffer.concat([cipher.update(data), cipher.final()]); fs.writeFileSync(destination, Buffer.concat([Buffer.from('KSBK1'), iv, cipher.getAuthTag(), encrypted]), { mode: 0o600 }); fs.unlinkSync(source); return destination; }
+  _decryptFile(source) { const payload = fs.readFileSync(source); if (payload.subarray(0, 5).toString() !== 'KSBK1') throw new Error('Invalid encrypted backup'); const decipher = crypto.createDecipheriv('aes-256-gcm', this._encryptionKey(), payload.subarray(5, 17)); decipher.setAuthTag(payload.subarray(17, 33)); const destination = path.join(this.appRoot, 'temp', `restore-${crypto.randomUUID()}`); fs.mkdirSync(path.dirname(destination), { recursive: true }); fs.writeFileSync(destination, Buffer.concat([decipher.update(payload.subarray(33)), decipher.final()]), { mode: 0o600 }); return destination; }
 
   _connection(input) {
     const connection = this.dbViewer._resolveConnection(input);
@@ -142,18 +147,19 @@ class BackupManager {
       const directory = path.join(this.backupRoot, connection.type, safeDatabase);
       fs.mkdirSync(directory, { recursive: true });
       const extension = { postgresql: 'dump', mysql: 'sql', mariadb: 'sql', mongodb: 'archive.gz' }[connection.type];
-      const destination = path.join(directory, `${safeDatabase}-${stamp}.${extension}`);
+      let destination = path.join(directory, `${safeDatabase}-${stamp}.${extension}`);
       const spec = this._spec(connection, database, destination, 'backup');
       activity.update({ stage: 'dumping', progress: 20, message: `Exporting ${database}` });
       try { await this._runner(spec.tool, spec.args, spec.env, spec); }
       finally { try { if (spec.cleanupFile && fs.existsSync(spec.cleanupFile)) fs.unlinkSync(spec.cleanupFile); } catch {} }
       if (!fs.existsSync(destination)) throw new Error('Database tool finished without creating a backup file');
+      if (options.encrypt) destination = this._encryptFile(destination);
       const stat = fs.statSync(destination);
       const checksum = crypto.createHash('sha256').update(fs.readFileSync(destination)).digest('hex');
       const record = {
         id: crypto.randomUUID(), type: connection.type, database,
         connectionName: connection.name, path: destination, size: stat.size, checksum,
-        createdAt: new Date().toISOString(), label: String(options.label || '').slice(0, 100), verifiedAt: null
+        createdAt: new Date().toISOString(), label: String(options.label || '').slice(0, 100), encrypted: Boolean(options.encrypt), verifiedAt: null
       };
       const metadata = this._metadata(); metadata.backups.push(record); this._saveMetadata(metadata);
       activity.update({ stage: 'verifying', progress: 90, message: 'Verifying checksum' });
@@ -192,9 +198,9 @@ class BackupManager {
     const database = this._databaseName(targetDatabase || record.database);
     return this.activityManager.run('database:restore', `Restore ${database}`, { backupId: id, type: connection.type }, async activity => {
       activity.update({ stage: 'restoring', progress: 15, message: `Restoring into ${database}` });
-      const spec = this._spec(connection, database, record.path, 'restore');
+      const decrypted = record.encrypted ? this._decryptFile(record.path) : ''; const restorePath = decrypted || record.path; const spec = this._spec(connection, database, restorePath, 'restore');
       try { await this._runner(spec.tool, spec.args, spec.env, spec); }
-      finally { try { if (spec.cleanupFile && fs.existsSync(spec.cleanupFile)) fs.unlinkSync(spec.cleanupFile); } catch {} }
+      finally { try { if (spec.cleanupFile && fs.existsSync(spec.cleanupFile)) fs.unlinkSync(spec.cleanupFile); } catch {} try { if (decrypted && fs.existsSync(decrypted)) fs.unlinkSync(decrypted); } catch {} }
       activity.update({ stage: 'checking', progress: 90, message: 'Restore command completed' });
       return { success: true, database, backup: record };
     });
@@ -234,6 +240,7 @@ class BackupManager {
       database: this._databaseName(input.database),
       intervalHours: Math.max(1, Math.min(24 * 365, Number(input.intervalHours) || 24)),
       keep: Math.max(1, Math.min(1000, Number(input.keep) || 10)),
+      encrypt: Boolean(input.encrypt),
       enabled: input.enabled !== false,
       lastRunAt: input.lastRunAt || null,
       nextRunAt: input.nextRunAt || new Date(Date.now() + (Number(input.intervalHours) || 24) * 3600000).toISOString()
@@ -257,7 +264,7 @@ class BackupManager {
     const results = [];
     for (const schedule of schedules.filter(item => item.enabled && Date.parse(item.nextRunAt) <= Date.now())) {
       try {
-        const result = await this.create(schedule.connectionId, schedule.database, { keep: schedule.keep, label: 'scheduled' });
+        const result = await this.create(schedule.connectionId, schedule.database, { keep: schedule.keep, encrypt: schedule.encrypt, label: 'scheduled' });
         schedule.lastRunAt = new Date().toISOString();
         schedule.nextRunAt = new Date(Date.now() + schedule.intervalHours * 3600000).toISOString();
         results.push({ id: schedule.id, ...result });

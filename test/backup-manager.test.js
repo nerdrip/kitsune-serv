@@ -57,3 +57,9 @@ test('backup schedules are normalized and persisted', t => {
   assert.equal(manager.schedules().length, 1);
   assert.equal(manager.removeSchedule(schedule.id).removed, 1);
 });
+
+test('encrypted backups use authenticated storage and schedules retain encryption', async t => {
+  const { manager } = fixture(t); const result = await manager.create('managed:postgresql', 'secure_db', { encrypt: true });
+  assert.equal(result.backup.encrypted, true); assert.match(result.backup.path, /\.enc$/); assert.equal(fs.readFileSync(result.backup.path).subarray(0, 5).toString(), 'KSBK1'); assert.equal(manager.verify(result.backup.id).success, true);
+  const schedule = manager.saveSchedule({ type: 'postgresql', database: 'secure_db', encrypt: true }); assert.equal(schedule.encrypt, true);
+});

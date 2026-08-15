@@ -9,9 +9,12 @@
   "scripts": {
     "start": "electron .",
     "server": "node src/server.js",
+    "agent": "node src/kitsune-agent.js",
+    "agent:keygen": "node src/kitsune-agent.js --generate-token",
     "test": "node --test test/*.test.js",
     "verify:release": "npm test && npm run check && node scripts/check-release.js",
     "test:packaged": "node scripts/smoke-packaged-app.js",
+    "qa:terminal-files": "node scripts/capture-terminal-files-qa.js",
     "test:download-smoke": "node scripts/smoke-service-install.js",
     "check": "node scripts/check-project.js",
     "build:win": "electron-builder --win nsis --config.directories.output=artifacts/windows",
@@ -61,8 +64,10 @@
     },
     "artifactName": "${productName}-${version}-${arch}.${ext}",
     "asar": true,
+    "npmRebuild": false,
     "compression": "maximum",
     "afterPack": "scripts/after-pack.js",
+    "afterSign": "scripts/after-sign-portable-tools.js",
     "files": [
       "src/**/*",
       "assets/icon.png",
@@ -88,6 +93,10 @@
       {
         "from": "tools/cli",
         "to": "cli"
+      },
+      {
+        "from": "vendor/portable-tools",
+        "to": "portable-tools"
       }
     ],
     "win": {
@@ -97,6 +106,7 @@
       "icon": "icon.ico"
     },
     "nsis": {
+      "include": "build/installer.nsh",
       "artifactName": "${productName}-${version}-${arch}-setup.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
@@ -129,8 +139,18 @@
     }
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1110.0",
+    "@azure/storage-blob": "^12.33.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-image": "^0.9.0",
+    "@xterm/addon-search": "^0.15.0",
+    "@xterm/xterm": "^5.5.0",
+    "basic-ftp": "^6.2.0",
     "mongodb": "^7.5.0",
     "mysql2": "^3.23.2",
-    "pg": "^8.22.0"
+    "node-pty": "^1.1.0",
+    "pg": "^8.22.0",
+    "ssh2": "^1.17.0",
+    "webdav": "^5.10.0"
   }
 }

@@ -1,0 +1,42 @@
+'use strict';
+
+const { URL } = require('url');
+const tls = require('tls');
+
+function quote(value) { return `'${String(value).replace(/'/g, `'"'"'`)}'`; }
+function absoluteRemote(value, label = 'path') { const result = String(value || ''); if (!/^\/[A-Za-z0-9_./@+ -]{1,1000}$/.test(result) || result.includes('..')) throw new Error(`Invalid ${label}`); return result; }
+function name(value, label = 'name') { const result = String(value || ''); if (!/^[A-Za-z0-9_.:@/-]{1,250}$/.test(result) || result.includes('..')) throw new Error(`Invalid ${label}`); return result; }
+
+class RemoteDevOpsManager {
+  constructor(remoteOperationsManager) { this.ops = remoteOperationsManager; }
+  git(input, repository, action, options = {}) {
+    const cwd = absoluteRemote(repository, 'repository path'); const commands = {
+      status: 'git status --short --branch', branches: 'git branch -a --no-color', log: `git log --date=iso --pretty=format:'%h%x09%an%x09%ad%x09%s' -n ${Math.max(1, Math.min(200, Number(options.limit) || 50))}`,
+      fetch: 'git fetch --all --prune', pull: 'git pull --ff-only', push: 'git push', diff: 'git diff --no-ext-diff --no-color', stash: 'git stash push -u', submodules: 'git submodule status --recursive'
+    };
+    if (action === 'checkout') commands.checkout = `git switch ${quote(name(options.branch, 'branch'))}`;
+    if (!commands[action]) throw new Error('Unsupported Git action'); return this.ops.exec(input, `cd -- ${quote(cwd)} && ${commands[action]}`, 180000);
+  }
+  compose(input, directory, action, service = '') {
+    const cwd = absoluteRemote(directory, 'Compose directory'); const serviceArg = service ? ` -- ${name(service, 'service')}` : ''; const commands = { ps: 'docker compose ps --all --format json', config: 'docker compose config', pull: 'docker compose pull', up: 'docker compose up -d', down: 'docker compose down', restart: `docker compose restart${serviceArg}`, logs: `docker compose logs --no-color --tail=300${serviceArg}` };
+    if (!commands[action]) throw new Error('Unsupported Docker Compose action'); return this.ops.exec(input, `cd -- ${quote(cwd)} && ${commands[action]}`, 300000);
+  }
+  kubernetes(input, action, options = {}) {
+    const namespace = options.namespace ? ` -n ${name(options.namespace, 'namespace')}` : ''; const pod = options.pod ? name(options.pod, 'pod') : ''; const container = options.container ? ` -c ${name(options.container, 'container')}` : ''; const commands = {
+      contexts: 'kubectl config get-contexts', pods: `kubectl get pods${namespace} -o wide`, deployments: `kubectl get deployments${namespace} -o wide`, events: `kubectl get events${namespace} --sort-by=.lastTimestamp`, logs: `kubectl logs${namespace} ${pod}${container} --tail=500`, describe: `kubectl describe pod${namespace} ${pod}`,
+      'port-forward': `kubectl port-forward${namespace} pod/${pod} ${Number(options.localPort)}:${Number(options.remotePort)}`,
+      exec: `kubectl exec${namespace} ${pod}${container} -- ${String(options.command || 'sh').slice(0, 2000)}`,
+      copy: `kubectl cp${namespace} ${quote(String(options.source || ''))} ${quote(String(options.destination || ''))}${container}`
+    };
+    if (['logs', 'describe', 'port-forward', 'exec', 'copy'].includes(action) && !pod && action !== 'copy') throw new Error('Pod is required'); if (action === 'port-forward' && (![options.localPort, options.remotePort].every(port => Number.isInteger(Number(port)) && Number(port) > 0 && Number(port) < 65536))) throw new Error('Valid ports are required'); if (!commands[action]) throw new Error('Unsupported Kubernetes action'); return this.ops.exec(input, commands[action], action === 'port-forward' ? 300000 : 180000);
+  }
+  metrics(input) { return this.ops.exec(input, "printf '{\"load\":'; awk '{printf \"[%.2f,%.2f,%.2f]\",$1,$2,$3}' /proc/loadavg; printf ',\"memory\":'; free -b | awk '/Mem:/{printf \"{\\\"total\\\":%s,\\\"used\\\":%s,\\\"available\\\":%s}\",$2,$3,$7}'; printf ',\"disk\":'; df -B1 --output=size,used,avail,pcent,target / 2>/dev/null | tail -1 | awk '{printf \"{\\\"total\\\":%s,\\\"used\\\":%s,\\\"available\\\":%s,\\\"percent\\\":\\\"%s\\\",\\\"mount\\\":\\\"%s\\\"}\",$1,$2,$3,$4,$5}'; printf ',\"network\":'; awk 'NR>2{rx+=$2;tx+=$10}END{printf \"{\\\"rx\\\":%.0f,\\\"tx\\\":%.0f}\",rx,tx}' /proc/net/dev; printf ',\"containers\":'; docker ps -q 2>/dev/null | wc -l | tr -d ' '; printf '}'"); }
+  async certificate(urlValue) { const url = new URL(String(urlValue)); if (url.protocol !== 'https:') throw new Error('Certificate check requires HTTPS'); return new Promise((resolve, reject) => { const socket = tls.connect({ host: url.hostname, port: Number(url.port) || 443, servername: url.hostname, rejectUnauthorized: true }, () => { const certificate = socket.getPeerCertificate(); const expiresAt = new Date(certificate.valid_to); socket.end(); resolve({ success: true, subject: certificate.subject?.CN || '', issuer: certificate.issuer?.CN || '', expiresAt: expiresAt.toISOString(), daysRemaining: Math.floor((expiresAt - Date.now()) / 86400000), authorized: socket.authorized }); }); socket.setTimeout(15000, () => socket.destroy(new Error('TLS connection timed out'))); socket.once('error', reject); }); }
+  async alerts(input, thresholds = {}) { const result = await this.metrics(input); if (!result.success) return { success: false, alerts: [{ type: 'unavailable', severity: 'critical', message: result.stderr || 'Server unavailable' }] }; let metrics; try { metrics = JSON.parse(result.stdout); } catch { return { success: false, alerts: [{ type: 'metrics', severity: 'warning', message: 'Server returned invalid metrics' }] }; } const alerts = []; const disk = Number.parseFloat(metrics.disk?.percent) || 0; const memory = metrics.memory?.total ? metrics.memory.used / metrics.memory.total * 100 : 0; const load = Number(metrics.load?.[0]) || 0; if (disk >= (Number(thresholds.diskPercent) || 85)) alerts.push({ type: 'disk', severity: disk >= 95 ? 'critical' : 'warning', value: disk, message: `Root disk usage is ${disk}%` }); if (memory >= (Number(thresholds.memoryPercent) || 90)) alerts.push({ type: 'memory', severity: 'warning', value: memory, message: `Memory usage is ${memory.toFixed(1)}%` }); if (load >= (Number(thresholds.load) || 8)) alerts.push({ type: 'load', severity: 'warning', value: load, message: `1-minute load is ${load}` }); let certificate = null; if (thresholds.httpsUrl) { try { certificate = await this.certificate(thresholds.httpsUrl); if (certificate.daysRemaining <= (Number(thresholds.certificateDays) || 30)) alerts.push({ type: 'certificate', severity: certificate.daysRemaining <= 7 ? 'critical' : 'warning', value: certificate.daysRemaining, message: `TLS certificate expires in ${certificate.daysRemaining} day(s)` }); } catch (error) { alerts.push({ type: 'certificate', severity: 'critical', message: `TLS check failed: ${error.message}` }); } } return { success: true, metrics, certificate, alerts, checkedAt: new Date().toISOString() }; }
+  async httpRequest(request = {}) {
+    const url = new URL(String(request.url || '')); if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Only HTTP and HTTPS are supported'); const method = String(request.method || 'GET').toUpperCase(); if (!['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'].includes(method)) throw new Error('Unsupported HTTP method'); const headers = {}; for (const [key, value] of Object.entries(request.headers || {})) { if (!/^[A-Za-z0-9-]{1,100}$/.test(key)) throw new Error('Invalid header name'); headers[key] = String(value).slice(0, 8192); }
+    const started = Date.now(); const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), Math.max(1000, Math.min(120000, Number(request.timeoutMs) || 30000))); try { const response = await fetch(url, { method, headers, body: ['GET', 'HEAD'].includes(method) ? undefined : String(request.body || '').slice(0, 5_000_000), redirect: 'manual', signal: controller.signal }); const body = Buffer.from(await response.arrayBuffer()); return { success: response.ok, status: response.status, statusText: response.statusText, durationMs: Date.now() - started, headers: Object.fromEntries(response.headers.entries()), body: body.subarray(0, 5_000_000).toString('utf8'), truncated: body.length > 5_000_000, size: body.length }; } finally { clearTimeout(timer); }
+  }
+}
+
+module.exports = RemoteDevOpsManager;

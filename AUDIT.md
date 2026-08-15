@@ -8,7 +8,7 @@ Wydanie 3.0.0 przeszło lokalny gate, pełny build oraz smoke-testy Windows i Li
 
 | Kontrola | Wynik |
 |---|---|
-| testy Node.js na Windows | 126/126 |
+| testy Node.js na Windows | 128/128 |
 | testy Node.js w builderze Linux | 124 OK, 1 pominięty wyłącznie z powodu braku PHP w obrazie |
 | PHP lint rozszerzenia Plesk na Windows | OK |
 | kontrola składni, odwołań DOM i duplikatów ID | OK; 471 odwołań DOM, 1000 unikalnych ID |
@@ -30,6 +30,7 @@ Wydanie 3.0.0 przeszło lokalny gate, pełny build oraz smoke-testy Windows i Li
 - Pasek API pokazuje stany starting/running/stopping/error, URL, uptime, liczniki żądań i błędów oraz ostatni wynik HTTP. Layout Test Lab został sprawdzony w rozdzielczości ze zgłoszenia; palety, płótno i inspektor nie nachodzą na siebie.
 - Kitsune Hub ma trwałe konta, role owner/admin/operator/developer/auditor/viewer, członkostwa zakresowe, scrypt, szyfrowane TOTP, jednorazowe recovery codes, zaproszenia, trwałe sesje i odwoływalne tokeny API/device/agent/Plesk z ograniczonymi uprawnieniami.
 - Gateway obsługuje płaskie subdomeny pod jedną domeną panelu, HTTP i WebSocket, polityki public/session/bearer, walidację targetów i separację kanałów aktualizacji desktop/server/Plesk.
+- Ustawienia Hubu rozdzielają teraz dwie role: serwer uruchomiony na tej maszynie oraz wychodzące połączenia klienckie do innych Hubów. Oba widoki mają niezależny status, objaśnienia skutków ustawień i instrukcję przepływu; QA 1360×860 potwierdza brak poziomego przepełnienia.
 - Parowanie urządzeń używa krótkotrwałych kodów, heartbeatów i odwoływalnych tokenów. Synchronizacja projektów, laboratoriów, API Flow, środowisk, snapshotów, profili wdrożeń i polityk jest wersjonowana, redaguje sekrety, wykrywa konflikty, zachowuje historię, rollback oraz tombstones.
 - Synchronizacja dwóch Hubów jest idempotentna, śledzi rewizje, nie nadpisuje rozbieżnych zmian i opcjonalnie przypina certyfikat TLS po SHA-256. Workflow wdrożeń obsługuje approval, replace, blue-green, canary, preview, health i rollback states.
 - Plesk Bridge release 11 ma wersjonowany executor uprzywilejowany weryfikowany podczas instalacji przez oficjalny `pm_ApiCli::callSbin` self-check, więc proces `post-install` nie próbuje czytać chronionego pliku i Plesk nie może ponownie uruchomić pozostawionej kopii `sbin` z wcześniejszego wydania. Zarządzana publikacja nie odczytuje ani nie zmienia już nginx Proxy Mode. Przetestowana reguła server-rewrite kieruje GET/POST, query string, assety i WebSocket do wewnętrznej lokalizacji Huba, współistnieje z Pleskowym `location /`, pozostawia `/.well-known` obsłudze certyfikatów i przy błędzie przywraca poprzedni plik. Wpis nawigacji Power User korzysta z tej samej sekcji server-management i kolejności co pozostałe pluginy Kitsune, zamiast pojawiać się osobno na dole. Rozszerzenie ma poprawny entry point zarządzany przez Plesk SDK, wymuszone zakończenia linii Unix LF niezależnie od platformy buildera, minimalną wersję Plesk 18.0.41, wybór aktywnej domeny z inventory Pleska, automatyczny/ręczny URL i reverse proxy, tryb zarządzanego lub zewnętrznego Huba, szyfrowane ustawienia, parowanie, heartbeat, redagowany inventory domen, service-plan permission i wpisy menu dla Service Provider/Reseller/Power User. Automatycznie wykrywa zgodny Node.js ≥22.19 z instalacji Pleska lub systemu, dobiera npm i naprawia starszą jednostkę systemd przy starcie. Brakujące ID konektora, sekret i adres Pleska generują się przy zapisie lub wdrożeniu, a start/restart bezpiecznie odświeża zmienne uwierzytelniania bez pełnego redeployu.
@@ -42,8 +43,8 @@ Wydanie 3.0.0 przeszło lokalny gate, pełny build oraz smoke-testy Windows i Li
 
 | Plik | Rozmiar | SHA-256 |
 |---|---:|---|
-| `artifacts/windows/KitsuneServ-3.0.0-x64-setup.exe` | 108 743 498 B | `f111e9c70ef4b7bb5c5699e4996ad679ede66e647a53ea345a21f340b970459a` |
-| `artifacts/windows/KitsuneServ-3.0.0-x64-portable.exe` | 108 430 327 B | `d2b20fc45e505fa089b54010d3b5110a8dd8e03b72cd7a1c716be91f9938917a` |
+| `artifacts/windows/KitsuneServ-3.0.0-x64-setup.exe` | 108 745 509 B | `2975ae44fc468ba95be7848b26090ab02f0a6a1a7a06342972320a1a888fac8d` |
+| `artifacts/windows/KitsuneServ-3.0.0-x64-portable.exe` | 108 432 338 B | `f0818d7ffe5e3e52416abf54c7a3676bf6b140c52a5a2ec9338f1b7e141524df` |
 | `artifacts/linux/KitsuneServ-3.0.0-x86_64.AppImage` | 94 165 359 B | `24fcec7e3bb5b6b9e2eaac2519b423fa56a89f407e8f3fe74d6e2236a19c3035` |
 | `artifacts/linux/KitsuneServ-3.0.0-amd64.deb` | 95 616 104 B | `214740351017871848cbd07aaf517f29561f525c56f31cafaf517ea565d2631d` |
 | `artifacts/linux/KitsuneServ-3.0.0-x86_64.rpm` | 84 118 189 B | `278ef99aefeadf053533b341838a00a2372ef272699cd15a4cd53cfe7e2e17eb` |

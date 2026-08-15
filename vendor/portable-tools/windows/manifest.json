@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-14T16:05:00.000Z",
+  "platform": "win32-x64",
+  "tools": [
+    { "id": "putty", "name": "PuTTY", "version": "0.84", "path": "putty/putty.exe", "sha256": "7056CA2F6A9F3C525845B116C7BF564CED3284A4083EA80D7E9EF51A16F612C4", "license": "MIT", "homepage": "https://www.chiark.greenend.org.uk/~sgtatham/putty/" },
+    { "id": "plink", "name": "Plink", "version": "0.84", "path": "putty/plink.exe", "sha256": "E5621FFE4879F0EC39ED40F688DB9399C2D43054D41EF14472FA335C4693B915", "license": "MIT" },
+    { "id": "pscp", "name": "PSCP", "version": "0.84", "path": "putty/pscp.exe", "sha256": "FB2D69F840026A562629D757095C968B5748DAAF1D08FAD14414A8EF79DE319E", "license": "MIT" },
+    { "id": "psftp", "name": "PSFTP", "version": "0.84", "path": "putty/psftp.exe", "sha256": "7B04CB14D2B5461598FE1FBD057A72092075B550A668492D031D13379F173031", "license": "MIT" },
+    { "id": "pageant", "name": "Pageant", "version": "0.84", "path": "putty/pageant.exe", "sha256": "FA7F58A7DD496F1AE078A67D742A0F4919B39EFBE0590A90A1A11E537F1E4D45", "license": "MIT" },
+    { "id": "puttygen", "name": "PuTTYgen", "version": "0.84", "path": "putty/puttygen.exe", "sha256": "3156E261FF5ED59EE517D016988109358477898A9FA0043739462236DACE6E4A", "license": "MIT" },
+    { "id": "winscp", "name": "WinSCP Portable", "version": "6.5.6", "path": "winscp/WinSCP.exe", "sha256": "CF948EAF8429C582636953E8B6B82097C8BB0A55111EC57E5F890E27DBAB70D9", "license": "GPL-3.0-or-later", "homepage": "https://winscp.net/", "source": "sources/WinSCP-6.5.6-Source.zip" },
+    { "id": "winscp-console", "name": "WinSCP Console", "version": "6.5.6", "path": "winscp/WinSCP.com", "sha256": "F1C35DA6C40B6A59A7C90AF257B06F725F71F329831214A9D752EFDB9AEAD3D6", "license": "GPL-3.0-or-later", "source": "sources/WinSCP-6.5.6-Source.zip" },
+    { "id": "vncviewer", "name": "TigerVNC Viewer", "version": "1.16.2", "path": "tigervnc/vncviewer.exe", "sha256": "58396D99556026DA6B906C9ED51AD6CB5C840CC3FB65E53653C52CA5A80BFAD9", "license": "GPL-2.0-or-later", "homepage": "https://tigervnc.org/", "source": "sources/TigerVNC-1.16.2-source.tar.gz" },
+    { "id": "rclone", "name": "rclone Portable", "version": "1.75.0", "path": "rclone/rclone.exe", "sha256": "8BE30F02266A6EAAD9D481941EF287B9744BB7140034B097AD862A2CCFF3E24C", "upstreamArchiveSha256": "203581F0A7BAEAE873F2347483A798C79E2EAF5C384A4E9D866AA374F1C89AC0", "license": "MIT", "homepage": "https://rclone.org/", "licenseFile": "rclone/COPYING.txt" }
+  ]
+}

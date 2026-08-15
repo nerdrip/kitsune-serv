@@ -181,6 +181,7 @@ class UpdateManager {
         if (actual !== manifest.sha256.toLowerCase()) throw new Error('Downloaded update checksum does not match the signed manifest');
         if (fs.existsSync(target)) fs.rmSync(target, { force: true });
         fs.renameSync(partial, target);
+        const historyFile = path.join(this.updatesRoot, 'verified-history.json'); const history = (() => { try { return JSON.parse(fs.readFileSync(historyFile, 'utf8')); } catch { return []; } })(); history.unshift({ version: manifest.version, path: target, sha256: actual, verifiedAt: new Date().toISOString() }); fs.writeFileSync(historyFile, JSON.stringify(history.filter((item, index, all) => all.findIndex(other => other.path === item.path) === index).slice(0, 10), null, 2), { mode: 0o600 });
         return { success: true, path: target, version: manifest.version, sha256: actual };
       } finally {
         try { output?.destroy(); } catch {}
@@ -201,6 +202,13 @@ class UpdateManager {
       }
       return { success: true, launched: true, path: downloaded.path };
     } catch (error) { return { success: false, error: error.message }; }
+  }
+
+  rollback() {
+    const historyFile = path.join(this.updatesRoot, 'verified-history.json'); let history = []; try { history = JSON.parse(fs.readFileSync(historyFile, 'utf8')); } catch {}
+    const candidate = history.find(item => item.version !== this.currentVersion && fs.existsSync(item.path) && /^[a-f0-9]{64}$/i.test(item.sha256) && crypto.createHash('sha256').update(fs.readFileSync(item.path)).digest('hex') === item.sha256.toLowerCase());
+    if (!candidate) return { success: false, error: 'No previously verified installer is available for rollback' }; if (!this.allowInstall) return { success: false, manual: true, path: candidate.path, error: 'Automatic rollback is disabled in server mode' }; if (this.platform !== 'win32' || path.extname(candidate.path).toLowerCase() !== '.exe') return { success: false, manual: true, path: candidate.path, error: 'Run the verified rollback package with your platform package manager' };
+    const child = spawn(candidate.path, [], { detached: true, stdio: 'ignore', windowsHide: false }); child.unref(); return { success: true, launched: true, version: candidate.version, path: candidate.path };
   }
 }
 
