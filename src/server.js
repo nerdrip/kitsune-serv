@@ -555,10 +555,11 @@ window.kitsuneAPI = {
     onExited: (cb) => { window._kitsuneExitedCb = cb; }
   },
   terminal: {
-    create: () => window.kitsuneAPI._call('terminal/create'),
+    create: (connection = null) => window.kitsuneAPI._call('terminal/create', { connection }),
     write: (id, data) => window.kitsuneAPI._call('terminal/write', { id, data }),
     kill: (id) => window.kitsuneAPI._call('terminal/kill', { id }),
     resize: (id, cols, rows) => window.kitsuneAPI._call('terminal/resize', { id, cols, rows }),
+    profiles: () => window.kitsuneAPI._call('terminal/profiles'),
     onData: (cb) => { window._kitsuneTermDataCb = cb; },
     onExit: (cb) => { window._kitsuneTermExitCb = cb; }
   },
@@ -972,6 +973,38 @@ function terminateSessionResources(sessionId) {
 
 function buildTerminalEnv() {
   return pathManager.buildEnvironment(process.env);
+}
+
+function localShellProfiles() {
+  const profiles = [];
+  const addProfile = (id, name, executable, args = []) => {
+    if (!executable) return;
+    const resolved = process.platform === 'win32'
+      ? (() => {
+          try { return execFileSync('where.exe', [executable], { encoding: 'utf8', windowsHide: true }).split(/\r?\n/)[0].trim(); } catch { return ''; }
+        })()
+      : executable;
+    if (resolved) profiles.push({ id, name, executable: resolved, args });
+  };
+
+  if (process.platform === 'win32') {
+    addProfile('powershell', 'Windows PowerShell', 'powershell.exe', ['-NoLogo']);
+    addProfile('pwsh', 'PowerShell 7', 'pwsh.exe', ['-NoLogo']);
+    addProfile('cmd', 'Command Prompt', 'cmd.exe');
+    const gitBash = ['C:\\Program Files\\Git\\bin\\bash.exe', 'C:\\Program Files (x86)\\Git\\bin\\bash.exe'].find(file => fs.existsSync(file));
+    if (gitBash) profiles.push({ id: 'git-bash', name: 'Git Bash', executable: gitBash, args: ['--login', '-i'] });
+  } else {
+    for (const [id, name, executable] of [
+      ['shell', 'Default shell', process.env.SHELL || '/bin/bash'],
+      ['bash', 'Bash', '/bin/bash'],
+      ['zsh', 'Zsh', '/bin/zsh'],
+      ['sh', 'Sh', '/bin/sh']
+    ]) {
+      addProfile(id, name, executable, ['-l']);
+    }
+  }
+
+  return profiles;
 }
 
 // ============ API Router ============
@@ -1572,13 +1605,23 @@ async function handleAPI(endpoint, body, context = {}) {
     // Terminal
     case 'terminal/create': {
       const id = ++terminalIdCounter;
+      const profiles = localShellProfiles();
+      const localProfile = String(body?.connection?.localProfile || '').trim();
+      const profile = profiles.find(item => item.id === localProfile) || profiles.find(item => item.id === 'shell') || profiles[0];
+      if (!profile) return { success: false, error: 'No local shell is available' };
       const env = buildTerminalEnv();
       const isWin = process.platform === 'win32';
-      const shell = isWin ? (process.env.COMSPEC || 'cmd.exe') : (process.env.SHELL || '/bin/bash');
-      const child = spawn(shell, [], {
-        env, cwd: path.resolve('.'), stdio: ['pipe', 'pipe', 'pipe'],
-        ...(isWin ? { windowsHide: true } : {})
-      });
+      let child;
+      try {
+        child = spawn(profile.executable, profile.args, {
+          env,
+          cwd: path.resolve('.'),
+          stdio: ['pipe', 'pipe', 'pipe'],
+          ...(isWin ? { windowsHide: true } : {})
+        });
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
       terminals.set(id, { process: child, id, sessionId: context.sessionId });
       child.stdout.on('data', (data) => broadcastSSE('terminal:data', { id, data: data.toString() }, context.sessionId));
       child.stderr.on('data', (data) => broadcastSSE('terminal:data', { id, data: data.toString() }, context.sessionId));
@@ -1588,8 +1631,9 @@ async function handleAPI(endpoint, body, context = {}) {
         broadcastSSE('terminal:exit', { id, code: 1 }, context.sessionId);
       });
       child.on('exit', (code) => { terminals.delete(id); broadcastSSE('terminal:exit', { id, code }, context.sessionId); });
-      return { id };
+      return { id, name: profile.name, profileId: profile.id };
     }
+    case 'terminal/profiles': return localShellProfiles();
 
     // Project workspaces and stack orchestration
     case 'workspace/templates': return projectManager.templates();
