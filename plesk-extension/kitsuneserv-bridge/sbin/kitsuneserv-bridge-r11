@@ -180,7 +180,7 @@ final class KitsuneServBridgeManager
             if (file_exists($from)) $this->copyTree($from, $stage . '/' . $relative);
         }
         $this->log('Instaluję zależności produkcyjne w katalogu staging.');
-        $this->run([$this->validatedBinary('npm_binary'), 'ci', '--omit=dev', '--ignore-scripts=false'], $stage, ['NODE_ENV' => 'production']);
+        $this->run([$this->validatedBinary('npm_binary'), 'ci', '--omit=dev', '--ignore-scripts'], $stage, ['NODE_ENV' => 'production']);
         $manifest = json_decode((string) file_get_contents($stage . '/package.json'), true);
         $version = is_array($manifest) ? (string) ($manifest['version'] ?? '') : '';
         if (!preg_match('/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/', $version)) throw new RuntimeException('Invalid KitsuneServ package version.');

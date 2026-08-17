@@ -110,10 +110,11 @@ class RemoteAccessManager {
   remove(id) {
     const sessions = this._read();
     const next = sessions.filter(item => item.id !== id);
+    if (next.length === sessions.length) return { success: false, removed: false, error: 'Unknown remote session' };
     this._write(next);
     this.secretStore.remove(`remote:${id}:password`);
     this.secretStore.remove(`remote:${id}:passphrase`);
-    return { success: true, removed: next.length !== sessions.length };
+    return { success: true, removed: true };
   }
 
   duplicate(id) {
