@@ -44,7 +44,7 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMa
 .titlebar-drag { display: flex; align-items: center; gap: 8px; }
 .titlebar-logo { font-size: 18px; }
 .titlebar-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); letter-spacing: 0.5px; }
-.titlebar-version { font-size: 11px; color: var(--text-muted); background: var(--bg-input); padding: 2px 8px; border-radius: 10px; }
+.titlebar-version { font-size: 11px; color: #cdd4ff; background: rgba(120, 132, 255, 0.14); border: 1px solid rgba(120, 132, 255, 0.32); padding: 2px 8px; border-radius: 10px; }
 .safe-mode-badge { padding: 2px 8px; border: 1px solid rgba(243,156,18,.55); border-radius: 10px; color: var(--warning); background: rgba(243,156,18,.12); font-size: 9px; font-weight: 800; letter-spacing: .7px; }
 .titlebar-controls { display: flex; gap: 2px; -webkit-app-region: no-drag; }
 .titlebar-btn { width: 36px; height: 28px; border: none; background: transparent; color: var(--text-secondary); font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); transition: background var(--transition), color var(--transition); }

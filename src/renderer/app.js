@@ -73,7 +73,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     runtimeSafeMode = Boolean(info.safeMode);
     startupPanel = info.initialPanel || '';
     const versionLabel = document.querySelector('.titlebar-version');
-    if (versionLabel) versionLabel.textContent = `v${info.version}`;
+    if (versionLabel) versionLabel.textContent = `v${info.version || 'unknown'}`;
     const dataRootLabel = document.getElementById('app-data-root');
     if (dataRootLabel) dataRootLabel.textContent = info.dataRoot;
     document.getElementById('safe-mode-badge')?.classList.toggle('hidden', !runtimeSafeMode);
