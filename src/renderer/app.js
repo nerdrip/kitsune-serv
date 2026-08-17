@@ -5631,6 +5631,8 @@ function openRemoteSessionModal(purpose = 'files', session = null) {
   document.getElementById('remote-session-path').value = value.remotePath || '/';
   document.getElementById('remote-session-password').value = '';
   document.getElementById('remote-session-passphrase').value = '';
+  document.getElementById('remote-session-password').placeholder = value.id ? 'Leave empty to keep existing' : 'Password';
+  document.getElementById('remote-session-passphrase').placeholder = value.id ? 'Leave empty to keep existing' : 'Private key passphrase';
   document.getElementById('remote-session-modal').classList.remove('hidden');
 }
 
@@ -5683,7 +5685,10 @@ function initRemoteAccess() {
   document.getElementById('remote-session-save').addEventListener('click', async () => {
     const input = remoteInput();
     try {
-      const result = await api.remote.save(input, { password: input.password, passphrase: input.passphrase });
+      const secrets = {};
+      if (input.password) secrets.password = input.password;
+      if (input.passphrase) secrets.passphrase = input.passphrase;
+      const result = await api.remote.save(input, secrets);
       if (!result.success) return showToast(result.error || 'Could not save session', 'error');
       closeRemoteSessionModal();
       await loadRemoteSessions();
@@ -5773,11 +5778,18 @@ function renderRemoteSessions() {
     card.innerHTML = `<i style="background:${escapeHtml(session.color || '#6f7bff')}"></i><span><strong>${session.favorite ? '★ ' : ''}${session.production ? '◆ ' : ''}${escapeHtml(session.name)}</strong><small>${escapeHtml(session.group ? `${session.group} · ${session.host}` : (session.username ? `${session.username}@${session.host}` : session.host))}</small></span><button class="session-copy" title="Duplicate session">⧉</button><button class="session-remove" title="Remove session">×</button>`;
     card.addEventListener('dblclick', () => openRemoteSessionModal('files', session));
     card.addEventListener('click', event => { if (!event.target.closest('button')) selectRemoteSession(session.id); });
-    card.querySelector('.session-copy').addEventListener('click', async event => { event.stopPropagation(); await api.remote.duplicate(session.id); await loadRemoteSessions(); showToast('Session duplicated', 'success'); });
+    card.querySelector('.session-copy').addEventListener('click', async event => {
+      event.stopPropagation();
+      const result = await api.remote.duplicate(session.id);
+      if (!result?.success) return showToast(result?.error || 'Could not duplicate session', 'error');
+      await loadRemoteSessions();
+      showToast('Session duplicated', 'success');
+    });
     card.querySelector('.session-remove').addEventListener('click', async event => {
       event.stopPropagation();
       if (!confirm(`Remove saved session "${session.name}"?`)) return;
-      await api.remote.remove(session.id);
+      const result = await api.remote.remove(session.id);
+      if (!result?.success) return showToast(result?.error || 'Could not remove session', 'error');
       if (remoteState.active?.id === session.id) remoteState.active = null;
       await loadRemoteSessions();
     });
@@ -6942,8 +6954,19 @@ async function createTerminal(connection = null) {
     showToast(`Maximum ${MAX_TERMINALS} terminals allowed. Close one first.`, 'error');
     return;
   }
-  const result = await api.terminal.create(connection);
-  if (!result?.id) { if (result?.error) showToast(result.error, 'error'); return; }
+  let result;
+  try {
+    result = await api.terminal.create(connection);
+  } catch (error) {
+    showToast(error.message, 'error');
+    return;
+  }
+  if (!result?.id) {
+    if (result?.error) showToast(result.error, 'error');
+    else if (result?.success === false) showToast(result.error || 'Could not start terminal', 'error');
+    else showToast('Could not start terminal', 'error');
+    return;
+  }
   const id = result.id;
   const savedSession = result.sessionId ? remoteState.sessions.find(item => item.id === result.sessionId) : null;
   terminalState.tabs.push({ id, name: result.name || `Local ${id}`, dead: false, remote: Boolean(result.remote), connection: result.remote ? (savedSession || connection) : null, autoReconnect: Boolean(result.remote), production: Boolean(savedSession?.production || savedSession?.group?.toLowerCase().includes('production')) });
