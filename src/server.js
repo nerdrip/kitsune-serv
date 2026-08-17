@@ -263,14 +263,30 @@ function hasValidOrigin(req) {
   }
 }
 
+function getApiTokenFromRequest(req) {
+  const bearer = String(req.headers.authorization || '').match(/^Bearer\s+(.+)$/i);
+  if (bearer && bearer[1]) return bearer[1].trim();
+
+  const headerNames = ['x-kitsune-api-token', 'x-api-token', 'x-kitsune-token'];
+  for (const name of headerNames) {
+    const value = req.headers[name];
+    if (Array.isArray(value)) {
+      if (value[0]) return String(value[0]).trim();
+      continue;
+    }
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
 function hasValidApiToken(req) {
-  const match = String(req.headers.authorization || '').match(/^Bearer\s+(.+)$/i);
-  if (!match) return null;
-  if (API_TOKEN && timingSafeTextEqual(match[1], API_TOKEN)) {
+  const token = getApiTokenFromRequest(req);
+  if (!token) return null;
+  if (API_TOKEN && timingSafeTextEqual(token, API_TOKEN)) {
     const owner = identityManager.listUsers().find(item => item.roles.includes('owner')) || identityManager.listUsers()[0];
     return owner ? { user: owner, principal: identityManager.principal(owner, { tokenKind: 'legacy-api' }) } : null;
   }
-  return identityManager.validateToken(match[1]);
+  return identityManager.validateToken(token);
 }
 
 // ============ HTTP helpers ============
