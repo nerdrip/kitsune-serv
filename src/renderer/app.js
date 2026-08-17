@@ -6987,7 +6987,28 @@ async function createTerminal(connection = null) {
 
   if (typeof Terminal === 'undefined') { pane.innerHTML = '<div class="terminal-empty">xterm.js could not be loaded.</div>'; return; }
   const term = new Terminal({ cursorBlink: true, cursorStyle: 'bar', convertEol: false, scrollback: 12000, fontFamily: 'Cascadia Code, Consolas, monospace', fontSize: 13, lineHeight: 1.2, linkHandler: { activate: (_event, uri) => { if (/^https?:\/\//i.test(uri) && confirm(`Open terminal link in the browser?\n\n${uri}`)) api.shell.openExternal(uri); }, hover: () => {}, leave: () => {} }, theme: { background: '#0d0d14', foreground: '#d7dae0', cursor: '#7f8cff', selectionBackground: '#5964c866', black: '#181820', red: '#e06c75', green: '#98c379', yellow: '#e5c07b', blue: '#61afef', magenta: '#c678dd', cyan: '#56b6c2', white: '#dcdfe4' } });
-  const fit = new FitAddon.FitAddon(); const search = new SearchAddon.SearchAddon(); term.loadAddon(fit); term.loadAddon(search); if (typeof ImageAddon !== 'undefined') term.loadAddon(new ImageAddon.ImageAddon({ enableSizeReports: true, pixelLimit: 4_194_304, sixelSupport: true, sixelSizeLimit: 2_097_152, iipSupport: true, iipSizeLimit: 2_097_152, storageLimit: 32, showPlaceholder: true })); term.open(pane.firstElementChild);
+  const fit = new FitAddon.FitAddon();
+  const search = new SearchAddon.SearchAddon();
+  term.loadAddon(fit);
+  term.loadAddon(search);
+  if (typeof ImageAddon !== 'undefined') {
+    try {
+      term.loadAddon(new ImageAddon.ImageAddon({
+        enableSizeReports: true,
+        pixelLimit: 4_194_304,
+        sixelSupport: true,
+        sixelSizeLimit: 2_097_152,
+        iipSupport: true,
+        iipSizeLimit: 2_097_152,
+        storageLimit: 32,
+        showPlaceholder: true
+      }));
+    } catch (error) {
+      console.warn('Image addon could not be initialized:', error);
+      showToast('Image support in terminal is disabled in this browser.', 'warning');
+    }
+  }
+  term.open(pane.firstElementChild);
   if (typeof KittyGraphicsRenderer !== 'undefined') terminalState.kittyRenderers[id] = new KittyGraphicsRenderer(pane, { maxImageBytes: 2_097_152, maxStorageBytes: 33_554_432 });
   term.parser.registerOscHandler(52, data => { api.terminalFileDeep?.execute('modern-terminal-media', { action: 'parse', data: `\x1b]52;${data}\x07`, clipboardApproved: false }).then(parsed => { const item = parsed.clipboard?.[0]; if (!item || item.bytes > 2 * 1024 * 1024 || !confirm(`Remote terminal requests clipboard access (${formatBytes(item.bytes)}). Allow once?`)) return; return api.terminalFileDeep.execute('modern-terminal-media', { action: 'parse', data: `\x1b]52;${data}\x07`, clipboardApproved: true }).then(approved => api.fabric.clipboardWrite(approved.clipboard[0].value, { ttlSeconds: 60, sessionId: savedSession?.id || '', allowSecrets: false })); }).catch(error => showToast(`Clipboard request blocked: ${error.message}`, 'warning')); return true; });
   terminalState.instances[id] = term; terminalState.fitAddons[id] = fit; terminalState.searchAddons[id] = search;
