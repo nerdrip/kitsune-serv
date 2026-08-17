@@ -2042,6 +2042,32 @@ async function handleRequest(req, res) {
     return;
   }
 
+  if (pathname === '/manifest.webmanifest') {
+    const manifestPath = path.join(__dirname, 'renderer', 'manifest.webmanifest');
+    try {
+      const manifest = fs.readFileSync(manifestPath, 'utf8');
+      res.writeHead(200, {
+        'Content-Type': MIME_TYPES['.webmanifest'],
+        'Content-Length': Buffer.byteLength(manifest),
+        'Cache-Control': 'no-cache'
+      });
+      res.end(manifest);
+    } catch {
+      sendJSON(res, {
+        name: 'KitsuneServ Operations',
+        short_name: 'KitsuneServ',
+        description: 'Offline-capable server operations and approval console',
+        start_url: '/',
+        scope: '/',
+        display: 'standalone',
+        background_color: '#0f0f1a',
+        theme_color: '#0f0f1a',
+        categories: ['developer', 'utilities', 'productivity']
+      });
+    }
+    return;
+  }
+
   // ---- Auth check for everything else ----
   const sessionToken = getSessionIdFromReq(req);
   const sessionAuthentication = validateSession(sessionToken);
@@ -2135,7 +2161,8 @@ async function handleRequest(req, res) {
     '/node_modules/@xterm/xterm/css/xterm.css': [path.join(__dirname, '..', 'node_modules', '@xterm', 'xterm', 'css', 'xterm.css'), 'text/css; charset=utf-8'],
     '/node_modules/@xterm/xterm/lib/xterm.js': [path.join(__dirname, '..', 'node_modules', '@xterm', 'xterm', 'lib', 'xterm.js'), 'application/javascript; charset=utf-8'],
     '/node_modules/@xterm/addon-fit/lib/addon-fit.js': [path.join(__dirname, '..', 'node_modules', '@xterm', 'addon-fit', 'lib', 'addon-fit.js'), 'application/javascript; charset=utf-8'],
-    '/node_modules/@xterm/addon-search/lib/addon-search.js': [path.join(__dirname, '..', 'node_modules', '@xterm', 'addon-search', 'lib', 'addon-search.js'), 'application/javascript; charset=utf-8']
+    '/node_modules/@xterm/addon-search/lib/addon-search.js': [path.join(__dirname, '..', 'node_modules', '@xterm', 'addon-search', 'lib', 'addon-search.js'), 'application/javascript; charset=utf-8'],
+    '/node_modules/@xterm/addon-image/lib/addon-image.js': [path.join(__dirname, '..', 'node_modules', '@xterm', 'addon-image', 'lib', 'addon-image.js'), 'application/javascript; charset=utf-8']
   };
   if (terminalVendorAssets[pathname]) {
     const [vendorPath, type] = terminalVendorAssets[pathname]; sendFile(res, vendorPath, type); return;
