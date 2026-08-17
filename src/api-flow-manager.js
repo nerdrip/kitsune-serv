@@ -140,7 +140,7 @@ class ApiFlowManager {
   _public(project) {
     const runtime = this.servers.get(project.id);
     return structuredClone({
-      ...project, running: Boolean(runtime), url: runtime ? `http://${project.host === '0.0.0.0' ? '127.0.0.1' : project.host}:${project.port}${project.basePath}` : null,
+      ...project, running: Boolean(runtime), url: runtime ? `http://${project.host}:${project.port}${project.basePath}` : null,
       runtime: runtime ? {
         startedAt: runtime.startedAt, uptimeMs: Math.max(0, Date.now() - Date.parse(runtime.startedAt)),
         requestCount: runtime.requestCount, errorCount: runtime.errorCount,

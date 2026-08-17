@@ -3039,6 +3039,26 @@ const apiFlowState = {
 };
 
 function apiFlowId(prefix) { return `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`}`; }
+function apiFlowPublicHost(rawHost) {
+  const configuredHost = String(rawHost || '127.0.0.1');
+  if (configuredHost !== '0.0.0.0') return configuredHost;
+  const hostname = String(window.location?.hostname || '').toLowerCase();
+  if (!hostname || ['localhost', '127.0.0.1', '::1', '[::1]'].includes(hostname)) return '127.0.0.1';
+  return hostname;
+}
+
+function apiFlowPublicUrl(project, suffix = '') {
+  const host = apiFlowPublicHost(project?.host);
+  const port = Number(project?.port || 9393);
+  const basePath = String(project?.basePath || '/api');
+  return `http://${host}:${port}${basePath}${suffix || ''}`;
+}
+
+function apiFlowDefaultHost() {
+  const hostname = String(window.location?.hostname || '').toLowerCase();
+  return ['localhost', '127.0.0.1', '::1', '[::1]'].includes(hostname) ? '127.0.0.1' : '0.0.0.0';
+}
+
 function selectedApiFlowEndpoint() { return apiFlowState.project?.endpoints?.find(item => item.id === apiFlowState.endpointId) || null; }
 function selectedApiFlowNode() { return selectedApiFlowEndpoint()?.nodes?.find(item => item.id === apiFlowState.selectedNodeId) || null; }
 
@@ -3052,7 +3072,7 @@ function defaultApiFlowEndpoint(index = 1) {
 
 function createApiFlowDraft() {
   const endpoint = defaultApiFlowEndpoint();
-  return { id: apiFlowId('flow'), name: 'Nowe REST API', slug: '', port: 9393, host: '127.0.0.1', basePath: '/api', cors: true, endpoints: [endpoint], running: false, url: null };
+  return { id: apiFlowId('flow'), name: 'Nowe REST API', slug: '', port: 9393, host: apiFlowDefaultHost(), basePath: '/api', cors: true, endpoints: [endpoint], running: false, url: null };
 }
 
 function initApiFlowBuilder() {
@@ -3074,8 +3094,15 @@ function initApiFlowBuilder() {
   document.getElementById('api-flow-validate')?.addEventListener('click', () => validateApiFlow(true));
   document.getElementById('api-flow-send-test')?.addEventListener('click', sendApiFlowTest);
   document.getElementById('api-flow-copy-test')?.addEventListener('click', () => copyApiFlowUrl(document.getElementById('api-flow-test-url')?.value));
-  document.getElementById('api-flow-copy-url')?.addEventListener('click', () => copyApiFlowUrl(apiFlowState.project?.url));
-  document.getElementById('api-flow-open-url')?.addEventListener('click', () => apiFlowState.project?.url && api.shell.openExternal(apiFlowState.project.url));
+  document.getElementById('api-flow-copy-url')?.addEventListener('click', () => {
+    const project = apiFlowState.project;
+    copyApiFlowUrl(project?.running ? apiFlowPublicUrl(project) : '');
+  });
+  document.getElementById('api-flow-open-url')?.addEventListener('click', () => {
+    const project = apiFlowState.project;
+    if (!project?.running) return;
+    api.shell.openExternal(apiFlowPublicUrl(project));
+  });
   document.getElementById('api-flow-refresh-logs')?.addEventListener('click', refreshApiFlowLogs);
   document.getElementById('api-flow-clear-logs')?.addEventListener('click', clearApiFlowLogs);
   document.querySelectorAll('[data-api-flow-view]').forEach(button => button.addEventListener('click', () => setApiFlowView(button.dataset.apiFlowView)));
@@ -3194,7 +3221,8 @@ function renderApiFlowToolbar() {
   document.getElementById('api-flow-name').value = project.name || ''; document.getElementById('api-flow-port').value = project.port || 9393; document.getElementById('api-flow-host').value = project.host || '127.0.0.1'; document.getElementById('api-flow-base-path').value = project.basePath || '/api'; document.getElementById('api-flow-cors').checked = project.cors !== false;
   renderApiFlowToggle();
   document.getElementById('api-flow-delete').disabled = !apiFlowState.projects.some(item => item.id === project.id);
-  const dirty = document.getElementById('api-flow-dirty-state'); dirty.textContent = apiFlowState.dirty ? '● Niezapisane zmiany' : project.running ? `● Działa · ${project.url || ''}` : '✓ Zapisano'; dirty.classList.toggle('dirty', apiFlowState.dirty); dirty.classList.toggle('running', Boolean(project.running));
+  const runtimeUrl = apiFlowPublicUrl(project);
+  const dirty = document.getElementById('api-flow-dirty-state'); dirty.textContent = apiFlowState.dirty ? '● Niezapisane zmiany' : project.running ? `● Działa · ${runtimeUrl}` : '✓ Zapisano'; dirty.classList.toggle('dirty', apiFlowState.dirty); dirty.classList.toggle('running', Boolean(project.running));
 }
 
 function renderApiFlowToggle() {
@@ -3217,7 +3245,7 @@ function renderApiFlowRuntime() {
   bar.dataset.state = state;
   const labels = { running: 'API działa', stopped: 'API zatrzymane', starting: apiFlowState.operation === 'testing' ? 'Przygotowuję test live…' : 'Uruchamiam API…', stopping: 'Zatrzymuję API…', error: 'Błąd runtime' };
   document.getElementById('api-flow-runtime-label').textContent = labels[state];
-  const url = project.url || `http://${project.host === '0.0.0.0' ? '127.0.0.1' : project.host}:${project.port}${project.basePath || ''}`;
+  const url = apiFlowPublicUrl(project);
   document.getElementById('api-flow-runtime-url').textContent = project.running ? url : `Docelowo: ${url}`;
   document.getElementById('api-flow-runtime-uptime').textContent = project.running ? formatApiFlowUptime(project.runtime?.uptimeMs || 0) : '—';
   document.getElementById('api-flow-runtime-requests').textContent = String(project.runtime?.requestCount || 0);
@@ -3469,7 +3497,7 @@ async function saveAndRestartApiFlow() {
     const saved = await saveApiFlowProject(false); if (!saved) return;
     if (wasRunning) {
       await api.apiFlow.start(saved.id); apiFlowState.project = structuredClone(await api.apiFlow.get(saved.id));
-      showToast(`Zmiany zapisane, API zrestartowane: ${apiFlowState.project.url}`, 'success');
+      showToast(`Zmiany zapisane, API zrestartowane: ${apiFlowPublicUrl(apiFlowState.project)}`, 'success');
     }
   } catch (error) {
     apiFlowState.runtimeError = error.message;
@@ -3485,7 +3513,7 @@ async function toggleApiFlowServer() {
   try {
     if (project.running) await api.apiFlow.stop(project.id);
     else { if (apiFlowState.dirty || !apiFlowState.projects.some(item => item.id === project.id)) project = await saveApiFlowProject(true); if (!project) return; await api.apiFlow.start(project.id); }
-    const fresh = await api.apiFlow.get(project.id); apiFlowState.project = structuredClone(fresh); apiFlowState.projects = await api.apiFlow.list(); renderApiFlowBuilder(); showToast(fresh.running ? `API działa: ${fresh.url}` : 'API zatrzymane', 'success');
+    const fresh = await api.apiFlow.get(project.id); apiFlowState.project = structuredClone(fresh); apiFlowState.projects = await api.apiFlow.list(); renderApiFlowBuilder(); showToast(fresh.running ? `API działa: ${apiFlowPublicUrl(fresh)}` : 'API zatrzymane', 'success');
   } catch (error) { apiFlowState.runtimeError = error.message; showToast(error.message, 'error'); }
   finally { apiFlowState.operation = 'idle'; await refreshApiFlowRuntimeStatus(); renderApiFlowBuilder(); }
 }
@@ -3501,7 +3529,7 @@ function setApiFlowView(view) {
 
 function updateApiFlowTestUrl() {
   const project = apiFlowState.project; const endpoint = selectedApiFlowEndpoint(); if (!project || !endpoint) return;
-  document.getElementById('api-flow-test-method').textContent = endpoint.method; document.getElementById('api-flow-test-url').value = `http://${project.host === '0.0.0.0' ? '127.0.0.1' : project.host}:${project.port}${project.basePath || ''}${endpoint.path}`;
+  document.getElementById('api-flow-test-method').textContent = endpoint.method; document.getElementById('api-flow-test-url').value = apiFlowPublicUrl(project, endpoint.path);
 }
 
 function parseApiFlowTesterValue(id, fallback) {
