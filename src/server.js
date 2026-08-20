@@ -1948,8 +1948,25 @@ async function handleAPI(endpoint, body, context = {}) {
     case 'apiFlow/get': return apiFlowManager.get(body.id);
     case 'apiFlow/validate': return apiFlowManager.validate(body.input || {});
     case 'apiFlow/save': return apiFlowManager.save(body.input || {});
-    case 'apiFlow/remove': return apiFlowManager.remove(body.id);
-    case 'apiFlow/start': return apiFlowManager.start(body.id);
+    case 'apiFlow/remove': {
+      const removed = apiFlowManager.remove(body.id);
+      const route = hubManager.listRoutes().find(item => item.kind === 'api-flow' && item.resourceId === body.id);
+      if (route) hubManager.removeRoute(route.id);
+      return { ...removed, routeRemoved: Boolean(route) };
+    }
+    case 'apiFlow/start': {
+      const started = await apiFlowManager.start(body.id);
+      const project = apiFlowManager.get(body.id);
+      let publication = null; let publicationWarning = '';
+      try {
+        publication = hubManager.ensureApiFlowRoute({
+          resourceId: project.id, name: project.name, slug: project.slug,
+          target: `http://127.0.0.1:${project.port}`, authPolicy: 'public', ownerNodeId: 'server-local'
+        });
+        if (!publication) publicationWarning = 'Plesk Bridge nie zsynchronizował bazowej domeny API';
+      } catch (error) { publicationWarning = error.message; }
+      return { ...started, publication, ...(publicationWarning ? { publicationWarning } : {}) };
+    }
     case 'apiFlow/stop': return apiFlowManager.stop(body.id);
     case 'apiFlow/status': return apiFlowManager.status(body.id);
     case 'apiFlow/test': return apiFlowManager.test(body.projectId, body.endpointId, body.request || {});
@@ -2051,6 +2068,15 @@ async function handleRequest(req, res) {
     const authorization = routeAuthentication(req, hubRoute);
     if (!authorization.allowed) { sendJSON(res, { error: 'Authentication is required for this Hub route' }, 401); return; }
     proxyHubRequest(req, res, hubRoute); return;
+  }
+  const apiNamespace = hubManager.settings().gatewayEnabled !== false ? hubManager.apiNamespaceForHost(req.headers.host || '') : null;
+  if (apiNamespace) {
+    sendJSON(res, {
+      error: 'No published API matches this hostname',
+      namespace: apiNamespace,
+      hint: `Start an API Flow to publish it automatically as <api-name>.${apiNamespace}`
+    }, 404);
+    return;
   }
   if (!isIpAllowed(clientAddress, ALLOWED_IPS)) {
     sendJSON(res, { error: 'Client address is not allowed' }, 403);

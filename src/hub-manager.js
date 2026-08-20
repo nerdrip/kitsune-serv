@@ -92,6 +92,7 @@ class HubManager {
     const payload = this._read(); this._cleanup(payload);
     return {
       enabled: Boolean(payload.settings.enabled), panelDomain: payload.settings.panelDomain, wildcardDomain: payload.settings.panelDomain ? `*.${payload.settings.panelDomain}` : '',
+      apiDomains: this._apiNamespaces(payload),
       authMode: payload.settings.authMode, gatewayEnabled: payload.settings.gatewayEnabled !== false,
       nodeCount: payload.nodes.length, onlineNodes: payload.nodes.filter(node => node.status === 'online').length,
       routeCount: payload.routes.filter(route => route.enabled !== false).length, objectCount: payload.objects.filter(object => !object.deletedAt).length,
@@ -126,9 +127,51 @@ class HubManager {
   }
 
   hostname(kind, value) {
-    const settings = this._read().settings; if (!settings.panelDomain) throw new Error('Configure the panel domain first');
+    const payload = this._read(); const settings = payload.settings; if (!settings.panelDomain) throw new Error('Configure the panel domain first');
+    if (kind === 'api-flow') {
+      const namespace = this._apiNamespaces(payload)[0];
+      if (namespace) return `${slugify(value)}.${namespace}`;
+    }
     const prefixes = settings.routePrefix || {}; const prefix = prefixes[kind] || slugify(kind); const slug = slugify(value);
     const label = `${prefix}-${slug}`.slice(0, 63).replace(/-$/, ''); if (!SLUG_PATTERN.test(label)) throw new Error('Could not generate a valid hostname'); return `${label}.${settings.panelDomain}`;
+  }
+
+  _apiNamespaces(payload = this._read()) {
+    const panelDomain = String(payload.settings?.panelDomain || '').toLowerCase();
+    if (!panelDomain) return [];
+    const directDepth = panelDomain.split('.').length + 1;
+    return [...new Set((payload.nodes || [])
+      .filter(node => node.kind === 'plesk')
+      .flatMap(node => Array.isArray(node.inventory?.apiDomains) ? node.inventory.apiDomains : [])
+      .map(value => String(value || '').trim().toLowerCase())
+      .filter(value => DOMAIN_PATTERN.test(value) && value.endsWith(`.${panelDomain}`) && value.split('.').length === directDepth))]
+      .sort();
+  }
+
+  apiNamespaces() { return clone(this._apiNamespaces()); }
+
+  apiNamespaceForHost(host) {
+    const hostname = String(host || '').trim().toLowerCase().replace(/:\d+$/, '');
+    return this._apiNamespaces().find(namespace => hostname === namespace || (hostname.endsWith(`.${namespace}`) && hostname.split('.').length === namespace.split('.').length + 1)) || null;
+  }
+
+  ensureApiFlowRoute(input = {}) {
+    const payload = this._read(); const namespace = this._apiNamespaces(payload)[0];
+    if (!namespace) return null;
+    const resourceId = String(input.resourceId || '').slice(0, 120); if (!resourceId) throw new Error('API Flow resource ID is required');
+    const existing = payload.routes.find(route => route.kind === 'api-flow' && route.resourceId === resourceId);
+    const existingNamespace = existing ? this.apiNamespaceForHost(existing.hostname) : null;
+    let hostname = existingNamespace && existing.hostname !== existingNamespace ? existing.hostname : `${slugify(input.slug || input.name || resourceId)}.${namespace}`;
+    const occupied = payload.routes.find(route => route.id !== existing?.id && route.hostname === hostname);
+    if (occupied) {
+      const suffix = hash(resourceId).slice(0, 6); const label = `${slugify(input.slug || input.name || resourceId).slice(0, 56)}-${suffix}`;
+      hostname = `${label}.${namespace}`;
+    }
+    return this.saveRoute({
+      id: existing?.id, kind: 'api-flow', resourceId, name: input.name, hostname,
+      target: input.target, authPolicy: input.authPolicy || 'public', websocket: false,
+      ownerNodeId: input.ownerNodeId || existing?.ownerNodeId || ''
+    });
   }
 
   listTeams() { return clone(this._read().teams); }
@@ -156,7 +199,10 @@ class HubManager {
     const payload = this._read(); if (!payload.settings.panelDomain) throw new Error('Configure the panel domain first');
     const id = String(input.id || this._id('route')); const kind = String(input.kind || 'project');
     const hostname = String(input.hostname || this.hostname(kind, input.slug || input.name)).trim().toLowerCase();
-    if (!DOMAIN_PATTERN.test(hostname) || !hostname.endsWith(`.${payload.settings.panelDomain}`) || hostname.split('.').length !== payload.settings.panelDomain.split('.').length + 1) throw new Error('Route must use one direct subdomain of the panel domain');
+    const direct = hostname.endsWith(`.${payload.settings.panelDomain}`) && hostname.split('.').length === payload.settings.panelDomain.split('.').length + 1;
+    const apiNamespace = kind === 'api-flow' ? this._apiNamespaces(payload).find(namespace => hostname.endsWith(`.${namespace}`) && hostname.split('.').length === namespace.split('.').length + 1) : null;
+    const validPlacement = kind === 'api-flow' ? Boolean(apiNamespace) : direct;
+    if (!DOMAIN_PATTERN.test(hostname) || !validPlacement) throw new Error(kind === 'api-flow' ? 'API route must use one name below a synchronized Plesk API domain' : 'Route must use one direct subdomain of the panel domain');
     const target = this._normalizeTarget(input.target); const index = payload.routes.findIndex(route => route.id === id);
     if (payload.routes.some((route, routeIndex) => routeIndex !== index && route.hostname === hostname)) throw new Error('Hostname is already assigned');
     const now = new Date(this.now()).toISOString(); const route = { id, kind, resourceId: String(input.resourceId || '').slice(0, 120), hostname, target, websocket: input.websocket !== false, enabled: input.enabled !== false, authPolicy: ['public', 'session', 'token'].includes(input.authPolicy) ? input.authPolicy : 'session', ownerNodeId: String(input.ownerNodeId || '').slice(0, 120), createdAt: index >= 0 ? payload.routes[index].createdAt : now, updatedAt: now };

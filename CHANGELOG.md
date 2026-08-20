@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.1.2 — 2026-08-20
+
+- Made Plesk API domains reusable namespaces: starting `Nowe API` in web mode now publishes `nowe-api.api.example.com` automatically while keeping the process port internal.
+- Prevented unmatched API namespace requests from falling through to the Kitsune Hub login page and added explicit API-not-found responses.
+- Added automatic wildcard DNS provisioning attempts and wildcard nginx host routing in Plesk Bridge r18, with actionable DNS/TLS warnings when the provider is external.
+- Clarified the desktop `localhost:port` model versus server-side public HTTPS addresses in API Flow.
+- Added exact `{steps.block-id}` result names, documented result fields and contextual placeholder examples to every API Flow block.
+
 ## 3.1.1 — 2026-08-20
 
 - Fixed web terminal startup output and added real SSH terminal sessions in server mode.

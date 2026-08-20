@@ -60,6 +60,7 @@ test('web mode authenticates and exposes a desktop-parity API', { timeout: 30000
   const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'kitsune-web-'));
   const port = await freePort();
   const upstreamPort = await freePort();
+  const apiFlowPort = await freePort();
   const managedConnectorSecret = 'managed-plesk-integration-secret-123456';
   const upstream = http.createServer((req, res) => {
     if (req.url === '/modules/kitsuneserv-bridge/public/auth.php' && req.method === 'POST') {
@@ -166,7 +167,7 @@ test('web mode authenticates and exposes a desktop-parity API', { timeout: 30000
   assert.equal(managedConnectors[0].id, 'managed-plesk');
   assert.equal(managedConnectors[0].baseUrl, `http://127.0.0.1:${upstreamPort}`);
   assert.equal(managedConnectors[0].configured, true);
-  const enrollmentRequest = { connectorId: 'managed-plesk', timestamp: Date.now(), nonce: crypto.randomBytes(16).toString('hex'), device: { name: 'Managed Plesk', platform: 'Linux', version: '3.1.1-r17', capabilities: ['plesk-sso', 'inventory'] } };
+  const enrollmentRequest = { connectorId: 'managed-plesk', timestamp: Date.now(), nonce: crypto.randomBytes(16).toString('hex'), device: { name: 'Managed Plesk', platform: 'Linux', version: '3.1.2-r18', capabilities: ['plesk-sso', 'inventory'] } };
   const enrollmentSignature = crypto.createHmac('sha256', managedConnectorSecret).update(stable(enrollmentRequest)).digest('base64url');
   const enrollmentResponse = await fetch(`${base}/auth/plesk/enroll`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-kitsune-enrollment-signature': enrollmentSignature }, body: JSON.stringify(enrollmentRequest) });
   assert.equal(enrollmentResponse.status, 200);
@@ -186,6 +187,19 @@ test('web mode authenticates and exposes a desktop-parity API', { timeout: 30000
   assert.deepEqual(usersAfterMerge.find(user => user.id === matchingLocal.id).roles, ['operator']);
   const hubConfiguration = await (await request('hub/configure', { input: { enabled: true, panelDomain: 'panel.example.test', authMode: 'hybrid' } })).json();
   assert.equal(hubConfiguration.wildcardDomain, '*.panel.example.test');
+  const pleskInventory = await fetch(`${base}/api/hub/heartbeat`, { method: 'POST', headers: { authorization: `Bearer ${automaticEnrollment.token}`, 'content-type': 'application/json' }, body: JSON.stringify({ nodeId: automaticEnrollment.node.id, input: { inventory: { apiDomains: ['api.panel.example.test'] } } }) });
+  assert.equal(pleskInventory.status, 200);
+  const apiFlow = { id: 'flow-publication', name: 'Nowe API', port: apiFlowPort, host: '127.0.0.1', basePath: '/api', cors: true, endpoints: [{ id: 'hello', name: 'Hello', method: 'GET', path: '/hello', enabled: true, nodes: [{ id: 'input', type: 'input', name: 'Input', x: 20, y: 20, next: 'output', config: {} }, { id: 'output', type: 'output', name: 'Output', x: 300, y: 20, config: { status: 200, body: { published: true } } }] }] };
+  const savedApiFlow = await (await request('apiFlow/save', { input: apiFlow })).json();
+  assert.equal(savedApiFlow.project.id, apiFlow.id);
+  const startedApiFlow = await (await request('apiFlow/start', { id: apiFlow.id })).json();
+  assert.equal(startedApiFlow.publication.hostname, 'nowe-api.api.panel.example.test');
+  const publicApi = await requestWithHost(port, '/api/hello', startedApiFlow.publication.hostname);
+  assert.equal(publicApi.status, 200);
+  assert.deepEqual(JSON.parse(publicApi.body), { published: true });
+  const namespaceWithoutApi = await requestWithHost(port, '/', 'api.panel.example.test');
+  assert.equal(namespaceWithoutApi.status, 404);
+  assert.match(namespaceWithoutApi.body, /No published API matches this hostname/);
   const publicRoute = await (await request('hub/saveRoute', { input: { name: 'Echo', kind: 'project', target: `http://127.0.0.1:${upstreamPort}`, authPolicy: 'public' } })).json();
   const proxied = await requestWithHost(port, '/gateway-test?q=1', publicRoute.hostname);
   assert.equal(proxied.status, 200);

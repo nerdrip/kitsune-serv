@@ -44,7 +44,10 @@ function project(port = 9393) {
 
 test('API Flow catalog exposes executable blocks and nested placeholders preserve types', () => {
   const manager = new ApiFlowManager(process.cwd());
-  assert.ok(manager.catalog().length >= 30);
+  const catalog = manager.catalog();
+  assert.ok(catalog.length >= 30);
+  assert.deepEqual(catalog.find(block => block.type === 'http-request').result.fields, ['data', 'status', 'ok', 'headers']);
+  assert.deepEqual(catalog.find(block => block.type === 'database-query').result.fields, ['objects', 'columns', 'rows']);
   assert.deepEqual(templateValue({ body: '{body}', id: '{query.id}' }, { body: { ok: true }, query: { id: 7 } }), { body: { ok: true }, id: 7 });
 });
 

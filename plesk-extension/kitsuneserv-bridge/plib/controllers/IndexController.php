@@ -59,12 +59,15 @@ class IndexController extends pm_Controller_Action
             Modules_KitsuneservBridge_Config::clearSecrets($clear);
             $generated = Modules_KitsuneservBridge_Config::ensureSsoConfiguration($this->currentPleskOrigin());
             $webServerError = null;
+            $dnsWarnings = $this->ensureApiWildcardDns(Modules_KitsuneservBridge_Config::values());
             try { $this->refreshWebServerDomains($previous, Modules_KitsuneservBridge_Config::values()); }
             catch (Throwable $exception) { $webServerError = $exception->getMessage(); }
             $message = 'Konfiguracja KitsuneServ Bridge została zapisana.';
             if (array_filter($generated)) $message .= ' Brakujące ustawienia Plesk SSO zostały wygenerowane automatycznie.';
+            if (!$dnsWarnings && !empty($values['api_domains'])) $message .= ' Wildcard DNS dla bazowych domen API został sprawdzony lub dodany.';
             $this->_status->addMessage('info', $message);
             if ($webServerError) $this->_status->addMessage('warning', 'Ustawienia zapisano, ale Plesk nie przebudował jednej z domen WWW: ' . $webServerError . ' Użyj „Przebuduj domeny WWW” po usunięciu problemu.');
+            foreach ($dnsWarnings as $warning) $this->_status->addMessage('warning', $warning);
         } catch (Throwable $exception) {
             $this->_status->addMessage('error', 'Nie zapisano konfiguracji: ' . $exception->getMessage());
         }
@@ -328,7 +331,7 @@ class IndexController extends pm_Controller_Action
         $runtime = null;
         try {
             $runtime = Modules_KitsuneservBridge_Config::createRuntimeConfig('status');
-            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r17', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
+            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r18', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
             if ((int) ($result['code'] ?? 1) !== 0) {
                 $detail = trim((string) ($result['stderr'] ?? $result['stdout'] ?? ''));
                 return mb_substr($detail !== '' ? $detail : 'Narzędzie statusu zakończyło się błędem.', -2000);
@@ -344,7 +347,7 @@ class IndexController extends pm_Controller_Action
     private function runImmediateOperation($runtime)
     {
         try {
-            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r17', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
+            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r18', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
             if ((int) ($result['code'] ?? 1) !== 0) {
                 $detail = trim((string) ($result['stderr'] ?? $result['stdout'] ?? ''));
                 throw new RuntimeException($detail !== '' ? $detail : 'Operacja zakończyła się błędem.');
@@ -411,6 +414,30 @@ class IndexController extends pm_Controller_Action
             try { $manager->updateDomainConfiguration(pm_Domain::getByName($name)); }
             catch (Throwable $exception) { throw new RuntimeException('Nie udało się przebudować konfiguracji WWW domeny ' . $name . ': ' . $exception->getMessage(), 0, $exception); }
         }
+    }
+
+    private function ensureApiWildcardDns(array $config)
+    {
+        $panelDomain = strtolower(trim((string) ($config['panel_domain'] ?? '')));
+        $warnings = [];
+        if ($panelDomain === '') return $warnings;
+        foreach (array_values(array_diff(Modules_KitsuneservBridge_Config::proxyDomains($config), [$panelDomain])) as $apiDomain) {
+            $suffix = '.' . $panelDomain;
+            if (substr($apiDomain, -strlen($suffix)) !== $suffix) continue;
+            $label = substr($apiDomain, 0, -strlen($suffix));
+            if (!preg_match('/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/', $label)) continue;
+            try {
+                $result = pm_ApiCli::call('dns', ['--add', $panelDomain, '-cname', '*.' . $label, '-canonical', $apiDomain], pm_ApiCli::RESULT_FULL);
+                $code = (int) ($result['code'] ?? 1);
+                if (!in_array($code, [0, 2], true)) {
+                    $detail = trim((string) ($result['stderr'] ?? $result['stdout'] ?? ''));
+                    throw new RuntimeException($detail !== '' ? $detail : 'kod ' . $code);
+                }
+            } catch (Throwable $exception) {
+                $warnings[] = 'Nie udało się dodać wildcard DNS *.' . $apiDomain . ' w strefie ' . $panelDomain . ': ' . $exception->getMessage() . '. Jeżeli DNS jest zewnętrzny, dodaj tam rekord CNAME *.' . $apiDomain . ' → ' . $apiDomain . '.';
+            }
+        }
+        return $warnings;
     }
 
     private function secretStatus()

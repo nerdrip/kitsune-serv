@@ -42,6 +42,28 @@ test('hub configures a flat wildcard domain and validates gateway routes', t => 
   assert.equal(hub.status().routeCount, 1);
 });
 
+test('Plesk API domains act as namespaces and API Flow routes are created below them', t => {
+  const { hub, owner } = fixture(t);
+  hub.configure({ enabled: true, panelDomain: 'serv.example.test' });
+  const pairing = hub.createPairing({ kind: 'plesk', name: 'Plesk' }, { userId: owner.id });
+  const node = hub.completePairing(pairing.code).node;
+  hub.heartbeat(node.id, { inventory: { apiDomains: ['api.serv.example.test'] } });
+
+  assert.deepEqual(hub.status().apiDomains, ['api.serv.example.test']);
+  assert.equal(hub.hostname('api-flow', 'Nowe API'), 'nowe-api.api.serv.example.test');
+  const route = hub.ensureApiFlowRoute({ resourceId: 'orders', name: 'Nowe API', target: 'http://127.0.0.1:9393' });
+  assert.equal(route.hostname, 'nowe-api.api.serv.example.test');
+  assert.equal(hub.apiNamespaceForHost(route.hostname), 'api.serv.example.test');
+  assert.equal(hub.apiNamespaceForHost('api.serv.example.test'), 'api.serv.example.test');
+  assert.throws(() => hub.saveRoute({ kind: 'api-flow', resourceId: 'base', hostname: 'api.serv.example.test', target: 'http://127.0.0.1:9494' }), /synchronized Plesk API domain/);
+  assert.throws(() => hub.saveRoute({ kind: 'api-flow', resourceId: 'bad', hostname: 'too.deep.api.serv.example.test', target: 'http://127.0.0.1:9494' }), /synchronized Plesk API domain/);
+
+  const updated = hub.ensureApiFlowRoute({ resourceId: 'orders', name: 'Zmieniona nazwa', target: 'http://127.0.0.1:9494' });
+  assert.equal(updated.id, route.id);
+  assert.equal(updated.hostname, route.hostname, 'renaming a project does not break its published URL');
+  assert.equal(updated.target, 'http://127.0.0.1:9494');
+});
+
 test('short-lived pairing enrolls, monitors and revokes a node with its device token', t => {
   const { hub, identity, owner, tick } = fixture(t);
   hub.configure({ panelDomain: 'hub.example.test' });
@@ -65,7 +87,7 @@ test('managed Plesk connector enrolls automatically with a replay-protected sign
   const connector = hub.saveConnector({ id: 'plesk-managed', baseUrl: 'https://plesk.example.test', authMode: 'hybrid' }, secret);
   const request = {
     connectorId: connector.id, timestamp: 1_800_000_000_000, nonce: crypto.randomBytes(16).toString('hex'),
-    device: { name: 'Plesk production', platform: 'Linux', version: '3.1.1-r17', capabilities: ['plesk-sso', 'inventory'] }
+    device: { name: 'Plesk production', platform: 'Linux', version: '3.1.2-r18', capabilities: ['plesk-sso', 'inventory'] }
   };
   const signature = crypto.createHmac('sha256', secret).update(stable(request)).digest('base64url');
   const enrolled = hub.enrollPleskConnector(request, signature);

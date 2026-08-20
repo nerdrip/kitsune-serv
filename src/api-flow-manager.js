@@ -44,6 +44,22 @@ const BLOCK_CATALOG = [
 ];
 
 const CATALOG_MAP = new Map(BLOCK_CATALOG.map(item => [item.type, item]));
+const BLOCK_RESULTS = {
+  input: { description: 'Odczytane żądanie HTTP.', fields: ['body', 'query', 'headers', 'params'] },
+  output: { description: 'Body końcowej odpowiedzi HTTP.', fields: [] },
+  validate: { description: 'Sprawdzona wartość źródłowa.', fields: [] },
+  auth: { description: 'Potwierdzenie autoryzacji.', fields: ['authenticated'] },
+  'rate-limit': { description: 'Pozostały limit i czas resetu.', fields: ['remaining', 'resetAt'] },
+  'database-query': { description: 'Pełny wynik zapytania oraz wiersze jako obiekty.', fields: ['objects', 'columns', 'rows'] },
+  'http-request': { description: 'Odpowiedź wywołanego API.', fields: ['data', 'status', 'ok', 'headers'] },
+  webhook: { description: 'Odpowiedź serwera webhooka.', fields: ['data', 'status', 'ok', 'headers'] },
+  'set-variable': { description: 'Zapisana wartość; dodatkowo dostępna pod nazwą zmiennej.', fields: [] },
+  condition: { description: 'Wynik warunku true albo false.', fields: [] },
+  paginate: { description: 'Bieżąca strona wraz z metadanymi.', fields: ['items', 'page', 'pageSize', 'total', 'pages'] },
+  cache: { description: 'Wartość cache albo informacja o usunięciu.', fields: [] },
+  'response-header': { description: 'Niezmieniony ostatni wynik; nagłówek trafia do odpowiedzi HTTP.', fields: [] },
+  secret: { description: 'Wartość tajna (ukrywana w śladzie wykonania).', fields: [] }
+};
 
 function slugify(value) {
   return String(value || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
@@ -87,7 +103,12 @@ class ApiFlowManager {
     this.onChanged = null;
   }
 
-  catalog() { return structuredClone(BLOCK_CATALOG); }
+  catalog() {
+    return structuredClone(BLOCK_CATALOG.map(block => ({
+      ...block,
+      result: BLOCK_RESULTS[block.type] || { description: 'Wartość zwracana przez ten blok.', fields: [] }
+    })));
+  }
 
   _read() {
     try {

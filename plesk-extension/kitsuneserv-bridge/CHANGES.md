@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.1.2-18
+
+- Treats every selected API domain as a reusable namespace and proxies one child hostname per API Flow project.
+- Attempts to provision the namespace wildcard CNAME in the Plesk DNS zone and reports an actionable warning for external DNS providers.
+- Explains the required wildcard TLS certificate and the difference between a base API domain and a concrete API address.
+- Ships the application-side automatic publication and API namespace fallback introduced in KitsuneServ 3.1.2.
+
 ## 3.1.1-17
 
 - Fixed the root-owned `state.json` permissions so the Plesk web UI can read operation, service-health and extension-update results written by the privileged executor.

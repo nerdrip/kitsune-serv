@@ -30,6 +30,11 @@ test('Hub UI renders independent local and remote status and responsive guidance
 });
 
 test('Test Lab and API publication use domains synchronized from the Plesk bridge', () => {
-  for (const marker of ['chooseHubPublicationDomain', 'inventory?.apiDomains', 'publish-domain-overlay', 'dodaniu domeny w Plesk Bridge']) assert.ok(app.includes(marker), `missing publication flow: ${marker}`);
+  for (const marker of ['chooseHubPublicationDomain', 'inventory?.apiDomains', 'publish-domain-overlay', 'Bazowa domena API z Plesk Bridge', 'Po uruchomieniu API jest on zapisywany także automatycznie']) assert.ok(app.includes(marker), `missing publication flow: ${marker}`);
   for (const marker of ['.publish-domain-overlay', '.publish-domain-dialog', '.publish-domain-warning']) assert.ok(styles.includes(marker), `missing publication style: ${marker}`);
+});
+
+test('API Flow explains internal web ports and exact block result placeholders', () => {
+  for (const marker of ['api-flow-listen-help', 'Port procesu (wewnętrzny)', 'rememberApiFlowPublication', 'renderApiFlowResultHelp', 'Wynik tego bloku', '{steps.${escapeHtml(node.id)}}']) assert.ok(html.includes(marker) || app.includes(marker), `missing API Flow guidance: ${marker}`);
+  for (const marker of ['.api-flow-result-help', '.api-flow-node-result']) assert.ok(styles.includes(marker), `missing API Flow result style: ${marker}`);
 });
