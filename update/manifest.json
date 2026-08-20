@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-20T17:50:44.985Z",
+  "generatedAt": "2026-08-20T18:17:10.461Z",
   "packages": [
     {
       "order": 1,
@@ -106,9 +106,9 @@
       "id": "ultimate-tool",
       "name": "Ultimate Tool",
       "version": "0.1.1",
-      "release": "87",
-      "file": "packages/12-ultimate-tool-0.1.1-r87.zip",
-      "sha256": "ef1b47d1171944b8220aa05ef7fc8514a42292585cef149e67f3edfb0405eab9"
+      "release": "88",
+      "file": "packages/12-ultimate-tool-0.1.1-r88.zip",
+      "sha256": "9c7746b13011074f05cad2c686e167ab028ab9faa2eba3344d233370cd1bfd26"
     },
     {
       "order": 99,
