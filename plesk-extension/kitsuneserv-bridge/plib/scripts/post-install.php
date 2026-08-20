@@ -16,12 +16,12 @@ foreach (['node_binary' => '/usr/bin/node', 'npm_binary' => '/usr/bin/npm'] as $
 }
 
 try {
-    $selfCheck = pm_ApiCli::callSbin('kitsuneserv-bridge-r21', ['--self-check'], pm_ApiCli::RESULT_FULL);
+    $selfCheck = pm_ApiCli::callSbin('kitsuneserv-bridge-r22', ['--self-check'], pm_ApiCli::RESULT_FULL);
 } catch (Throwable $exception) {
-    throw new RuntimeException('Nie udało się uruchomić uprzywilejowanego executora KitsuneServ Bridge r21 przez Plesk.', 0, $exception);
+    throw new RuntimeException('Nie udało się uruchomić uprzywilejowanego executora KitsuneServ Bridge r22 przez Plesk.', 0, $exception);
 }
-if ((int) ($selfCheck['code'] ?? 1) !== 0 || trim((string) ($selfCheck['stdout'] ?? '')) !== '3.1.2-r21') {
-    throw new RuntimeException('Executor KitsuneServ Bridge r21 nie przeszedł kontroli wersji przez Plesk.');
+if ((int) ($selfCheck['code'] ?? 1) !== 0 || trim((string) ($selfCheck['stdout'] ?? '')) !== '3.1.2-r22') {
+    throw new RuntimeException('Executor KitsuneServ Bridge r22 nie przeszedł kontroli wersji przez Plesk.');
 }
 
 $config = Modules_KitsuneservBridge_Config::values();
@@ -29,7 +29,7 @@ if (($config['deployment_mode'] ?? 'managed') === 'managed' && ($config['proxy_m
     $runtimeConfig = null;
     try {
         $runtimeConfig = Modules_KitsuneservBridge_Config::createRuntimeConfig('proxy');
-        $proxyResult = pm_ApiCli::callSbin('kitsuneserv-bridge-r21', ['--config', $runtimeConfig], pm_ApiCli::RESULT_FULL);
+        $proxyResult = pm_ApiCli::callSbin('kitsuneserv-bridge-r22', ['--config', $runtimeConfig], pm_ApiCli::RESULT_FULL);
         if ((int) ($proxyResult['code'] ?? 1) !== 0) throw new RuntimeException(trim((string) ($proxyResult['stderr'] ?? $proxyResult['stdout'] ?? '')));
     } catch (Throwable $exception) {
         /* Instalacja ma pozostać możliwa; widok i dziennik operacji pokażą problem do ręcznego rozwiązania. */

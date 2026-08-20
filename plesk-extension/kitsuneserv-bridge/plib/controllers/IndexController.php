@@ -42,6 +42,7 @@ class IndexController extends pm_Controller_Action
         $this->view->automaticConnectionError = $automaticConnectionError;
         $this->view->warnings = $this->warnings($config, $domains, $state, $statusError, $automaticConnectionError);
         $this->view->manualProxy = $this->manualProxy($config);
+        $this->view->suiteCatalog = $client->isAdmin() ? Modules_KitsuneservBridge_Suite::catalog() : [];
         $this->view->suiteExtensions = $client->isAdmin() ? Modules_KitsuneservBridge_Suite::installedExtensions() : [];
         $this->view->modulesListUrl = pm_Context::getModulesListUrl();
     }
@@ -128,6 +129,39 @@ class IndexController extends pm_Controller_Action
             $this->_status->addMessage('info', 'Zainstalowano ' . $metadata['name'] . ' ' . $metadata['version'] . '-r' . $metadata['release'] . '. Menu pozostaje skupione w Kitsune Hub.');
         } catch (Throwable $exception) {
             $this->_status->addMessage('error', 'Nie zaktualizowano rozszerzenia: ' . $exception->getMessage());
+        }
+        $this->_helper->redirector('index', 'index', null, ['tab' => 'plesk']);
+    }
+
+    public function suiteRefreshAction()
+    {
+        $this->requireAdmin();
+        if (!$this->getRequest()->isPost()) throw new pm_Exception('POST is required.');
+        try {
+            $catalog = Modules_KitsuneservBridge_Suite::refreshCatalog();
+            $available = 0;
+            foreach (Modules_KitsuneservBridge_Suite::installedExtensions() as $extension) {
+                if ($extension['updateStatus'] === 'available') $available++;
+            }
+            $message = 'Sprawdzono ' . count($catalog['packages']) . ' paczek z gałęzi main. ';
+            $message .= $available > 0 ? 'Dostępne aktualizacje: ' . $available . '.' : 'Wszystkie zainstalowane managery są aktualne.';
+            $this->_status->addMessage('info', $message);
+        } catch (Throwable $exception) {
+            $this->_status->addMessage('error', 'Nie sprawdzono aktualizacji Suite: ' . $exception->getMessage());
+        }
+        $this->_helper->redirector('index', 'index', null, ['tab' => 'plesk']);
+    }
+
+    public function suiteUpdateAction()
+    {
+        $this->requireAdmin();
+        if (!$this->getRequest()->isPost()) throw new pm_Exception('POST is required.');
+        try {
+            $id = trim((string) $this->getRequest()->getPost('extension_id'));
+            $metadata = Modules_KitsuneservBridge_Suite::updateFromCatalog($id);
+            $this->_status->addMessage('info', 'Zaktualizowano ' . $metadata['name'] . ' do ' . $metadata['version'] . '-r' . $metadata['release'] . '. Suma SHA-256 i meta.xml zostały zweryfikowane.');
+        } catch (Throwable $exception) {
+            $this->_status->addMessage('error', 'Nie zaktualizowano managera: ' . $exception->getMessage());
         }
         $this->_helper->redirector('index', 'index', null, ['tab' => 'plesk']);
     }
@@ -356,7 +390,7 @@ class IndexController extends pm_Controller_Action
         $runtime = null;
         try {
             $runtime = Modules_KitsuneservBridge_Config::createRuntimeConfig('status');
-            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r21', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
+            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r22', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
             if ((int) ($result['code'] ?? 1) !== 0) {
                 $detail = trim((string) ($result['stderr'] ?? $result['stdout'] ?? ''));
                 return mb_substr($detail !== '' ? $detail : 'Narzędzie statusu zakończyło się błędem.', -2000);
@@ -372,7 +406,7 @@ class IndexController extends pm_Controller_Action
     private function runImmediateOperation($runtime)
     {
         try {
-            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r21', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
+            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r22', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
             if ((int) ($result['code'] ?? 1) !== 0) {
                 $detail = trim((string) ($result['stderr'] ?? $result['stdout'] ?? ''));
                 throw new RuntimeException($detail !== '' ? $detail : 'Operacja zakończyła się błędem.');
