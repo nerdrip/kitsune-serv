@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.1.1-16
+
+- Replaced mandatory pairing codes with automatic, HMAC-signed enrollment backed by the connector secret already deployed to Kitsune Hub.
+- Made the managed start action perform the first deployment when needed and added one guided action for deployment, SSO trust and node synchronization.
+- Reduced the connection screen to a clear three-step status; manual connector fields and legacy pairing remain available only as an emergency fallback.
+- Added a managed connector heartbeat so the Plesk node stays accurately online without requiring the extension page to remain open.
+
 ## 3.1.1-15
 
 - Serialized status refreshes and state-changing operations through one lock, preventing a stale page refresh from overwriting update results.

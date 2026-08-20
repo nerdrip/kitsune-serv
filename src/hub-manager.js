@@ -181,6 +181,60 @@ class HubManager {
     return { success: true, node: clone(node), token: token.token, hub: { panelDomain: payload.settings.panelDomain, authMode: payload.settings.authMode } };
   }
 
+  enrollPleskConnector(input = {}, signature = '') {
+    const connectorId = String(input.connectorId || '').trim();
+    const timestamp = Number(input.timestamp);
+    const nonce = String(input.nonce || '').trim().toLowerCase();
+    const device = input.device && typeof input.device === 'object' && !Array.isArray(input.device) ? input.device : {};
+    if (!connectorId || connectorId.length > 160) throw new Error('Connector ID is invalid');
+    if (!Number.isSafeInteger(timestamp) || Math.abs(this.now() - timestamp) > 120_000) throw new Error('Enrollment request expired');
+    if (!/^[a-f0-9]{32}$/.test(nonce)) throw new Error('Enrollment nonce is invalid');
+
+    const payload = this._read();
+    const connector = payload.connectors.find(item => item.id === connectorId && this._connectorReady(item));
+    if (!connector) throw new Error('Plesk connector is not configured');
+    const secret = this.secretStore?.get(this._connectorSecretKey(connectorId));
+    if (!secret) throw new Error('Plesk connector secret is unavailable');
+    const replayKey = `plesk-enroll:${connectorId}:${nonce}`;
+    if (this.assertionNonces.has(replayKey)) throw new Error('Enrollment request was already used');
+    if (!safeEqual(hmac(secret, stable(input)), signature)) throw new Error('Enrollment signature is invalid');
+    this.assertionNonces.set(replayKey, this.now() + 5 * 60_000);
+
+    const user = this.identityManager?.listUsers().find(item => item.roles.includes('owner'))
+      || this.identityManager?.listUsers().find(item => item.roles.includes('admin'));
+    if (!user) throw new Error('No owner account is available for device enrollment');
+    const capabilities = [...new Set((Array.isArray(device.capabilities) ? device.capabilities : []).map(String))].sort().slice(0, 100);
+    const existing = payload.nodes.find(item => item.kind === 'plesk' && item.connectorId === connectorId);
+    const node = {
+      id: existing?.id || this._id('node'), connectorId, kind: 'plesk',
+      name: String(device.name || connector.name || 'Plesk').slice(0, 100),
+      platform: String(device.platform || '').slice(0, 100), version: String(device.version || '').slice(0, 50),
+      capabilities, status: 'online', enrolledAt: existing?.enrolledAt || this.now(), lastSeenAt: this.now(),
+      address: String(device.address || connector.baseUrl || '').slice(0, 255), inventory: existing?.inventory || {}, tokenId: ''
+    };
+    if (existing?.tokenId) this.identityManager?.revokeToken(existing.tokenId);
+    const token = this.identityManager.createToken({
+      userId: user.id, name: `${node.name} automatic Plesk bridge`, kind: 'plesk', nodeId: node.id,
+      permissions: ['nodes.read', 'projects.read', 'projects.sync', 'labs.read', 'labs.sync', 'api-flows.read', 'api-flows.sync', 'routes.read', 'deployments.read', 'deployments.update'],
+      expiresAt: this.now() + 365 * 24 * 60 * 60 * 1000
+    });
+    node.tokenId = token.id;
+    if (existing) payload.nodes[payload.nodes.indexOf(existing)] = node; else payload.nodes.push(node);
+    connector.status = 'connected'; connector.lastSeenAt = this.now(); connector.updatedAt = this.now();
+    this._write(payload, { type: existing ? 'node-reenrolled' : 'node-enrolled', node });
+    return { success: true, automatic: true, node: clone(node), token: token.token, hub: { panelDomain: payload.settings.panelDomain, authMode: payload.settings.authMode } };
+  }
+
+  touchConnectorNodes(connectorId) {
+    const payload = this._read(); const now = this.now(); let touched = 0;
+    for (const node of payload.nodes) {
+      if (node.kind !== 'plesk' || node.connectorId !== connectorId) continue;
+      node.status = 'online'; node.lastSeenAt = now; touched++;
+    }
+    if (touched) this._write(payload, { type: 'connector-heartbeat', connectorId, nodes: touched });
+    return touched;
+  }
+
   listNodes() { const payload = this._read(); this._cleanup(payload); this._write(payload); return clone(payload.nodes); }
   heartbeat(nodeId, input = {}) {
     const payload = this._read(); const node = payload.nodes.find(item => item.id === nodeId); if (!node) throw new Error('Node not found');

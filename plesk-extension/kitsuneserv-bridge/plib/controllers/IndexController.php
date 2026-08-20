@@ -18,6 +18,18 @@ class IndexController extends pm_Controller_Action
         $domains = $this->domainOptions($config['panel_domain']);
         $statusError = $client->isAdmin() ? $this->refreshStatus() : null;
         $state = Modules_KitsuneservBridge_Config::readState();
+        $automaticConnectionError = trim((string) pm_Settings::get('automatic_connection_error', '')) ?: null;
+        if ($client->isAdmin() && $config['deployment_mode'] === 'managed' && $config['auth_mode'] !== 'independent' && ($state['service']['health'] ?? null) === true && !Modules_KitsuneservBridge_Config::hasSecret('device_token')) {
+            try {
+                Modules_KitsuneservBridge_Config::ensureSsoConfiguration($this->currentPleskOrigin());
+                $this->enrollAutomatically(Modules_KitsuneservBridge_Config::values());
+                $config = Modules_KitsuneservBridge_Config::values();
+                pm_Settings::set('automatic_connection_error', '');
+                $automaticConnectionError = null;
+            } catch (Throwable $exception) {
+                $automaticConnectionError = $exception->getMessage();
+            }
+        }
 
         $this->view->isAdmin = $client->isAdmin();
         $this->view->config = $config;
@@ -27,7 +39,8 @@ class IndexController extends pm_Controller_Action
         $this->view->extensionVersion = Modules_KitsuneservBridge_Config::EXTENSION_VERSION;
         $this->view->paired = Modules_KitsuneservBridge_Config::hasSecret('device_token');
         $this->view->secretStatus = $this->secretStatus();
-        $this->view->warnings = $this->warnings($config, $domains, $state, $statusError);
+        $this->view->automaticConnectionError = $automaticConnectionError;
+        $this->view->warnings = $this->warnings($config, $domains, $state, $statusError, $automaticConnectionError);
         $this->view->manualProxy = $this->manualProxy($config);
     }
 
@@ -69,6 +82,8 @@ class IndexController extends pm_Controller_Action
             Modules_KitsuneservBridge_Config::ensureSsoConfiguration($this->currentPleskOrigin());
             $config = Modules_KitsuneservBridge_Config::values();
             if ($config['deployment_mode'] !== 'managed') throw new RuntimeException('Operacje serwera są dostępne tylko w trybie wdrożenia zarządzanego.');
+            $state = Modules_KitsuneservBridge_Config::readState();
+            if ($action === 'start' && empty($state['service']['installed'])) $action = 'sync-deploy';
             if ($action === 'proxy' && $config['proxy_mode'] !== 'managed') throw new RuntimeException('Automatyczna konfiguracja proxy jest wyłączona.');
             if (in_array($action, ['deploy', 'sync-deploy'], true) && !Modules_KitsuneservBridge_Config::hasSecret('bootstrap_password')) {
                 throw new RuntimeException('Ustaw hasło pierwszego administratora przed wdrożeniem.');
@@ -85,6 +100,36 @@ class IndexController extends pm_Controller_Action
             }
         } catch (Throwable $exception) {
             $this->_status->addMessage('error', 'Nie uruchomiono operacji: ' . $exception->getMessage());
+        }
+        $this->_helper->redirector('index');
+    }
+
+    public function connectAction()
+    {
+        $this->requireAdmin();
+        if (!$this->getRequest()->isPost()) throw new pm_Exception('POST is required.');
+        try {
+            Modules_KitsuneservBridge_Config::ensureSsoConfiguration($this->currentPleskOrigin());
+            $config = Modules_KitsuneservBridge_Config::values();
+            if ($config['auth_mode'] === 'independent') throw new RuntimeException('Automatyczne SSO jest wyłączone. Wybierz tryb hybrydowy albo tylko Plesk w ustawieniach.');
+            $this->refreshStatus();
+            $state = Modules_KitsuneservBridge_Config::readState();
+            if (($state['service']['health'] ?? null) === true) {
+                $this->enrollAutomatically($config);
+                $this->_status->addMessage('info', 'SSO, zaufanie Bridge i synchronizacja węzła zostały skonfigurowane automatycznie.');
+            } elseif ($config['deployment_mode'] === 'managed') {
+                $operation = empty($state['service']['installed']) ? 'sync-deploy' : 'restart';
+                if ($operation === 'sync-deploy' && !Modules_KitsuneservBridge_Config::hasSecret('bootstrap_password')) throw new RuntimeException('Ustaw hasło pierwszego administratora przed wdrożeniem.');
+                $runtime = Modules_KitsuneservBridge_Config::createRuntimeConfig($operation);
+                $task = new Modules_KitsuneservBridge_Task_Operate();
+                $task->setParam('runtimeConfig', $runtime);
+                (new pm_LongTask_Manager())->start($task);
+                $this->_status->addMessage('info', 'Bridge wdraża lub uruchamia Hub. Po zakończeniu zadania odśwież tę stronę — bezkodowe połączenie SSO dokończy się automatycznie.');
+            } else {
+                throw new RuntimeException('Zewnętrzny Hub nie odpowiada. Uruchom go i spróbuj ponownie albo użyj ręcznego kodu awaryjnego.');
+            }
+        } catch (Throwable $exception) {
+            $this->_status->addMessage('error', 'Automatyczne połączenie nie powiodło się: ' . $exception->getMessage());
         }
         $this->_helper->redirector('index');
     }
@@ -120,17 +165,7 @@ class IndexController extends pm_Controller_Action
             $nodeId = pm_Settings::get('node_id', '');
             $token = $this->secret('device_token');
             if ($nodeId === '' || $token === '') throw new RuntimeException('Najpierw sparuj ten serwer Plesk z Hubem.');
-            $inventory = [
-                'pleskVersion' => pm_ProductInfo::getVersion(),
-                'bridgeVersion' => Modules_KitsuneservBridge_Config::EXTENSION_VERSION,
-                'hostname' => gethostname(),
-                'domains' => $this->domainNames(),
-                'hubDomain' => pm_Settings::get('panel_domain', ''),
-                'apiDomains' => array_values(array_diff(Modules_KitsuneservBridge_Config::proxyDomains(), [pm_Settings::get('panel_domain', '')])),
-                'authMode' => pm_Settings::get('auth_mode', 'hybrid'),
-                'deploymentMode' => pm_Settings::get('deployment_mode', 'managed'),
-            ];
-            $this->client()->heartbeat($nodeId, $token, $inventory);
+            $this->client()->heartbeat($nodeId, $token, $this->inventory());
             pm_Settings::set('last_sync', gmdate('c'));
             $this->_status->addMessage('info', 'Inwentarz Pleska został zsynchronizowany.');
         } catch (Throwable $exception) {
@@ -267,7 +302,7 @@ class IndexController extends pm_Controller_Action
         return $values;
     }
 
-    private function warnings(array $config, array $domains, array $state, $statusError)
+    private function warnings(array $config, array $domains, array $state, $statusError, $automaticConnectionError = null)
     {
         $warnings = [];
         if (!$domains) $warnings[] = ['critical', 'Brak aktywnej domeny lub subdomeny z hostingiem WWW w Plesku.'];
@@ -278,7 +313,8 @@ class IndexController extends pm_Controller_Action
         if ($config['deployment_mode'] === 'managed' && $isSsh && $config['git_ssh_known_hosts'] === '') $warnings[] = ['critical', 'Repozytorium SSH wymaga zweryfikowanej zawartości known_hosts.'];
         if ($config['proxy_mode'] === 'manual') $warnings[] = ['info', 'Publikacja jest ręczna — skopiuj konfigurację nginx z zakładki Instrukcja.'];
         if ($config['auth_mode'] !== 'independent' && ($config['plesk_url'] === '' || $config['connector_id'] === '' || !Modules_KitsuneservBridge_Config::hasSecret('shared_secret'))) $warnings[] = ['info', 'Brakujące ustawienia Plesk SSO zostaną wygenerowane automatycznie przy zapisie lub pierwszym wdrożeniu.'];
-        if (!Modules_KitsuneservBridge_Config::hasSecret('device_token')) $warnings[] = ['info', 'Ten Plesk nie jest jeszcze sparowany jako węzeł Kitsune Hub.'];
+        if (!Modules_KitsuneservBridge_Config::hasSecret('device_token')) $warnings[] = ['info', $config['deployment_mode'] === 'managed' ? 'Po pierwszym poprawnym uruchomieniu Huba Bridge połączy SSO i węzeł automatycznie — bez kodu parowania.' : 'Zewnętrzny Hub nie jest jeszcze połączony z tym serwerem Plesk.'];
+        if ($automaticConnectionError) $warnings[] = ['warning', 'Automatyczne połączenie z Hubem nie powiodło się: ' . $automaticConnectionError];
         if ($config['update_manifest_url'] !== '' && $config['update_public_key'] === '') $warnings[] = ['critical', 'Skonfigurowano kanał aktualizacji bez klucza publicznego do weryfikacji podpisu.'];
         if ($statusError) $warnings[] = ['warning', 'Nie udało się odświeżyć stanu usługi: ' . $statusError];
         if (($state['extensionUpdate']['status'] ?? '') === 'failed') $warnings[] = ['warning', 'Automatyczna aktualizacja Plesk Bridge nie powiodła się: ' . ($state['extensionUpdate']['error'] ?? 'sprawdź log operacji.')];
@@ -292,7 +328,7 @@ class IndexController extends pm_Controller_Action
         $runtime = null;
         try {
             $runtime = Modules_KitsuneservBridge_Config::createRuntimeConfig('status');
-            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r15', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
+            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r16', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
             if ((int) ($result['code'] ?? 1) !== 0) {
                 $detail = trim((string) ($result['stderr'] ?? $result['stdout'] ?? ''));
                 return mb_substr($detail !== '' ? $detail : 'Narzędzie statusu zakończyło się błędem.', -2000);
@@ -308,7 +344,7 @@ class IndexController extends pm_Controller_Action
     private function runImmediateOperation($runtime)
     {
         try {
-            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r15', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
+            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r16', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
             if ((int) ($result['code'] ?? 1) !== 0) {
                 $detail = trim((string) ($result['stderr'] ?? $result['stdout'] ?? ''));
                 throw new RuntimeException($detail !== '' ? $detail : 'Operacja zakończyła się błędem.');
@@ -384,6 +420,41 @@ class IndexController extends pm_Controller_Action
             $result[$field] = Modules_KitsuneservBridge_Config::hasSecret($field);
         }
         return $result;
+    }
+
+    private function enrollAutomatically(array $config)
+    {
+        $connectorId = trim((string) ($config['connector_id'] ?? ''));
+        $sharedSecret = $this->secret('shared_secret');
+        if ($connectorId === '' || $sharedSecret === '') throw new RuntimeException('Bridge nie ma jeszcze automatycznych danych zaufania SSO. Zapisz konfigurację i spróbuj ponownie.');
+        $result = $this->client()->autoEnroll($connectorId, $sharedSecret, [
+            'name' => gethostname() ?: 'Plesk',
+            'platform' => PHP_OS_FAMILY,
+            'version' => Modules_KitsuneservBridge_Config::EXTENSION_VERSION,
+            'address' => (string) ($config['plesk_url'] ?? ''),
+            'capabilities' => ['plesk-sso', 'domains', 'inventory', 'projects', 'labs', 'api-flows', 'managed-deployment'],
+        ]);
+        if (empty($result['token']) || empty($result['node']['id'])) throw new RuntimeException('Hub nie zwrócił danych automatycznej rejestracji węzła.');
+        pm_Settings::setEncrypted('device_token', (string) $result['token']);
+        pm_Settings::set('node_id', (string) $result['node']['id']);
+        $this->client()->heartbeat((string) $result['node']['id'], (string) $result['token'], $this->inventory());
+        pm_Settings::set('last_sync', gmdate('c'));
+        pm_Settings::set('automatic_connection_error', '');
+        return true;
+    }
+
+    private function inventory()
+    {
+        return [
+            'pleskVersion' => pm_ProductInfo::getVersion(),
+            'bridgeVersion' => Modules_KitsuneservBridge_Config::EXTENSION_VERSION,
+            'hostname' => gethostname(),
+            'domains' => $this->domainNames(),
+            'hubDomain' => pm_Settings::get('panel_domain', ''),
+            'apiDomains' => array_values(array_diff(Modules_KitsuneservBridge_Config::proxyDomains(), [pm_Settings::get('panel_domain', '')])),
+            'authMode' => pm_Settings::get('auth_mode', 'hybrid'),
+            'deploymentMode' => pm_Settings::get('deployment_mode', 'managed'),
+        ];
     }
 
     private function validatePath($value, $field)

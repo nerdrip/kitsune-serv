@@ -22,6 +22,12 @@ function fixture(t) {
   return { root, secrets, identity, owner, hub, tick: (milliseconds = 1) => { time += milliseconds; } };
 }
 
+function stable(value) {
+  if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`;
+  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stable(value[key])}`).join(',')}}`;
+  return JSON.stringify(value);
+}
+
 test('hub configures a flat wildcard domain and validates gateway routes', t => {
   const { hub } = fixture(t);
   const result = hub.configure({ enabled: true, panelDomain: 'panel.example.test', authMode: 'hybrid', policies: { requireDeploymentApproval: true } });
@@ -51,6 +57,35 @@ test('short-lived pairing enrolls, monitors and revokes a node with its device t
   assert.equal(hub.revokeNode(enrolled.node.id).success, true);
   assert.equal(identity.validateToken(enrolled.token), null);
   assert.throws(() => hub.completePairing(pairing.code), /invalid or expired/);
+});
+
+test('managed Plesk connector enrolls automatically with a replay-protected signature', t => {
+  const { hub, identity, tick } = fixture(t);
+  const secret = 'automatic-plesk-enrollment-secret-123456';
+  const connector = hub.saveConnector({ id: 'plesk-managed', baseUrl: 'https://plesk.example.test', authMode: 'hybrid' }, secret);
+  const request = {
+    connectorId: connector.id, timestamp: 1_800_000_000_000, nonce: crypto.randomBytes(16).toString('hex'),
+    device: { name: 'Plesk production', platform: 'Linux', version: '3.1.1-r16', capabilities: ['plesk-sso', 'inventory'] }
+  };
+  const signature = crypto.createHmac('sha256', secret).update(stable(request)).digest('base64url');
+  const enrolled = hub.enrollPleskConnector(request, signature);
+  assert.equal(enrolled.automatic, true);
+  assert.equal(enrolled.node.connectorId, connector.id);
+  assert.equal(identity.validateToken(enrolled.token).principal.nodeId, enrolled.node.id);
+  assert.throws(() => hub.enrollPleskConnector(request, signature), /already used/);
+
+  tick(91_000);
+  assert.equal(hub.listNodes()[0].status, 'offline');
+  assert.equal(hub.touchConnectorNodes(connector.id), 1);
+  assert.equal(hub.listNodes()[0].status, 'online');
+
+  const replacementRequest = { ...request, timestamp: 1_800_000_091_000, nonce: crypto.randomBytes(16).toString('hex') };
+  const replacementSignature = crypto.createHmac('sha256', secret).update(stable(replacementRequest)).digest('base64url');
+  const replaced = hub.enrollPleskConnector(replacementRequest, replacementSignature);
+  assert.equal(replaced.node.id, enrolled.node.id);
+  assert.equal(identity.validateToken(enrolled.token), null);
+  assert.equal(identity.validateToken(replaced.token).principal.nodeId, enrolled.node.id);
+  assert.equal(hub.listNodes().filter(node => node.connectorId === connector.id).length, 1);
 });
 
 test('versioned synchronization reports conflicts, redacts secrets and supports rollback', t => {

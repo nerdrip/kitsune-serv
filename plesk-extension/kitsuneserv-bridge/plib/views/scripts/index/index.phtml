@@ -37,7 +37,7 @@ $shortCommit = static function ($value) { return $value ? substr((string) $value
     <div class="ks-hero-status">
       <?php if (!empty($c['hub_url'])): ?><a class="ks-hero-link" href="<?php echo $e($c['hub_url']); ?>" target="_blank" rel="noopener noreferrer">↗ Otwórz panel serwera</a><?php endif; ?>
       <span class="ks-pill <?php echo $healthOk ? 'is-good' : 'is-warning'; ?>"><i></i><?php echo $e($serviceLabel); ?></span>
-      <span class="ks-pill <?php echo $paired ? 'is-good' : 'is-warning'; ?>"><i></i><?php echo $paired ? 'Węzeł sparowany' : 'Brak parowania'; ?></span>
+      <span class="ks-pill <?php echo $paired ? 'is-good' : 'is-warning'; ?>"><i></i><?php echo $paired ? 'SSO połączone automatycznie' : ($healthOk ? 'Łączenie automatyczne' : 'SSO po wdrożeniu'); ?></span>
       <span class="ks-version">v<?php echo $e($this->extensionVersion); ?></span>
     </div>
   </header>
@@ -79,6 +79,7 @@ $shortCommit = static function ($value) { return $value ? substr((string) $value
           <li class="<?php echo $repositoryReady ? 'is-done' : ($configured ? 'is-current' : ''); ?>"><span><?php echo $repositoryReady ? '✓' : '2'; ?></span><div><strong>Synchronizacja kodu</strong><small><?php echo $repositoryReady ? 'Repozytorium jest dostępne lokalnie.' : 'W zakładce Wdrożenie wybierz „Pobierz kod”.'; ?></small></div></li>
           <li class="<?php echo $deploymentReady ? 'is-done' : ($repositoryReady ? 'is-current' : ''); ?>"><span><?php echo $deploymentReady ? '✓' : '3'; ?></span><div><strong>Pierwsze wdrożenie</strong><small><?php echo $deploymentReady ? 'Aktywne wydanie: v' . $e($deployment['version']) . '.' : 'Wdróż zsynchronizowany kod i utwórz usługę systemd.'; ?></small></div></li>
           <li class="<?php echo $healthOk ? 'is-done' : ($deploymentReady ? 'is-current' : ''); ?>"><span><?php echo $healthOk ? '✓' : '4'; ?></span><div><strong>Kontrola działania</strong><small><?php echo $healthOk ? 'HTTP odpowiada przez lokalny port Huba.' : 'Uruchom usługę i sprawdź diagnostykę.'; ?></small></div></li>
+          <li class="<?php echo $paired ? 'is-done' : ($healthOk ? 'is-current' : ''); ?>"><span><?php echo $paired ? '✓' : '5'; ?></span><div><strong>SSO i węzeł Plesk</strong><small><?php echo $paired ? 'Połączenie zaufane utworzono bez kodu parowania.' : 'Po uruchomieniu Huba Bridge wykona ten krok automatycznie.'; ?></small></div></li>
         </ol>
       </article>
 
@@ -208,32 +209,42 @@ $shortCommit = static function ($value) { return $value ? substr((string) $value
     </section>
 
     <section class="ks-tab-panel" data-ks-panel="access">
-      <div class="ks-grid ks-grid-2">
-        <article class="ks-card">
-          <div class="ks-card-head"><div><span class="ks-kicker">PLESK SSO</span><h2>Podpisane logowanie</h2></div><span class="ks-icon">⌾</span></div>
-          <p class="ks-muted">Connector ID, adres Pleska i wspólny sekret są tworzone automatycznie przy zapisie albo pierwszym wdrożeniu. Pola poniżej służą do kontrolowanej zmiany lub podłączenia zewnętrznego Huba.</p>
-          <form method="post" action="<?php echo $e($url('save')); ?>" class="ks-subform" data-ks-merge-config>
-            <?php foreach ($c as $name => $value): if (in_array($name, ['plesk_url', 'connector_id', 'last_sync', 'node_id'], true)) continue; ?><input type="hidden" name="<?php echo $e($name); ?>" value="<?php echo $e($value); ?>"><?php endforeach; ?>
-            <label class="ks-field"><span>Publiczny adres panelu Plesk</span><input type="url" name="plesk_url" value="<?php echo $e($c['plesk_url']); ?>" placeholder="https://plesk.example.com:8443"><small>Adres źródłowego panelu tożsamości, bez ścieżki i końcowego ukośnika.</small></label>
-            <label class="ks-field"><span>Connector ID z Hub</span><input name="connector_id" value="<?php echo $e($c['connector_id']); ?>" placeholder="utworzy się automatycznie"><small>Stabilny identyfikator tego panelu Plesk. Zwykle nie trzeba go wpisywać ręcznie.</small></label>
-            <label class="ks-field"><span>Wspólny sekret SSO</span><input type="password" name="shared_secret" autocomplete="new-password" placeholder="<?php echo $secrets['shared_secret'] ? 'Zapisany — puste pole zachowa' : 'Minimum 32 znaki'; ?>"><small><?php echo $secrets['shared_secret'] ? 'Sekret zapisany i zaszyfrowany.' : 'Brak zapisanego sekretu.'; ?></small><em class="ks-clear"><input type="checkbox" name="clear_shared_secret" value="1"> wyczyść sekret</em></label>
-            <button class="ks-button is-primary" type="submit">Zapisz lub wygeneruj ustawienia SSO</button>
-          </form>
-        </article>
-        <article class="ks-card">
-          <div class="ks-card-head"><div><span class="ks-kicker">WĘZEŁ PLESK</span><h2>Parowanie i synchronizacja</h2></div><span class="ks-icon">⇄</span></div>
-          <?php if (!$paired): ?>
-            <form method="post" action="<?php echo $e($url('pair')); ?>" class="ks-subform">
-              <label class="ks-field"><span>10-minutowy kod parowania z Kitsune Hub</span><input name="pairing_code" placeholder="abcdef-123456" pattern="[a-fA-F0-9]{6}-[a-fA-F0-9]{6}" required></label>
-              <button class="ks-button is-primary" type="submit">Sparuj ten serwer</button>
+      <div class="ks-section-title"><div><span class="ks-kicker">AUTOMATYCZNE ZAUFANIE</span><h2>Jedno połączenie dla SSO i serwera</h2><p>Bridge generuje zaszyfrowany sekret, wdraża go po obu stronach i rejestruje Pleska podpisanym żądaniem. Nie trzeba kopiować kodu ani identyfikatorów.</p></div></div>
+      <article class="ks-card ks-auto-connect">
+        <div class="ks-card-head"><div><span class="ks-kicker">STAN POŁĄCZENIA</span><h2><?php echo $paired ? 'Plesk i Hub są połączone' : ($healthOk ? 'Hub jest gotowy do automatycznego połączenia' : 'Najpierw uruchomimy Hub'); ?></h2></div><span class="ks-icon"><?php echo $paired ? '✓' : '⇄'; ?></span></div>
+        <div class="ks-service-banner <?php echo $paired ? 'is-running' : ''; ?>"><span></span><div><strong><?php echo $paired ? 'SSO i synchronizacja działają automatycznie' : ($healthOk ? 'Bridge dokończy rejestrację bez kodu' : 'Po wdrożeniu rejestracja wykona się sama'); ?></strong><small><?php echo $paired ? 'Węzeł ' . $e($c['node_id']) . ' · ostatnia synchronizacja ' . $e($c['last_sync'] ?: 'przed chwilą') : 'Sekret i Connector ID pozostają zaszyfrowane w Plesku i nie wymagają ręcznej obsługi.'; ?></small></div></div>
+        <ol class="ks-auto-flow">
+          <li class="<?php echo $secrets['shared_secret'] && $c['connector_id'] !== '' ? 'is-done' : ''; ?>"><span>1</span><div><strong>Zaufanie Bridge</strong><small>Connector ID i sekret są generowane lokalnie.</small></div></li>
+          <li class="<?php echo $healthOk ? 'is-done' : ''; ?>"><span>2</span><div><strong>Uruchomiony Hub</strong><small>Przy pierwszym użyciu przycisk wykona wdrożenie.</small></div></li>
+          <li class="<?php echo $paired ? 'is-done' : ''; ?>"><span>3</span><div><strong>SSO i inwentarz</strong><small>Podpisana rejestracja oraz synchronizacja bez kodu.</small></div></li>
+        </ol>
+        <div class="ks-actions">
+          <form method="post" action="<?php echo $e($url('connect')); ?>"><button class="ks-button is-primary is-large" type="submit"><?php echo $paired ? 'Sprawdź i odśwież połączenie' : 'Uruchom automatyczną konfigurację'; ?></button></form>
+          <?php if ($paired): ?><form method="post" action="<?php echo $e($url('sync')); ?>"><button class="ks-button is-large" type="submit">Synchronizuj teraz</button></form><?php endif; ?>
+        </div>
+      </article>
+
+      <details class="ks-advanced-settings ks-connection-fallback">
+        <summary>Ustawienia awaryjne dla zewnętrznego Huba</summary>
+        <div class="ks-grid ks-grid-2 ks-auto-advanced">
+          <article class="ks-card">
+            <div class="ks-card-head"><div><span class="ks-kicker">RĘCZNE SSO</span><h2>Dane zaufania</h2></div><span class="ks-icon">⌾</span></div>
+            <p class="ks-muted">Zmieniaj te pola wyłącznie przy podłączaniu istniejącego Huba zarządzanego poza tym Pleskiem.</p>
+            <form method="post" action="<?php echo $e($url('save')); ?>" class="ks-subform" data-ks-merge-config>
+              <?php foreach ($c as $name => $value): if (in_array($name, ['plesk_url', 'connector_id', 'last_sync', 'node_id'], true)) continue; ?><input type="hidden" name="<?php echo $e($name); ?>" value="<?php echo $e($value); ?>"><?php endforeach; ?>
+              <label class="ks-field"><span>Publiczny adres panelu Plesk</span><input type="url" name="plesk_url" value="<?php echo $e($c['plesk_url']); ?>" placeholder="https://plesk.example.com:8443"></label>
+              <label class="ks-field"><span>Connector ID</span><input name="connector_id" value="<?php echo $e($c['connector_id']); ?>"></label>
+              <label class="ks-field"><span>Wspólny sekret SSO</span><input type="password" name="shared_secret" autocomplete="new-password" placeholder="<?php echo $secrets['shared_secret'] ? 'Zapisany — puste pole zachowa' : 'Minimum 32 znaki'; ?>"><em class="ks-clear"><input type="checkbox" name="clear_shared_secret" value="1"> wyczyść sekret</em></label>
+              <button class="ks-button" type="submit">Zapisz ręczne dane</button>
             </form>
-          <?php else: ?>
-            <div class="ks-service-banner is-running"><span></span><div><strong>Węzeł jest sparowany</strong><small>ID: <?php echo $e($c['node_id']); ?></small></div></div>
-            <form method="post" action="<?php echo $e($url('sync')); ?>"><button class="ks-button is-primary" type="submit">Synchronizuj domeny i możliwości</button></form>
-          <?php endif; ?>
-          <p class="ks-muted">Synchronizacja publikuje do Huba wersję Pleska, domeny dostępne dla bieżącego serwera, tryb uwierzytelniania i możliwości Bridge.</p>
-        </article>
-      </div>
+          </article>
+          <article class="ks-card">
+            <div class="ks-card-head"><div><span class="ks-kicker">STARY HUB</span><h2>Kod parowania</h2></div><span class="ks-icon">#</span></div>
+            <p class="ks-muted">Kod jest potrzebny tylko wtedy, gdy zewnętrzny Hub nie obsługuje automatycznej rejestracji Bridge.</p>
+            <?php if (!$paired): ?><form method="post" action="<?php echo $e($url('pair')); ?>" class="ks-subform"><label class="ks-field"><span>10-minutowy kod</span><input name="pairing_code" placeholder="abcdef-123456" pattern="[a-fA-F0-9]{6}-[a-fA-F0-9]{6}" required></label><button class="ks-button" type="submit">Połącz kodem awaryjnym</button></form><?php else: ?><div class="ks-service-banner is-running"><span></span><div><strong>Węzeł jest już połączony</strong><small>Ręczny kod nie jest potrzebny.</small></div></div><?php endif; ?>
+          </article>
+        </div>
+      </details>
     </section>
 
     <section class="ks-tab-panel" data-ks-panel="manual">

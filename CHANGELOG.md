@@ -12,6 +12,7 @@
 - Reworked Plesk Bridge status, API-domain configuration, web-server integration and self-updates.
 - Added the Plesk Bridge r14 migration that removes the legacy managed nginx block before domain rebuilds, fixes API-domain selection and links directly to the server panel.
 - Fixed the Plesk Bridge update-result race so checks and upgrade scheduling are displayed immediately and survive automatic status refreshes.
+- Replaced managed Plesk pairing codes with automatic signed enrollment, one-click SSO setup and a persistent connector heartbeat in Bridge r16.
 
 ## 3.1.0 — 2026-08-20
 
