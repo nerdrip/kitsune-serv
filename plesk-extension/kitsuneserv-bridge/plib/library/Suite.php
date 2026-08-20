@@ -17,6 +17,7 @@ class Modules_KitsuneservBridge_Suite
         'kitsune-git',
         'wpkit-parse-manager',
         'nerd-apps-runtime-manager',
+        'ultimate-tool',
         self::HUB_ID,
     ];
 

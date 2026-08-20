@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-20T12:14:02.856Z",
+  "generatedAt": "2026-08-20T12:47:49.864Z",
   "packages": [
     {
       "order": 1,
@@ -18,7 +18,7 @@
       "version": "1.3.4",
       "release": "2",
       "file": "packages/02-kitsuneirc-manager-1.3.4-r2.zip",
-      "sha256": "89a50bfe845f3915baf2c789521a81742bb4fa194302158c6a52dfe9baa3ab26"
+      "sha256": "70e3985aa73047abf173e2636721302e8758d9f6d6585d7b53fe05023348c308"
     },
     {
       "order": 3,
@@ -27,7 +27,7 @@
       "version": "1.5.11",
       "release": "2",
       "file": "packages/03-kitsunecolab-manager-1.5.11-r2.zip",
-      "sha256": "2131dffb26b565ef7ba117ef3daf9dfb226055842ebc05a178edf9fb8204be53"
+      "sha256": "8cf7c29bb150501ee317d3d2d50e5c4db95739d6b2144941f6b3fcdd0d05496b"
     },
     {
       "order": 4,
@@ -36,7 +36,7 @@
       "version": "2.0.5",
       "release": "2",
       "file": "packages/04-kitsunepaint-manager-2.0.5-r2.zip",
-      "sha256": "1bf5ef7c5987037e7b16d056af01b7737f698d324d3d83f63541a995099994af"
+      "sha256": "c8dbd3ff9c9576a8a39d35a4fe42f8808f062334c90ff208a97a235a5b03ebb9"
     },
     {
       "order": 5,
@@ -45,7 +45,7 @@
       "version": "1.8.9",
       "release": "2",
       "file": "packages/05-kitsunepnc-manager-1.8.9-r2.zip",
-      "sha256": "fee9342ab9aac1ed97381c83cbeae72c4e67114d04cef59ea1378dc1c07419c3"
+      "sha256": "5b34b24dc8373a0a633597fa5735f0df06204774f26e643dbd2537184aa13d8d"
     },
     {
       "order": 6,
@@ -54,7 +54,7 @@
       "version": "0.4.0",
       "release": "2",
       "file": "packages/06-kitsunetab-manager-0.4.0-r2.zip",
-      "sha256": "231bc2cecfd94afff73548b58d79bf68109e5cd45b85f5f379ca2f8bbce83400"
+      "sha256": "e41217447ce90076c8658aa81651fb401002e8d21d752a7ffd311a499cd44354"
     },
     {
       "order": 7,
@@ -72,7 +72,7 @@
       "version": "1.0.28",
       "release": "2",
       "file": "packages/08-nailit-manager-1.0.28-r2.zip",
-      "sha256": "63033f8cad3b107ee81ed1441b3e5ce7cf01c4d1cd017a0e94a7680fac328c9a"
+      "sha256": "4fd27b3fc04c0c8ad8fecd3837a2a827e3b98374c30d9f27aab2e806c9eacd9a"
     },
     {
       "order": 9,
@@ -81,7 +81,7 @@
       "version": "1.3.0",
       "release": "2",
       "file": "packages/09-kitsune-git-1.3.0-r2.zip",
-      "sha256": "c09c16ffd3d645fb2774be2ce1d38e4d715ca24fd7f2bf3219b638af7ac1d477"
+      "sha256": "a784564fcfa6e9fa484e795f6755b797964861393525df758f134f6fad40af31"
     },
     {
       "order": 10,
@@ -102,13 +102,22 @@
       "sha256": "7410f3192e4e681da4f8868c7d1a6bb1967997f1d9041791054e4f4cd750b95c"
     },
     {
+      "order": 12,
+      "id": "ultimate-tool",
+      "name": "Ultimate Tool",
+      "version": "0.1.1",
+      "release": "82",
+      "file": "packages/12-ultimate-tool-0.1.1-r82.zip",
+      "sha256": "2f11db8c91eca2756ce49327dc477ab5722c4789e6d25191fcef57764eabc04c"
+    },
+    {
       "order": 99,
       "id": "kitsuneserv-bridge",
       "name": "KitsuneServ Bridge",
       "version": "3.1.2",
-      "release": "20",
-      "file": "packages/99-kitsuneserv-bridge-3.1.2-r20.zip",
-      "sha256": "a8e91c26fb5bbfc61b53c291694d682b558650a8e27ca1e3a48e1b644e1a0b3c"
+      "release": "21",
+      "file": "packages/99-kitsuneserv-bridge-3.1.2-r21.zip",
+      "sha256": "7ae91966e3d158aa97946ad488d87d42d5eaa7aeb08fe81a50e64a9375a74d78"
     }
   ]
 }

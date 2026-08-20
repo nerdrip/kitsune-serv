@@ -1,0 +1,859 @@
+#!/usr/bin/env php
+<?php
+
+const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.1.2-r21';
+
+final class KitsuneServBridgeManager
+{
+    private $config;
+    private $varDir;
+    private $statePath;
+    private $state;
+    private $productRoot;
+    private $lockHandle;
+    private $redactions = [];
+
+    public function __construct($configPath)
+    {
+        $real = $this->validateRuntimeConfigPath($configPath);
+        if (((int) fileperms($real) & 0077) !== 0) throw new RuntimeException('Operation configuration must have mode 0600.');
+        $decoded = json_decode((string) file_get_contents($real), true);
+        if (!is_array($decoded)) throw new RuntimeException('Invalid operation configuration JSON.');
+        $this->config = $decoded;
+        $this->varDir = dirname($real);
+        $this->statePath = $this->varDir . '/state.json';
+        $this->productRoot = dirname(__DIR__, 4);
+        $this->state = $this->readState();
+        foreach (['git_token', 'git_ssh_private_key', 'bootstrap_password', 'secret_key', 'api_token', 'shared_secret', 'device_token'] as $field) {
+            if (!empty($this->config[$field])) $this->redactions[] = (string) $this->config[$field];
+        }
+        foreach (['repository_path', 'deploy_path', 'data_path'] as $field) {
+            $this->config[$field] = $this->validateManagedPath($this->config[$field] ?? '', $field);
+        }
+        if ($this->pathsOverlap($this->config['repository_path'], $this->config['deploy_path']) ||
+            $this->pathsOverlap($this->config['repository_path'], $this->config['data_path']) ||
+            $this->pathsOverlap($this->config['deploy_path'], $this->config['data_path'])) {
+            throw new RuntimeException('Repository, deployment and data paths must not overlap.');
+        }
+    }
+
+    public function execute()
+    {
+        $action = (string) ($this->config['action'] ?? '');
+        if (!in_array($action, ['status', 'check', 'sync', 'deploy', 'sync-deploy', 'start', 'stop', 'restart', 'proxy', 'extension-check', 'extension-update'], true)) {
+            throw new RuntimeException('Unsupported operation.');
+        }
+        if (($this->config['deployment_mode'] ?? 'managed') !== 'managed' && $action !== 'status') {
+            throw new RuntimeException('Repository operations are disabled in external Hub mode.');
+        }
+        $isStatus = $action === 'status';
+        $this->acquireLock($isStatus ? 2 : 15, 'operation.lock');
+        $this->state = $this->readState();
+        $this->normalizeExtensionUpdateState();
+        if (!$isStatus) {
+            $this->log('Executor KitsuneServ Bridge ' . KITSUNESERV_BRIDGE_EXECUTOR_RELEASE . '.');
+            $this->state['lastOperation'] = $action;
+            $this->state['lastError'] = null;
+        }
+        try {
+            switch ($action) {
+                case 'status':
+                    $this->refreshState();
+                    break;
+                case 'check':
+                    $this->checkPrerequisites();
+                    $this->refreshRepository(true);
+                    $this->refreshState();
+                    break;
+                case 'sync':
+                    $this->checkPrerequisites();
+                    $this->synchronizeRepository();
+                    $this->refreshState();
+                    break;
+                case 'deploy':
+                    $this->checkPrerequisites();
+                    $this->deploy();
+                    break;
+                case 'sync-deploy':
+                    $this->checkPrerequisites();
+                    $this->synchronizeRepository();
+                    $this->deploy();
+                    break;
+                case 'start':
+                case 'restart':
+                    $this->resolveNodeRuntime();
+                    $this->refreshAuthenticationEnvironment();
+                    $this->writeSystemdUnit();
+                    $this->run(['systemctl', 'daemon-reload']);
+                    $this->controlService($action);
+                    $this->refreshState();
+                    break;
+                case 'stop':
+                    $this->controlService($action);
+                    $this->refreshState();
+                    break;
+                case 'proxy':
+                    $this->configureProxy();
+                    $this->refreshState();
+                    break;
+                case 'extension-check':
+                    $this->checkRepositoryPrerequisites();
+                    $this->synchronizeRepository();
+                    $this->scheduleExtensionUpdate(false);
+                    $this->refreshState();
+                    break;
+                case 'extension-update':
+                    $this->checkRepositoryPrerequisites();
+                    $this->synchronizeRepository();
+                    $this->scheduleExtensionUpdate(true);
+                    $this->refreshState();
+                    break;
+            }
+            if (in_array($action, ['sync', 'deploy', 'sync-deploy'], true)) {
+                try {
+                    $this->scheduleExtensionUpdate();
+                } catch (Throwable $extensionError) {
+                    $message = $this->redact($extensionError->getMessage());
+                    $this->state['extensionUpdate'] = ['status' => 'failed', 'current' => KITSUNESERV_BRIDGE_EXECUTOR_RELEASE, 'candidate' => null, 'checkedAt' => gmdate('c'), 'error' => $message];
+                    $this->log('OSTRZEŻENIE: automatyczna aktualizacja Plesk Bridge nie została zaplanowana: ' . $message);
+                }
+            }
+            if (!$isStatus) {
+                $this->state['lastSuccess'] = gmdate('c');
+                $this->log('Operacja zakończona: ' . $action . '.');
+            }
+        } catch (Throwable $exception) {
+            if (!$isStatus) {
+                $this->state['lastError'] = $this->redact($exception->getMessage());
+                $this->log('BŁĄD: ' . $exception->getMessage());
+                $this->saveState();
+            }
+            throw $exception;
+        }
+        $this->saveState();
+    }
+
+    private function checkPrerequisites()
+    {
+        $this->checkRepositoryPrerequisites();
+        [$node, $npm, $nodeVersion] = $this->resolveNodeRuntime();
+        $this->run([$npm, '--version']);
+        $this->run(['systemctl', '--version']);
+        $this->log('Node.js ' . $nodeVersion . ' (' . $node . '), npm (' . $npm . '), Git i systemd są dostępne.');
+    }
+
+    private function checkRepositoryPrerequisites()
+    {
+        $this->validatedRepositoryUrl();
+        $this->validatedBranch();
+        $this->run(['git', '--version']);
+    }
+
+    private function synchronizeRepository()
+    {
+        $path = $this->config['repository_path'];
+        $url = $this->validatedRepositoryUrl();
+        $branch = $this->validatedBranch();
+        if (!is_dir($path . '/.git')) {
+            if (file_exists($path) && count(array_diff(scandir($path), ['.', '..'])) > 0) {
+                throw new RuntimeException('Repository path exists but is not an empty Git checkout: ' . $path);
+            }
+            if (is_dir($path)) @rmdir($path);
+            $this->ensureDirectory(dirname($path), 0750);
+            $this->log('Klonuję repozytorium ' . $url . ' (' . $branch . ').');
+            $this->runGit(['git', 'clone', '--branch', $branch, '--recurse-submodules', $url, $path]);
+        } else {
+            $origin = trim($this->runGit(['git', '-C', $path, 'remote', 'get-url', 'origin'])['stdout']);
+            if ($origin !== $url) $this->runGit(['git', '-C', $path, 'remote', 'set-url', 'origin', $url]);
+            $dirty = trim($this->runGit(['git', '-C', $path, 'status', '--porcelain'])['stdout']);
+            if ($dirty !== '') throw new RuntimeException('Managed repository contains local changes. Commit or remove them before synchronization.');
+            $this->runGit(['git', '-C', $path, 'fetch', '--prune', 'origin']);
+            $this->runGit(['git', '-C', $path, 'checkout', '-B', $branch, 'refs/remotes/origin/' . $branch]);
+            $this->runGit(['git', '-C', $path, 'reset', '--hard', 'refs/remotes/origin/' . $branch]);
+            $this->runGit(['git', '-C', $path, 'submodule', 'update', '--init', '--recursive']);
+        }
+        $this->refreshRepository(false);
+    }
+
+    private function refreshRepository($fetch)
+    {
+        $path = $this->config['repository_path'];
+        $url = $this->validatedRepositoryUrl();
+        $branch = $this->validatedBranch();
+        if (!is_dir($path . '/.git')) {
+            if ($fetch) {
+                $remote = trim($this->runGit(['git', 'ls-remote', $url, 'refs/heads/' . $branch])['stdout']);
+                $this->state['repository']['remoteCommit'] = preg_split('/\s+/', $remote)[0] ?? null;
+            }
+            $this->state['repository']['branch'] = $branch;
+            $this->state['repository']['localCommit'] = null;
+            $this->state['repository']['dirty'] = null;
+            $this->state['repository']['updateAvailable'] = null;
+            return;
+        }
+        if ($fetch) $this->runGit(['git', '-C', $path, 'fetch', '--prune', 'origin']);
+        $local = trim($this->runGit(['git', '-C', $path, 'rev-parse', 'HEAD'])['stdout']);
+        $remoteResult = $this->runGit(['git', '-C', $path, 'rev-parse', '--verify', 'refs/remotes/origin/' . $branch], false);
+        $remote = $remoteResult['code'] === 0 ? trim($remoteResult['stdout']) : null;
+        $dirty = trim($this->runGit(['git', '-C', $path, 'status', '--porcelain'])['stdout']) !== '';
+        $this->state['repository'] = ['branch' => $branch, 'localCommit' => $local ?: null, 'remoteCommit' => $remote ?: null, 'dirty' => $dirty, 'updateAvailable' => $remote ? $local !== $remote : null];
+    }
+
+    private function deploy()
+    {
+        $source = $this->config['repository_path'];
+        if (!is_file($source . '/package.json') || !is_file($source . '/package-lock.json') || !is_file($source . '/src/server.js')) {
+            throw new RuntimeException('Repository does not contain a complete KitsuneServ server application.');
+        }
+        $deploy = $this->config['deploy_path'];
+        $stage = $deploy . '.stage-' . bin2hex(random_bytes(6));
+        $previous = $deploy . '.previous';
+        $this->removeTree($stage);
+        $this->ensureDirectory($stage, 0750);
+        foreach (['package.json', 'package-lock.json', 'src', 'config', 'www', 'utils', 'assets', 'LICENSE', 'README.md', 'SERVICES.md'] as $relative) {
+            $from = $source . '/' . $relative;
+            if (file_exists($from)) $this->copyTree($from, $stage . '/' . $relative);
+        }
+        $this->log('Instaluję zależności produkcyjne w katalogu staging.');
+        $this->run([$this->validatedBinary('npm_binary'), 'ci', '--omit=dev', '--ignore-scripts'], $stage, ['NODE_ENV' => 'production']);
+        $manifest = json_decode((string) file_get_contents($stage . '/package.json'), true);
+        $version = is_array($manifest) ? (string) ($manifest['version'] ?? '') : '';
+        if (!preg_match('/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/', $version)) throw new RuntimeException('Invalid KitsuneServ package version.');
+
+        $environmentPath = '/etc/kitsuneserv-hub.env';
+        $unitPath = '/etc/systemd/system/kitsuneserv-hub.service';
+        $previousEnvironment = is_file($environmentPath) ? (string) file_get_contents($environmentPath) : null;
+        $previousUnit = is_file($unitPath) ? (string) file_get_contents($unitPath) : null;
+        $this->removeTree($previous);
+        if (is_dir($deploy) && !rename($deploy, $previous)) throw new RuntimeException('Cannot preserve previous deployment.');
+        if (!rename($stage, $deploy)) {
+            if (is_dir($previous)) @rename($previous, $deploy);
+            throw new RuntimeException('Cannot activate staged deployment.');
+        }
+        try {
+            $this->writeEnvironment();
+            $this->writeSystemdUnit();
+            $this->run(['systemctl', 'daemon-reload']);
+            $this->run(['systemctl', 'enable', 'kitsuneserv-hub.service']);
+            $this->applyOwnership();
+            $this->run(['systemctl', 'restart', 'kitsuneserv-hub.service']);
+            if (($this->config['proxy_mode'] ?? 'managed') === 'managed') $this->configureProxy();
+        } catch (Throwable $exception) {
+            $this->run(['systemctl', 'stop', 'kitsuneserv-hub.service'], null, [], false);
+            $this->removeTree($deploy);
+            if (is_dir($previous)) @rename($previous, $deploy);
+            $this->restoreFile($environmentPath, $previousEnvironment, 0600);
+            $this->restoreFile($unitPath, $previousUnit, 0644);
+            $this->run(['systemctl', 'daemon-reload'], null, [], false);
+            if (is_dir($deploy) && $previousUnit !== null) $this->run(['systemctl', 'restart', 'kitsuneserv-hub.service'], null, [], false);
+            throw new RuntimeException('Deployment rolled back: ' . $exception->getMessage(), 0, $exception);
+        }
+        $commit = is_dir($source . '/.git') ? trim($this->runGit(['git', '-C', $source, 'rev-parse', 'HEAD'])['stdout']) : null;
+        $this->state['deployment'] = ['version' => $version, 'commit' => $commit ?: null, 'path' => $deploy, 'deployedAt' => gmdate('c')];
+        $this->refreshState();
+    }
+
+    private function writeEnvironment()
+    {
+        $password = (string) ($this->config['bootstrap_password'] ?? '');
+        if ($password === '') throw new RuntimeException('Bootstrap administrator password is required before deployment.');
+        $domain = $this->validatedDomain((string) ($this->config['panel_domain'] ?? ''));
+        $authMode = (string) ($this->config['auth_mode'] ?? 'hybrid');
+        if (!in_array($authMode, ['independent', 'plesk', 'hybrid'], true)) throw new RuntimeException('Invalid Hub authentication mode.');
+        $node = $this->validatedBinary('node_binary');
+        $values = [
+            'PATH' => dirname($node) . ':/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+            'NODE_ENV' => 'production',
+            'KITSUNE_HOST' => $this->validatedBindAddress(),
+            'KITSUNE_PORT' => (string) $this->validatedPort(),
+            'KITSUNE_DATA_DIR' => $this->config['data_path'],
+            'KITSUNE_USER' => $this->validatedUsername((string) ($this->config['bootstrap_user'] ?? 'admin')),
+            'KITSUNE_PASS' => $password,
+            'KITSUNE_SECRET_KEY' => (string) ($this->config['secret_key'] ?? ''),
+            'KITSUNE_API_TOKEN' => (string) ($this->config['api_token'] ?? ''),
+            'KITSUNE_ALLOWED_IPS' => (string) ($this->config['allowed_ips'] ?? ''),
+            'KITSUNE_SAFE_MODE' => ($this->config['safe_mode'] ?? 'false') === 'true' ? '1' : '0',
+            'KITSUNE_DISABLE_SYSTEM_INTEGRATION' => ($this->config['disable_system_integration'] ?? 'false') === 'true' ? '1' : '0',
+            'KITSUNE_UPDATE_MANIFEST_URL' => (string) ($this->config['update_manifest_url'] ?? ''),
+            'KITSUNE_UPDATE_PUBLIC_KEY' => $this->normalizedUpdatePublicKey((string) ($this->config['update_public_key'] ?? '')),
+            'KITSUNE_PANEL_DOMAIN' => $domain,
+            'KITSUNE_HUB_AUTH_MODE' => $authMode,
+            'KITSUNE_HUB_AUTO_PROVISION' => ($this->config['auto_provision'] ?? '1') === '1' ? '1' : '0',
+            'KITSUNE_ALLOW_LOCAL_LOGIN' => $authMode === 'plesk' ? '0' : '1',
+            'KITSUNE_PLESK_URL' => (string) ($this->config['plesk_url'] ?? ''),
+            'KITSUNE_PLESK_CONNECTOR_ID' => (string) ($this->config['connector_id'] ?? ''),
+            'KITSUNE_PLESK_CONNECTOR_SECRET' => (string) ($this->config['shared_secret'] ?? ''),
+        ];
+        $lines = [];
+        foreach ($values as $key => $value) $lines[] = $key . '=' . $this->systemdValue((string) $value);
+        $this->writeAtomicFile('/etc/kitsuneserv-hub.env', implode("\n", $lines) . "\n", 0600);
+    }
+
+    private function refreshAuthenticationEnvironment()
+    {
+        $path = '/etc/kitsuneserv-hub.env';
+        if (!is_file($path)) throw new RuntimeException('Deploy KitsuneServ before controlling the service.');
+        $authMode = (string) ($this->config['auth_mode'] ?? 'hybrid');
+        if (!in_array($authMode, ['independent', 'plesk', 'hybrid'], true)) throw new RuntimeException('Invalid Hub authentication mode.');
+        $updates = [
+            'PATH' => dirname($this->validatedBinary('node_binary')) . ':/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+            'KITSUNE_HUB_AUTH_MODE' => $authMode,
+            'KITSUNE_HUB_AUTO_PROVISION' => ($this->config['auto_provision'] ?? '1') === '1' ? '1' : '0',
+            'KITSUNE_ALLOW_LOCAL_LOGIN' => $authMode === 'plesk' ? '0' : '1',
+            'KITSUNE_PLESK_URL' => (string) ($this->config['plesk_url'] ?? ''),
+            'KITSUNE_PLESK_CONNECTOR_ID' => (string) ($this->config['connector_id'] ?? ''),
+            'KITSUNE_PLESK_CONNECTOR_SECRET' => (string) ($this->config['shared_secret'] ?? ''),
+        ];
+        $keys = array_fill_keys(array_keys($updates), true);
+        $lines = preg_split('/\r?\n/', (string) file_get_contents($path));
+        $preserved = [];
+        foreach ((array) $lines as $line) {
+            if ($line === '') continue;
+            $separator = strpos($line, '=');
+            $key = $separator === false ? '' : substr($line, 0, $separator);
+            if (!isset($keys[$key])) $preserved[] = $line;
+        }
+        foreach ($updates as $key => $value) $preserved[] = $key . '=' . $this->systemdValue((string) $value);
+        $this->writeAtomicFile($path, implode("\n", $preserved) . "\n", 0600);
+        $this->log('Odświeżono konfigurację uwierzytelniania usługi przed uruchomieniem.');
+    }
+
+    private function writeSystemdUnit()
+    {
+        $user = trim((string) ($this->config['service_user'] ?? 'root'));
+        if (!preg_match('/^[a-z_][a-z0-9_-]{0,31}$/', $user)) throw new RuntimeException('Invalid Linux service user.');
+        $result = $this->run(['id', '-u', $user], null, [], false);
+        if ($result['code'] !== 0) throw new RuntimeException('Linux service user does not exist: ' . $user);
+        $node = $this->validatedBinary('node_binary');
+        $deploy = $this->config['deploy_path'];
+        $unit = "[Unit]\nDescription=KitsuneServ Hub managed by Plesk\nAfter=network-online.target\nWants=network-online.target\n\n"
+            . "[Service]\nType=simple\nUser=" . $user . "\nWorkingDirectory=" . $deploy . "\nEnvironmentFile=/etc/kitsuneserv-hub.env\n"
+            . "ExecStart=" . $node . " " . $deploy . "/src/server.js\nRestart=on-failure\nRestartSec=5\nTimeoutStopSec=45\nKillSignal=SIGTERM\nUMask=0077\n"
+            . "LimitNOFILE=65536\n\n[Install]\nWantedBy=multi-user.target\n";
+        $this->writeAtomicFile('/etc/systemd/system/kitsuneserv-hub.service', $unit, 0644);
+    }
+
+    private function applyOwnership()
+    {
+        $user = trim((string) ($this->config['service_user'] ?? 'root'));
+        $this->ensureDirectory($this->config['data_path'], 0750);
+        if ($user !== 'root') {
+            $this->run(['chown', '-R', $user . ':' . $user, $this->config['deploy_path']]);
+            $this->run(['chown', '-R', $user . ':' . $user, $this->config['data_path']]);
+        }
+    }
+
+    private function controlService($action)
+    {
+        if (!is_file('/etc/systemd/system/kitsuneserv-hub.service')) throw new RuntimeException('Deploy KitsuneServ before controlling the service.');
+        $command = $action === 'start' ? 'start' : ($action === 'stop' ? 'stop' : 'restart');
+        $this->run(['systemctl', $command, 'kitsuneserv-hub.service']);
+    }
+
+    private function configureProxy()
+    {
+        if (($this->config['proxy_mode'] ?? 'managed') !== 'managed') throw new RuntimeException('Automatic proxy management is disabled.');
+        $domains = preg_split('/\s*,\s*/', (string) ($this->config['proxy_domains'] ?? $this->config['panel_domain'] ?? ''), -1, PREG_SPLIT_NO_EMPTY);
+        $domains = array_values(array_unique(array_map([$this, 'validatedDomain'], $domains)));
+        if (!$domains) throw new RuntimeException('No Plesk publication domain is configured.');
+        $httpdmng = $this->productRoot . '/admin/sbin/httpdmng';
+        $legacyMigrations = [];
+        foreach ($domains as $domain) {
+            $migration = $this->removeLegacyProxyBlock($domain);
+            if ($migration !== null) $legacyMigrations[] = $migration;
+            $this->run([$httpdmng, '--reconfigure-domain', $domain]);
+        }
+        $this->state['proxy'] = ['mode' => 'managed', 'strategy' => 'plesk-webserver-hook', 'domain' => $domains[0], 'domains' => $domains, 'configuredAt' => gmdate('c'), 'path' => 'pm_Hook_WebServer', 'transition' => false, 'legacyMigrations' => $legacyMigrations];
+        $this->log('Przebudowano konfigurację WWW przez hook Pleska dla: ' . implode(', ', $domains) . '.');
+    }
+
+    private function removeLegacyProxyBlock($domain)
+    {
+        $vhostPaths = (array) ($this->config['proxy_vhost_paths'] ?? []);
+        if (!isset($vhostPaths[$domain])) throw new RuntimeException('Plesk did not provide a verified vhost path for ' . $domain . '.');
+        $vhost = $this->validatedPleskVhostPath($vhostPaths[$domain], $domain);
+        $path = $vhost . '/conf/vhost_nginx.conf';
+        if (!file_exists($path)) return null;
+        if (!is_file($path) || is_link($path)) throw new RuntimeException('Unsafe Plesk nginx configuration path for ' . $domain . '.');
+
+        $original = file_get_contents($path);
+        if ($original === false) throw new RuntimeException('Cannot read the Plesk nginx configuration for ' . $domain . '.');
+        $begin = '# BEGIN KITSUNESERV BRIDGE MANAGED';
+        $end = '# END KITSUNESERV BRIDGE MANAGED';
+        $beginCount = substr_count($original, $begin);
+        $endCount = substr_count($original, $end);
+        if ($beginCount === 0 && $endCount === 0) {
+            if (strpos($original, '__kitsuneserv_bridge_internal__') !== false) {
+                throw new RuntimeException('The nginx configuration for ' . $domain . ' contains an unmarked conflict with the reserved KitsuneServ route. Remove it manually before rebuilding the domain.');
+            }
+            return null;
+        }
+        if ($beginCount !== $endCount) throw new RuntimeException('The legacy KitsuneServ nginx block for ' . $domain . ' is incomplete. Restore or remove that marked block manually.');
+
+        $pattern = '/\n?' . preg_quote($begin, '/') . '.*?' . preg_quote($end, '/') . '\n?/s';
+        $next = preg_replace($pattern, "\n", $original, -1, $removed);
+        if (!is_string($next) || $removed !== $beginCount) throw new RuntimeException('Could not safely migrate the legacy KitsuneServ nginx block for ' . $domain . '.');
+        if (strpos($next, '__kitsuneserv_bridge_internal__') !== false) {
+            throw new RuntimeException('The nginx configuration for ' . $domain . ' also contains an unmarked conflict with the reserved KitsuneServ route. Remove it manually before rebuilding the domain.');
+        }
+
+        $backup = $path . '.kitsuneserv-legacy-backup';
+        if (!file_exists($backup)) $this->writeAtomicFile($backup, $original, 0640);
+        $mode = fileperms($path);
+        $mode = $mode === false ? 0640 : ($mode & 0777);
+        if ($mode === 0) $mode = 0640;
+        $cleaned = trim($next) === '' ? '' : rtrim($next) . "\n";
+        $this->writeAtomicFile($path, $cleaned, $mode);
+        $this->log('Usunięto stary zarządzany blok nginx dla ' . $domain . '; kopia: ' . $backup . '.');
+        return ['domain' => $domain, 'removedBlocks' => $removed, 'backup' => $backup];
+    }
+
+    private function validatedPleskVhostPath($value, $domain)
+    {
+        $value = rtrim(str_replace('\\', '/', trim((string) $value)), '/');
+        $expected = '/var/www/vhosts/system/' . $domain;
+        if ($value !== $expected || strpos($value, '..') !== false) throw new RuntimeException('Plesk returned an unsafe vhost path for ' . $domain . '.');
+        $this->assertNoSymlinkComponents($value, 'Plesk vhost path');
+        return $value;
+    }
+
+    private function refreshState()
+    {
+        try { $this->refreshRepository(false); } catch (Throwable $exception) { $this->state['repository']['error'] = $this->redact($exception->getMessage()); }
+        try { $this->resolveNodeRuntime(); unset($this->state['runtime']['error']); } catch (Throwable $exception) { $this->state['runtime']['error'] = $this->redact($exception->getMessage()); }
+        $unit = '/etc/systemd/system/kitsuneserv-hub.service';
+        $active = $this->run(['systemctl', 'is-active', 'kitsuneserv-hub.service'], null, [], false);
+        $enabled = $this->run(['systemctl', 'is-enabled', 'kitsuneserv-hub.service'], null, [], false);
+        $pidResult = $this->run(['systemctl', 'show', '--property=MainPID', '--value', 'kitsuneserv-hub.service'], null, [], false);
+        $health = null;
+        if ($active['code'] === 0) {
+            $context = stream_context_create(['http' => ['timeout' => 2, 'ignore_errors' => true]]);
+            $response = @file_get_contents('http://127.0.0.1:' . $this->validatedPort() . '/', false, $context);
+            $health = $response !== false;
+        }
+        $this->state['service'] = [
+            'installed' => is_file($unit),
+            'active' => $active['code'] === 0 && trim($active['stdout']) === 'active',
+            'enabled' => $enabled['code'] === 0 && trim($enabled['stdout']) === 'enabled',
+            'health' => $health,
+            'pid' => max(0, (int) trim($pidResult['stdout'])),
+        ];
+    }
+
+    private function scheduleExtensionUpdate($install = true)
+    {
+        $source = $this->config['repository_path'] . '/plesk-extension/kitsuneserv-bridge';
+        $metaPath = $source . '/meta.xml';
+        if (!is_file($metaPath)) {
+            $this->state['extensionUpdate'] = ['status' => 'not-available', 'current' => KITSUNESERV_BRIDGE_EXECUTOR_RELEASE, 'candidate' => null, 'checkedAt' => gmdate('c')];
+            return;
+        }
+        $meta = (string) file_get_contents($metaPath);
+        if (!preg_match('#<id>kitsuneserv-bridge</id>#', $meta) || !preg_match('#<version>([^<]+)</version>#', $meta, $versionMatch) || !preg_match('#<release>(\d+)</release>#', $meta, $releaseMatch)) {
+            throw new RuntimeException('Repository contains invalid KitsuneServ Bridge metadata.');
+        }
+        $candidateVersion = trim($versionMatch[1]);
+        $candidateRelease = (int) $releaseMatch[1];
+        if (!preg_match('/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/', $candidateVersion) || $candidateRelease < 1) throw new RuntimeException('Repository contains an invalid extension version.');
+        if (!preg_match('/^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)-r(\d+)$/', KITSUNESERV_BRIDGE_EXECUTOR_RELEASE, $currentMatch)) throw new RuntimeException('Current extension release marker is invalid.');
+        $candidate = $candidateVersion . '-r' . $candidateRelease;
+        $newer = version_compare($candidateVersion, $currentMatch[1], '>') || ($candidateVersion === $currentMatch[1] && $candidateRelease > (int) $currentMatch[2]);
+        if (!$newer) {
+            $this->state['extensionUpdate'] = ['status' => 'current', 'current' => KITSUNESERV_BRIDGE_EXECUTOR_RELEASE, 'candidate' => $candidate, 'checkedAt' => gmdate('c')];
+            return;
+        }
+        if (!$install) {
+            $this->state['extensionUpdate'] = ['status' => 'available', 'current' => KITSUNESERV_BRIDGE_EXECUTOR_RELEASE, 'candidate' => $candidate, 'checkedAt' => gmdate('c')];
+            $this->log('Dostępna jest aktualizacja Plesk Bridge do ' . $candidate . '.');
+            return;
+        }
+        if (!class_exists('ZipArchive')) throw new RuntimeException('PHP ZipArchive is required for automatic Plesk extension updates.');
+        foreach (['htdocs', 'plib', 'sbin'] as $required) if (!is_dir($source . '/' . $required)) throw new RuntimeException('Repository extension source is incomplete: ' . $required);
+        $archive = $this->varDir . '/kitsuneserv-bridge-' . preg_replace('/[^A-Za-z0-9._-]/', '-', $candidate) . '.zip';
+        $this->createExtensionArchive($source, $archive);
+        $installer = $this->extensionInstallerCommand($archive);
+        $script = $this->varDir . '/install-extension-' . bin2hex(random_bytes(6)) . '.sh';
+        $command = implode(' ', array_map('escapeshellarg', $installer));
+        $cleanup = 'rm -f -- ' . escapeshellarg($archive) . ' ' . escapeshellarg($script);
+        $body = "#!/bin/sh\nset -eu\ntrap " . escapeshellarg($cleanup) . " EXIT\n" . $command . "\n";
+        $this->writeAtomicFile($script, $body, 0700);
+        $unit = 'kitsuneserv-bridge-update-' . preg_replace('/[^A-Za-z0-9]/', '-', $candidate) . '-' . bin2hex(random_bytes(3));
+        $scheduled = $this->run(['systemd-run', '--unit=' . $unit, '--on-active=10s', '--collect', $script], null, [], false);
+        if ($scheduled['code'] !== 0) { @unlink($script); @unlink($archive); throw new RuntimeException('Could not schedule the Plesk extension update: ' . trim($scheduled['stderr'] ?: $scheduled['stdout'])); }
+        $this->state['extensionUpdate'] = ['status' => 'scheduled', 'current' => KITSUNESERV_BRIDGE_EXECUTOR_RELEASE, 'candidate' => $candidate, 'checkedAt' => gmdate('c'), 'unit' => $unit];
+        $this->log('Zaplanowano automatyczną aktualizację Plesk Bridge do ' . $candidate . '.');
+    }
+
+    private function createExtensionArchive($source, $archive)
+    {
+        if (is_file($archive)) @unlink($archive);
+        $zip = new ZipArchive();
+        if ($zip->open($archive, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) throw new RuntimeException('Could not create the extension update archive.');
+        $sourceReal = realpath($source);
+        if ($sourceReal === false || !is_dir($sourceReal)) throw new RuntimeException('Extension update source does not exist.');
+        try {
+            $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($sourceReal, FilesystemIterator::SKIP_DOTS));
+            foreach ($iterator as $item) {
+                if ($item->isLink()) throw new RuntimeException('Extension source cannot contain symbolic links.');
+                if (!$item->isFile()) continue;
+                $file = $item->getRealPath();
+                if ($file === false || strpos($file, $sourceReal . DIRECTORY_SEPARATOR) !== 0) throw new RuntimeException('Extension archive path escaped its source.');
+                $relative = str_replace(DIRECTORY_SEPARATOR, '/', substr($file, strlen($sourceReal) + 1));
+                if (!$zip->addFile($file, $relative)) throw new RuntimeException('Could not add extension file: ' . $relative);
+            }
+            $icon = $this->config['repository_path'] . '/assets/icon.png';
+            if (is_file($icon)) { $zip->addFile($icon, 'htdocs/images/icon.png'); $zip->addFile($icon, '_meta/icons/64x64.png'); }
+        } finally { $zip->close(); }
+        if (!is_file($archive) || filesize($archive) < 1024) throw new RuntimeException('Created extension update archive is empty.');
+        @chmod($archive, 0600);
+    }
+
+    private function extensionInstallerCommand($archive)
+    {
+        if (is_executable('/usr/local/psa/bin/extension')) return ['/usr/local/psa/bin/extension', '--upgrade', $archive];
+        if (is_executable('/usr/sbin/plesk')) return ['/usr/sbin/plesk', 'bin', 'extension', '--upgrade', $archive];
+        throw new RuntimeException('Plesk extension CLI was not found.');
+    }
+
+    private function runGit(array $command, $throw = true)
+    {
+        $environment = ['GIT_TERMINAL_PROMPT' => '0'];
+        $temporary = [];
+        try {
+            $url = (string) ($this->config['repository_url'] ?? '');
+            $token = (string) ($this->config['git_token'] ?? '');
+            if ($token !== '' && strpos($url, 'https://') === 0) {
+                $askPass = $this->varDir . '/git-askpass-' . bin2hex(random_bytes(6)) . '.sh';
+                file_put_contents($askPass, "#!/bin/sh\ncase \"\$1\" in *Username*) printf '%s\\n' \"\$KITSUNE_GIT_USERNAME\" ;; *) printf '%s\\n' \"\$KITSUNE_GIT_TOKEN\" ;; esac\n", LOCK_EX);
+                chmod($askPass, 0700);
+                $temporary[] = $askPass;
+                $environment['GIT_ASKPASS'] = $askPass;
+                $environment['KITSUNE_GIT_USERNAME'] = (string) ($this->config['git_username'] ?: 'x-access-token');
+                $environment['KITSUNE_GIT_TOKEN'] = $token;
+            }
+            $isSsh = strpos($url, 'ssh://') === 0 || strpos($url, 'git@') === 0;
+            if ($isSsh) {
+                $known = trim((string) ($this->config['git_ssh_known_hosts'] ?? ''));
+                if ($known === '') throw new RuntimeException('SSH repository requires verified known_hosts content.');
+                $knownPath = $this->varDir . '/known-hosts-' . bin2hex(random_bytes(6));
+                file_put_contents($knownPath, $known . "\n", LOCK_EX); chmod($knownPath, 0600); $temporary[] = $knownPath;
+                $ssh = 'ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=' . escapeshellarg($knownPath);
+                $key = trim((string) ($this->config['git_ssh_private_key'] ?? ''));
+                if ($key !== '') {
+                    $keyPath = $this->varDir . '/git-key-' . bin2hex(random_bytes(6));
+                    file_put_contents($keyPath, $key . "\n", LOCK_EX); chmod($keyPath, 0600); $temporary[] = $keyPath;
+                    $ssh .= ' -i ' . escapeshellarg($keyPath);
+                }
+                $environment['GIT_SSH_COMMAND'] = $ssh;
+            }
+            return $this->run($command, null, $environment, $throw);
+        } finally {
+            foreach ($temporary as $path) if (is_file($path)) @unlink($path);
+        }
+    }
+
+    private function run(array $command, $cwd = null, array $extraEnvironment = [], $throw = true)
+    {
+        if (!$command) throw new RuntimeException('Empty command.');
+        foreach ($command as $argument) if (!is_scalar($argument) || strpos((string) $argument, "\0") !== false) throw new RuntimeException('Invalid process argument.');
+        $line = implode(' ', array_map('escapeshellarg', array_map('strval', $command)));
+        $environment = getenv(); if (!is_array($environment)) $environment = [];
+        $basePath = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+        $configuredNode = trim((string) ($this->config['node_binary'] ?? ''));
+        $environment['PATH'] = $this->isExecutableBinary($configuredNode) ? dirname($configuredNode) . ':' . $basePath : $basePath;
+        foreach ($extraEnvironment as $key => $value) $environment[$key] = (string) $value;
+        $descriptor = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        $process = proc_open($line, $descriptor, $pipes, $cwd, $environment);
+        if (!is_resource($process)) throw new RuntimeException('Cannot start ' . $command[0]);
+        fclose($pipes[0]); $stdout = stream_get_contents($pipes[1]); $stderr = stream_get_contents($pipes[2]); fclose($pipes[1]); fclose($pipes[2]);
+        $code = proc_close($process); $stdout = $this->redact($stdout); $stderr = $this->redact($stderr);
+        if ($throw && $code !== 0) {
+            $detail = trim(($stderr !== '' ? $stderr . "\n" : '') . $stdout);
+            throw new RuntimeException($command[0] . ' failed (' . $code . '): ' . mb_substr($detail ?: 'no details', -5000));
+        }
+        return ['code' => $code, 'stdout' => $stdout, 'stderr' => $stderr];
+    }
+
+    private function validatedRepositoryUrl()
+    {
+        $url = trim((string) ($this->config['repository_url'] ?? ''));
+        if (!preg_match('#^(?:https://[^\s]+|ssh://[^\s]+|git@[A-Za-z0-9.-]+:[A-Za-z0-9._~/-]+)$#', $url)) throw new RuntimeException('Repository URL must use HTTPS or SSH.');
+        if (preg_match('/[\r\n\0]/', $url) || strlen($url) > 1000) throw new RuntimeException('Invalid repository URL.');
+        $parts = strpos($url, 'git@') === 0 ? null : parse_url($url);
+        if (is_array($parts) && (isset($parts['pass']) || (($parts['scheme'] ?? '') === 'https' && isset($parts['user'])))) throw new RuntimeException('Repository credentials must use the encrypted credential fields, not the URL.');
+        return $url;
+    }
+
+    private function validatedBranch()
+    {
+        $branch = trim((string) ($this->config['repository_branch'] ?? 'main'));
+        if (!preg_match('/^(?![-.])(?!.*\.\.)(?!.*@\{)[A-Za-z0-9._\/-]+$/', $branch) || strlen($branch) > 200) throw new RuntimeException('Invalid Git branch.');
+        return $branch;
+    }
+
+    private function validatedBinary($field)
+    {
+        $value = trim((string) ($this->config[$field] ?? ''));
+        if (!preg_match('#^/[A-Za-z0-9._/-]+$#', $value) || strpos($value, '..') !== false || !is_file($value) || !is_executable($value)) throw new RuntimeException('Invalid or non-executable ' . $field . ': ' . $value);
+        return $value;
+    }
+
+    private function resolveNodeRuntime()
+    {
+        $configuredNode = trim((string) ($this->config['node_binary'] ?? 'auto'));
+        $nodeCandidates = [];
+        if ($configuredNode !== '' && $configuredNode !== 'auto') $nodeCandidates[] = $configuredNode;
+        foreach ((array) glob('/opt/plesk/node/*/bin/node') as $candidate) $nodeCandidates[] = $candidate;
+        foreach (['/usr/local/bin/node', '/usr/bin/node', '/snap/bin/node'] as $candidate) $nodeCandidates[] = $candidate;
+
+        $compatible = [];
+        foreach (array_values(array_unique($nodeCandidates)) as $candidate) {
+            if (!$this->isExecutableBinary($candidate)) continue;
+            $result = $this->run([$candidate, '--version'], null, [], false);
+            $versionOutput = trim((string) ($result['stdout'] ?: $result['stderr']));
+            if ($result['code'] !== 0 || !preg_match('/^v?(\d+)\.(\d+)\.(\d+)/', $versionOutput, $matches)) continue;
+            $version = (int) $matches[1] . '.' . (int) $matches[2] . '.' . (int) $matches[3];
+            if (version_compare($version, '22.19.0', '<')) continue;
+            $compatible[] = ['path' => $candidate, 'version' => $version, 'configured' => $candidate === $configuredNode];
+        }
+        if (!$compatible) {
+            throw new RuntimeException('Nie znaleziono zgodnego Node.js 22.19 lub nowszego. Zainstaluj Node.js 22+ w Plesk: Narzędzia i ustawienia > Aktualizacje > Dodaj/usuń komponenty > Node.js support, albo podaj poprawną ścieżkę ręcznie.');
+        }
+        usort($compatible, function ($left, $right) {
+            if ($left['configured'] !== $right['configured']) return $left['configured'] ? -1 : 1;
+            return version_compare($right['version'], $left['version']);
+        });
+        $selectedNode = $compatible[0];
+        $this->config['node_binary'] = $selectedNode['path'];
+
+        $configuredNpm = trim((string) ($this->config['npm_binary'] ?? 'auto'));
+        $npmCandidates = [];
+        if ($selectedNode['path'] === $configuredNode && $configuredNpm !== '' && $configuredNpm !== 'auto') $npmCandidates[] = $configuredNpm;
+        $npmCandidates[] = dirname($selectedNode['path']) . '/npm';
+        if ($configuredNpm !== '' && $configuredNpm !== 'auto') $npmCandidates[] = $configuredNpm;
+        foreach (['/usr/local/bin/npm', '/usr/bin/npm'] as $candidate) $npmCandidates[] = $candidate;
+        $selectedNpm = '';
+        foreach (array_values(array_unique($npmCandidates)) as $candidate) {
+            if (!$this->isExecutableBinary($candidate)) continue;
+            $result = $this->run([$candidate, '--version'], null, [], false);
+            if ($result['code'] === 0 && preg_match('/^\d+\.\d+\.\d+/', trim((string) $result['stdout']))) { $selectedNpm = $candidate; break; }
+        }
+        if ($selectedNpm === '') throw new RuntimeException('Znaleziono Node.js ' . $selectedNode['version'] . ', ale nie znaleziono działającego npm. Zainstaluj lub napraw komponent Node.js support w Plesku.');
+        $this->config['npm_binary'] = $selectedNpm;
+        $this->state['runtime'] = ['node' => $selectedNode['path'], 'nodeVersion' => $selectedNode['version'], 'npm' => $selectedNpm, 'detectedAt' => gmdate('c')];
+        if ($configuredNode !== $selectedNode['path'] || $configuredNpm !== $selectedNpm) {
+            $this->log('Automatycznie wybrano runtime: Node.js ' . $selectedNode['path'] . ', npm ' . $selectedNpm . '.');
+        }
+        return [$selectedNode['path'], $selectedNpm, $selectedNode['version']];
+    }
+
+    private function isExecutableBinary($value)
+    {
+        $value = trim((string) $value);
+        return preg_match('#^/[A-Za-z0-9._/-]+$#', $value) && strpos($value, '..') === false && is_file($value) && is_executable($value);
+    }
+
+    private function validatedPort()
+    {
+        $port = filter_var($this->config['hub_port'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1024, 'max_range' => 65535]]);
+        if ($port === false) throw new RuntimeException('Hub port must be between 1024 and 65535.');
+        return (int) $port;
+    }
+
+    private function validatedBindAddress()
+    {
+        $value = trim((string) ($this->config['bind_address'] ?? '127.0.0.1'));
+        if (!in_array($value, ['127.0.0.1', '::1'], true)) throw new RuntimeException('Managed Hub must bind to loopback.');
+        return $value;
+    }
+
+    private function validatedUsername($value)
+    {
+        if (!preg_match('/^[A-Za-z0-9._@+-]{3,100}$/', $value)) throw new RuntimeException('Invalid bootstrap username.');
+        return $value;
+    }
+
+    private function validatedDomain($value)
+    {
+        $value = strtolower(trim($value));
+        if (!preg_match('/^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]*$/', $value)) throw new RuntimeException('Invalid panel domain.');
+        return $value;
+    }
+
+    private function validateRuntimeConfigPath($path)
+    {
+        $productRoot = dirname(__DIR__, 4);
+        $expected = realpath($productRoot . '/var/modules/kitsuneserv-bridge');
+        $real = realpath((string) $path);
+        if ($expected === false || $real === false || dirname($real) !== $expected || !preg_match('/^operation-[a-f0-9]{24}\.json$/', basename($real))) {
+            throw new RuntimeException('Operation configuration is outside the extension state directory.');
+        }
+        return $real;
+    }
+
+    private function validateManagedPath($value, $field)
+    {
+        $value = rtrim(str_replace('\\', '/', trim((string) $value)), '/');
+        if (!preg_match('#^/(?:home|opt|srv|var/lib)/[A-Za-z0-9._/-]+$#', $value) || in_array('..', explode('/', $value), true)) {
+            throw new RuntimeException('Unsafe ' . $field . '. Use a dedicated path below /home, /opt, /srv or /var/lib.');
+        }
+        $this->assertNoSymlinkComponents($value, $field);
+        return $value;
+    }
+
+    private function assertNoSymlinkComponents($path, $field)
+    {
+        $current = '';
+        foreach (explode('/', ltrim((string) $path, '/')) as $segment) {
+            $current .= '/' . $segment;
+            if (is_link($current)) throw new RuntimeException('Unsafe symlink in ' . $field . ': ' . $current);
+            if (!file_exists($current)) break;
+        }
+    }
+
+    private function systemdValue($value)
+    {
+        if (preg_match('/[\r\n\0]/', $value)) throw new RuntimeException('Environment values cannot contain line breaks.');
+        return '"' . str_replace(['\\', '"'], ['\\\\', '\\"'], $value) . '"';
+    }
+
+    private function normalizedUpdatePublicKey($value)
+    {
+        $value = trim((string) $value);
+        if ($value === '') return '';
+        $value = preg_replace('/-----BEGIN [^-]+-----|-----END [^-]+-----|\s+/', '', $value);
+        if (!is_string($value) || $value === '' || !preg_match('/^[A-Za-z0-9+\/=]+$/', $value) || base64_decode($value, true) === false) {
+            throw new RuntimeException('Update public key must be a PEM or base64-encoded SPKI key.');
+        }
+        return $value;
+    }
+
+    private function writeAtomicFile($path, $contents, $mode)
+    {
+        $temporary = dirname($path) . '/.' . basename($path) . '.kitsune-' . bin2hex(random_bytes(6));
+        if (file_put_contents($temporary, $contents, LOCK_EX) === false) throw new RuntimeException('Cannot write temporary file: ' . $path);
+        chmod($temporary, $mode);
+        if (!rename($temporary, $path)) { @unlink($temporary); throw new RuntimeException('Cannot activate file: ' . $path); }
+    }
+
+    private function restoreFile($path, $contents, $mode)
+    {
+        if ($contents === null) {
+            if (is_file($path) || is_link($path)) @unlink($path);
+            return;
+        }
+        $this->writeAtomicFile($path, $contents, $mode);
+    }
+
+    private function copyTree($source, $target)
+    {
+        if (is_link($source)) throw new RuntimeException('Deployment source contains an unsupported symlink: ' . $source);
+        if (is_dir($source)) {
+            $this->ensureDirectory($target, 0750);
+            foreach (new FilesystemIterator($source, FilesystemIterator::SKIP_DOTS) as $item) {
+                if (in_array($item->getFilename(), ['node_modules', '.git', 'artifacts'], true)) continue;
+                $this->copyTree($item->getPathname(), $target . '/' . $item->getFilename());
+            }
+            return;
+        }
+        $this->ensureDirectory(dirname($target), 0750);
+        if (!copy($source, $target)) throw new RuntimeException('Cannot copy deployment file: ' . $source);
+        chmod($target, 0640);
+    }
+
+    private function removeTree($path)
+    {
+        if (!file_exists($path) && !is_link($path)) return;
+        if (is_link($path) || is_file($path)) {
+            if (!@unlink($path)) throw new RuntimeException('Cannot remove deployment path: ' . $path);
+            return;
+        }
+        if (!is_dir($path)) throw new RuntimeException('Unsupported deployment path: ' . $path);
+        foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST) as $item) {
+            if ($item->isLink() || $item->isFile()) @unlink($item->getPathname()); else @rmdir($item->getPathname());
+        }
+        @rmdir($path);
+    }
+
+    private function ensureDirectory($path, $mode)
+    {
+        if (!is_dir($path) && !mkdir($path, $mode, true) && !is_dir($path)) throw new RuntimeException('Cannot create directory: ' . $path);
+        chmod($path, $mode);
+    }
+
+    private function pathsOverlap($left, $right)
+    {
+        $left = rtrim((string) $left, '/'); $right = rtrim((string) $right, '/');
+        return $left === $right || strpos($left . '/', $right . '/') === 0 || strpos($right . '/', $left . '/') === 0;
+    }
+
+    private function acquireLock($seconds, $name)
+    {
+        if ($name !== 'operation.lock') throw new RuntimeException('Invalid lock name.');
+        $this->lockHandle = fopen($this->varDir . '/' . $name, 'c');
+        if (!is_resource($this->lockHandle)) throw new RuntimeException('Cannot open operation lock.');
+        $until = microtime(true) + $seconds;
+        do { if (flock($this->lockHandle, LOCK_EX | LOCK_NB)) return; usleep(250000); } while (microtime(true) < $until);
+        throw new RuntimeException('Another KitsuneServ Bridge operation is running.');
+    }
+
+    private function readState()
+    {
+        $empty = ['updatedAt' => null, 'lastOperation' => null, 'lastSuccess' => null, 'lastError' => null, 'repository' => [], 'runtime' => [], 'deployment' => [], 'service' => [], 'proxy' => [], 'extensionUpdate' => ['status' => 'never-checked', 'current' => KITSUNESERV_BRIDGE_EXECUTOR_RELEASE, 'candidate' => null, 'checkedAt' => null], 'log' => []];
+        if (!is_file($this->statePath)) return $empty;
+        $decoded = json_decode((string) file_get_contents($this->statePath), true);
+        return is_array($decoded) ? array_replace_recursive($empty, $decoded) : $empty;
+    }
+
+    private function normalizeExtensionUpdateState()
+    {
+        $update = (array) ($this->state['extensionUpdate'] ?? []);
+        if (($update['status'] ?? '') !== 'scheduled' || ($update['candidate'] ?? '') !== KITSUNESERV_BRIDGE_EXECUTOR_RELEASE) return;
+        $this->state['extensionUpdate'] = [
+            'status' => 'current',
+            'current' => KITSUNESERV_BRIDGE_EXECUTOR_RELEASE,
+            'candidate' => KITSUNESERV_BRIDGE_EXECUTOR_RELEASE,
+            'checkedAt' => gmdate('c'),
+        ];
+    }
+
+    private function saveState()
+    {
+        $this->state['updatedAt'] = gmdate('c');
+        $json = json_encode($this->state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        // The privileged executor runs as root, while the extension UI reads this redacted file as the Plesk web user.
+        $this->writeAtomicFile($this->statePath, $json . "\n", 0644);
+    }
+
+    private function redact($value)
+    {
+        return $this->redactions ? str_replace($this->redactions, '[REDACTED]', (string) $value) : (string) $value;
+    }
+
+    private function log($message)
+    {
+        $line = '[' . gmdate('Y-m-d H:i:s') . ' UTC] ' . $this->redact($message);
+        $this->state['log'][] = $line;
+        $this->state['log'] = array_slice($this->state['log'], -300);
+        fwrite(STDOUT, $line . PHP_EOL);
+    }
+}
+
+function kitsuneConfigPath(array $arguments)
+{
+    if (count($arguments) !== 3 || $arguments[1] !== '--config') throw new RuntimeException('Usage: kitsuneserv-bridge-r21 --config /secure/operation.json');
+    return (string) $arguments[2];
+}
+
+umask(0077);
+if (count($argv) === 2 && $argv[1] === '--self-check') {
+    fwrite(STDOUT, KITSUNESERV_BRIDGE_EXECUTOR_RELEASE . PHP_EOL);
+    exit(0);
+}
+try {
+    (new KitsuneServBridgeManager(kitsuneConfigPath($argv)))->execute();
+    exit(0);
+} catch (Throwable $error) {
+    fwrite(STDERR, 'KitsuneServ Bridge: ' . $error->getMessage() . PHP_EOL);
+    exit(1);
+}

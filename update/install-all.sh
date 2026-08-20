@@ -3,7 +3,10 @@ set -euo pipefail
 
 update_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$update_root"
-sha256sum -c SHA256SUMS
+# A bundle may be copied or unpacked by Windows tooling which converts this
+# text manifest to CRLF. Strip only carriage returns from the checksum stream;
+# package bytes remain untouched and are still verified before installation.
+tr -d '\r' < SHA256SUMS | sha256sum -c -
 
 found=0
 for package in "$update_root"/packages/*.zip; do
