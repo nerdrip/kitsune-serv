@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.1.0 — 2026-08-20
+
+- Reorganized the desktop and web interface into clearer workspace, operations and management sections with contextual descriptions and improved responsive presentation.
+- Enabled authenticated browser terminals and restored file drag-and-drop between workspace columns.
+- Made dashboard health refreshes resilient so one unavailable endpoint no longer hides healthy services or stale-but-useful operational data.
+- Improved Test Lab value discovery and added domain-based public API Flow publication with managed proxy metadata.
+- Added automatic Plesk Bridge self-updates from the configured verified repository checkout, including release status and failure reporting in the Plesk overview.
+
 ## 3.0.0 — 2026-08-09
 
 - Added the context-driven Deep Tools Dock with nine advanced Terminal/File workflows grouped into Inspect, Connect and Move & Prove, plus a compact visual result inspector instead of new data tables.

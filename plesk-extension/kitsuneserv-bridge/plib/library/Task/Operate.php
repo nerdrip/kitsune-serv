@@ -9,7 +9,7 @@ class Modules_KitsuneservBridge_Task_Operate extends pm_LongTask_Task
         $runtimeConfig = (string) $this->getParam('runtimeConfig');
         try {
             $this->updateProgress(5);
-            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r11', ['--config', $runtimeConfig], pm_ApiCli::RESULT_FULL);
+            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r12', ['--config', $runtimeConfig], pm_ApiCli::RESULT_FULL);
             $this->updateProgress(100);
             if ((int) ($result['code'] ?? 1) !== 0) {
                 $detail = trim((string) ($result['stderr'] ?? $result['stdout'] ?? 'Operation failed.'));

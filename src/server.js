@@ -971,6 +971,8 @@ serviceManager._onServiceExit = (section, code) => {
 
 // ============ Terminal management (server-side) ============
 const { spawn } = require('child_process');
+let nodePty = null;
+try { nodePty = require('node-pty'); } catch {}
 const terminals = new Map();
 let terminalIdCounter = 0;
 
@@ -1629,25 +1631,23 @@ async function handleAPI(endpoint, body, context = {}) {
       const isWin = process.platform === 'win32';
       let child;
       try {
-        child = spawn(profile.executable, profile.args, {
-          env,
-          cwd: path.resolve('.'),
-          stdio: ['pipe', 'pipe', 'pipe'],
-          ...(isWin ? { windowsHide: true } : {})
-        });
+        child = nodePty
+          ? nodePty.spawn(profile.executable, profile.args, { name: 'xterm-256color', cols: 120, rows: 32, env, cwd: path.resolve('.'), useConpty: isWin })
+          : spawn(profile.executable, profile.args, { env, cwd: path.resolve('.'), stdio: ['pipe', 'pipe', 'pipe'], ...(isWin ? { windowsHide: true } : {}) });
       } catch (error) {
         return { success: false, error: error.message };
       }
-      terminals.set(id, { process: child, id, sessionId: context.sessionId });
-      child.stdout.on('data', (data) => broadcastSSE('terminal:data', { id, data: data.toString() }, context.sessionId));
-      child.stderr.on('data', (data) => broadcastSSE('terminal:data', { id, data: data.toString() }, context.sessionId));
-      child.on('error', (error) => {
-        terminals.delete(id);
-        broadcastSSE('terminal:data', { id, data: `[KitsuneServ] ${error.message}\n` }, context.sessionId);
-        broadcastSSE('terminal:exit', { id, code: 1 }, context.sessionId);
-      });
-      child.on('exit', (code) => { terminals.delete(id); broadcastSSE('terminal:exit', { id, code }, context.sessionId); });
-      return { id, name: profile.name, profileId: profile.id };
+      terminals.set(id, { process: child, id, pty: Boolean(nodePty), sessionId: context.sessionId });
+      if (nodePty) {
+        child.onData(data => broadcastSSE('terminal:data', { id, data }, context.sessionId));
+        child.onExit(({ exitCode }) => { terminals.delete(id); broadcastSSE('terminal:exit', { id, code: exitCode }, context.sessionId); });
+      } else {
+        child.stdout.on('data', data => broadcastSSE('terminal:data', { id, data: data.toString() }, context.sessionId));
+        child.stderr.on('data', data => broadcastSSE('terminal:data', { id, data: data.toString() }, context.sessionId));
+        child.on('error', error => { terminals.delete(id); broadcastSSE('terminal:data', { id, data: `[KitsuneServ] ${error.message}\n` }, context.sessionId); broadcastSSE('terminal:exit', { id, code: 1 }, context.sessionId); });
+        child.on('exit', code => { terminals.delete(id); broadcastSSE('terminal:exit', { id, code }, context.sessionId); });
+      }
+      return { id, name: profile.name, profileId: profile.id, pty: Boolean(nodePty) };
     }
     case 'terminal/profiles': return localShellProfiles();
 
@@ -1747,8 +1747,11 @@ async function handleAPI(endpoint, body, context = {}) {
       if (typeof body.data !== 'string' || Buffer.byteLength(body.data) > 65536) {
         return { success: false, error: 'Invalid terminal input' };
       }
-      if (!term.process.stdin.writable) return { success: false, error: 'Terminal input is closed' };
-      term.process.stdin.write(body.data);
+      if (term.pty) term.process.write(body.data);
+      else {
+        if (!term.process.stdin.writable) return { success: false, error: 'Terminal input is closed' };
+        term.process.stdin.write(body.data);
+      }
       return { success: true };
     }
     case 'terminal/kill': {
@@ -1758,7 +1761,11 @@ async function handleAPI(endpoint, body, context = {}) {
       terminals.delete(body.id);
       return { success: true };
     }
-    case 'terminal/resize': return { success: true };
+    case 'terminal/resize': {
+      const term = terminals.get(body.id); if (!term || term.sessionId !== context.sessionId) return { success: false };
+      if (term.pty) try { term.process.resize(Math.max(2, Math.min(500, Number(body.cols) || 120)), Math.max(2, Math.min(200, Number(body.rows) || 32))); } catch {}
+      return { success: true };
+    }
 
     // Composer
     case 'composer/getStatus': {

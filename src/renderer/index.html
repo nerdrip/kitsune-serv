@@ -223,12 +223,14 @@
           </div>
         </li>
         <li class="sidebar-divider"></li>
+        <li class="sidebar-group-label sidebar-section-label" data-group="development"><span class="group-label-text">Development</span><span class="group-toggle">▾</span></li>
         <li class="nav-item" data-panel="workspaces">
           <span class="nav-icon">🚀</span><span class="nav-label">Projects</span>
         </li>
         <li class="nav-item" data-panel="test-lab">
           <span class="nav-icon">🧪</span><span class="nav-label">Test Lab</span>
         </li>
+        <li class="sidebar-group-label sidebar-section-label" data-group="platform"><span class="group-label-text">Platform &amp; data</span><span class="group-toggle">▾</span></li>
         <li class="nav-item" data-panel="hub">
           <span class="nav-icon">🌐</span><span class="nav-label">Hub &amp; Servers</span><span class="hub-nav-dot" id="hub-nav-dot"></span>
         </li>
@@ -244,6 +246,7 @@
         <li class="nav-item" data-panel="appstore">
           <span class="nav-icon">📦</span><span class="nav-label">App Store</span>
         </li>
+        <li class="sidebar-group-label sidebar-section-label" data-group="operations"><span class="group-label-text">Remote operations</span><span class="group-toggle">▾</span></li>
         <li class="nav-item" data-panel="server-workspace">
           <span class="nav-icon">🛰️</span><span class="nav-label">Server Workspace</span>
         </li>
@@ -1606,6 +1609,7 @@
           <div class="panel-header-left"><h1>🧪 Visual Test Lab</h1><p class="panel-subtitle">Buduj środowiska testowe albo prawdziwe endpointy REST z połączonych bloków</p></div>
           <div class="panel-header-right"><button class="btn btn-toolbar" id="lab-refresh">↻ Odśwież</button><button class="btn btn-add" id="lab-new">＋ Otwórz kreator</button></div>
         </div>
+        <div class="module-guide"><span>01</span><div><strong>Wybierz środowisko</strong><small>Szablon ustawi runtime, polecenia i zależności.</small></div><i></i><span>02</span><div><strong>Sprawdź wartości</strong><small>Lab pokaże port, URL, zmienne i sposób uruchomienia.</small></div><i></i><span>03</span><div><strong>Uruchom lub opublikuj</strong><small>Na serwerze przypisz domenę przez Hub i Plesk.</small></div></div>
         <nav class="lab-mode-switch"><button class="active" type="button" data-lab-mode="environment">▦ Środowiska</button><button type="button" data-lab-mode="api-flow">⤳ API Flow Builder <span>NOWE</span></button></nav>
         <div id="lab-environment-mode">
         <div class="lab-template-gallery" id="lab-template-gallery"><div class="workspace-empty compact">Ładowanie gotowych szablonów…</div></div>
@@ -1664,7 +1668,7 @@
             <div class="form-group api-flow-listen"><label>Host / port</label><div><select id="api-flow-host"><option value="127.0.0.1">tylko lokalnie</option><option value="0.0.0.0">sieć LAN</option></select><input id="api-flow-port" type="number" min="1024" max="65535" value="9393"></div></div>
             <div class="form-group"><label>Ścieżka bazowa</label><input id="api-flow-base-path" type="text" value="/api" placeholder="/api"></div>
             <label class="api-flow-cors"><input id="api-flow-cors" type="checkbox" checked> CORS</label>
-            <div class="api-flow-project-actions"><button class="btn btn-small" id="api-flow-new">＋ Nowy</button><button class="btn btn-small" id="api-flow-save">💾 Zapisz</button><button class="btn btn-small btn-primary" id="api-flow-toggle">▶ Uruchom API</button><button class="btn btn-small btn-danger" id="api-flow-delete" title="Usuń projekt API">🗑</button></div>
+            <div class="api-flow-project-actions"><button class="btn btn-small" id="api-flow-new">＋ Nowy</button><button class="btn btn-small" id="api-flow-save">💾 Zapisz</button><button class="btn btn-small btn-primary" id="api-flow-toggle">▶ Uruchom API</button><button class="btn btn-small" id="api-flow-publish" title="Przypisz domenę przez Hub i Plesk reverse proxy">↗ Domena</button><button class="btn btn-small btn-danger" id="api-flow-delete" title="Usuń projekt API">🗑</button></div>
           </header>
           <section class="api-flow-runtime" id="api-flow-runtime" data-state="stopped">
             <div class="api-flow-runtime-state"><i id="api-flow-runtime-led"></i><div><small>RUNTIME</small><strong id="api-flow-runtime-label">API zatrzymane</strong></div></div>
@@ -1911,6 +1915,8 @@
       <!-- OPERATIONS CENTER -->
       <section class="panel" id="panel-operations-center">
         <div class="panel-header"><div class="panel-header-left"><h1>Operations Center</h1><p class="panel-subtitle">Infrastructure graph, change safety, incidents, automation and resilience</p></div><div class="panel-header-right"><select id="ops-server-select" class="terminal-session-select"><option value="">Choose server…</option></select><button class="btn btn-toolbar" id="ops-refresh">↻ Refresh</button><button class="btn btn-add" data-ops="incident-start">⚠ Incident Mode</button></div></div>
+        <div class="module-intro"><div><span>OPERATIONS WORKSPACE</span><strong>Jedno miejsce do pracy na zdalnych serwerach</strong><small>Najpierw wybierz serwer. Potem przejdź do sesji, bezpieczeństwa albo automatyzacji.</small></div><div class="module-context"><b id="ops-context-state">Brak wybranego serwera</b><small>Ten sam kontekst jest używany przez terminal, pliki i diagnostykę.</small></div></div>
+        <nav class="module-tabs" id="ops-section-tabs" aria-label="Sekcje Operations Center"><button class="active" data-ops-section="start">Start</button><button data-ops-section="sessions">Sesje i pliki</button><button data-ops-section="safety">Bezpieczeństwo</button><button data-ops-section="automation">Automatyzacja</button><button data-ops-section="advanced">Laboratorium</button></nav>
         <div class="ops-command-bar"><input id="ops-command-query" placeholder="Search servers, terminals, files, workspaces and actions…"><button class="btn btn-primary" data-ops="command-run">Run</button><button class="btn" data-ops="global-search">Global file search</button><button class="btn" data-ops="global-replace">Global replace</button><button class="btn" data-ops="limited-transfer">Limited transfer</button><button class="btn" data-ops="proxy">Proxy</button></div>
         <div class="ops-summary" id="ops-summary"><span>Loading operational state…</span></div>
         <section class="tf-deck" aria-labelledby="tf-deck-title">
@@ -2150,6 +2156,7 @@
           <div class="panel-header-left"><h1>File Manager</h1><p class="panel-subtitle">Two-pane local and SFTP file management</p></div>
           <div class="panel-header-right"><button class="btn btn-toolbar" id="fm-command-deck">✦ Command Deck</button><button class="btn btn-toolbar" id="fm-open-winscp">Open in WinSCP</button><button class="btn btn-toolbar" id="fm-import-sessions">⇧ Import sessions</button><button class="btn btn-toolbar" id="fm-export-sessions">⇩ Share profiles</button><button class="btn btn-toolbar" id="fm-refresh">↻ Refresh</button><button class="btn btn-add" id="fm-new-session">＋ New connection</button></div>
         </div>
+        <div class="module-intro compact"><div><span>DWIE STRONY, JEDEN TRANSFER</span><strong>Przeciągnij element do drugiej kolumny</strong><small>Lewa strona to host KitsuneServ, prawa to wybrany serwer SFTP lub magazyn. Upuszczenie rozpoczyna upload albo download.</small></div><div class="module-context"><b id="fm-transfer-hint">Wybierz połączenie po prawej</b><small>Operacje wymagające potwierdzenia nadal pokażą kontrolę bezpieczeństwa.</small></div></div>
         <div class="remote-workspace">
           <aside class="remote-sessions"><div class="remote-sessions-title">SAVED SSH / SFTP</div><input class="remote-session-filter" id="fm-session-filter" placeholder="Filter servers…"><div id="fm-session-list" class="remote-session-list"></div><div class="remote-sessions-title cloud-title">CLOUD &amp; NETWORK STORAGE <button id="fm-new-storage" title="Add storage">＋</button></div><div id="fm-storage-list" class="remote-session-list"></div></aside>
           <div class="file-manager-main">
@@ -2187,6 +2194,7 @@
             <button class="btn btn-add" id="btn-new-terminal">+ Local Terminal</button>
           </div>
         </div>
+        <div class="module-intro compact"><div><span id="terminal-mode-label">LOKALNA POWŁOKA</span><strong>Terminal działa na hoście KitsuneServ</strong><small>W webie „lokalny” oznacza serwer panelu. Zapisana sesja SSH otwiera powłokę na serwerze zdalnym.</small></div><div class="module-context"><b>Ctrl+Shift+T</b><small>Nowa karta · maksymalnie 12 aktywnych sesji.</small></div></div>
         <div class="terminal-tabs" id="terminal-tabs"></div>
         <div class="terminal-container" id="terminal-container">
           <div class="terminal-empty" id="terminal-empty">

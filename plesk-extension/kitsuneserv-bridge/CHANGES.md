@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.1.0-12
+
+- Added automatic Plesk Bridge self-updates after repository synchronization and managed deployment. A newer extension from the verified checkout is packaged locally and installed through the Plesk CLI after the active long task completes.
+- The overview reports the installed and discovered Bridge releases, scheduled updates and actionable update failures.
+- Updated the Bridge alongside KitsuneServ 3.1.0 interface, web terminal, file workspace, operational dashboard and Test Lab publication improvements.
+
 ## 3.0.0-11
 
 - Replaced Proxy Mode detection and mutation with a server-rewrite plus an internal named path that safely coexists with Plesk's generated `location /` and static-file locations.
