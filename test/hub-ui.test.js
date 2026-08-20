@@ -29,6 +29,12 @@ test('Hub UI renders independent local and remote status and responsive guidance
   for (const marker of ['.hub-context-banner', '.hub-connection-flow', '.hub-settings-next', '.hub-remote-form']) assert.ok(styles.includes(marker), `missing Hub UI style: ${marker}`);
 });
 
+test('Hub synchronization makes pull, push, merge and their effects explicit before execution', () => {
+  for (const marker of ['← Pull: pobierz', 'Push: wyślij →', '↔ Połącz bezpiecznie', 'LOKALNIE · TEN KOMPUTER', 'ZDALNIE · DOCELOWY SERWER', 'Plan jest pusty']) assert.ok(html.includes(marker), `missing synchronization guidance: ${marker}`);
+  for (const marker of ['setHubSyncPreset', 'hubSyncActionEffect', 'MERGE  Połącz → zapisz po obu stronach', 'Plan wykonany zgodnie z podglądem', 'bez plików z katalogów projektów']) assert.ok(app.includes(marker), `missing synchronization behavior: ${marker}`);
+  for (const marker of ['.hub-sync-modes', '.hub-sync-effect', '.hub-sync-impact', '.hub-sync-result']) assert.ok(styles.includes(marker), `missing synchronization style: ${marker}`);
+});
+
 test('Test Lab and API publication use domains synchronized from the Plesk bridge', () => {
   for (const marker of ['chooseHubPublicationDomain', 'inventory?.apiDomains', 'publish-domain-overlay', 'Bazowa domena API z Plesk Bridge', 'Działający adres awaryjny zostanie pokazany']) assert.ok(app.includes(marker), `missing publication flow: ${marker}`);
   for (const marker of ['.publish-domain-overlay', '.publish-domain-dialog', '.publish-domain-warning']) assert.ok(styles.includes(marker), `missing publication style: ${marker}`);

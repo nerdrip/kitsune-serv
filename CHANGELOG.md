@@ -2,6 +2,9 @@
 
 ## 3.1.3 — 2026-08-20
 
+- Added explicit Pull (server → computer), Push (computer → server) and safe Merge plan modes; opening a comparison alone now starts with an empty plan and cannot transfer data accidentally.
+- Added real three-way merging against the last synchronized revision. Independent field edits are written to both sides, while overlapping edits expose their exact conflict paths and require an explicit choice.
+- Added a live operation-impact summary, per-resource effect descriptions and post-run results that distinguish server updates, local working-copy updates and partial failures.
 - Replaced the ambiguous one-click Desktop ↔ Hub synchronization with a read-only comparison followed by an explicit per-resource plan.
 - Added side-by-side local/server state, hashes, server revisions, changed-field paths and clear states for local-only, server-only, one-sided changes and divergence.
 - Added safe upload/download recommendations, revision history before replacement, stale-preview protection and an additional confirmation for overwriting either side.

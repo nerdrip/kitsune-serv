@@ -1248,7 +1248,7 @@ function initSecurityPanel() {
 /* ===== Kitsune Hub ===== */
 let hubSnapshot = { status: {}, settings: {}, nodes: [], routes: [], objects: [], deployments: [], users: [], connectors: [], remotes: [] };
 let hubPairing = null;
-let hubSyncPlan = { remoteId: '', comparison: null, selections: new Map() };
+let hubSyncPlan = { remoteId: '', comparison: null, selections: new Map(), preset: 'review' };
 
 function initHubPanel() {
   if (!api.hub) return;
@@ -1282,8 +1282,12 @@ function initHubPanel() {
   document.getElementById('hub-sync-filter')?.addEventListener('change', renderHubSync);
   document.getElementById('hub-sync-plan-close')?.addEventListener('click', closeHubSyncPlan);
   document.getElementById('hub-sync-plan-cancel')?.addEventListener('click', closeHubSyncPlan);
-  document.getElementById('hub-sync-plan-refresh')?.addEventListener('click', () => openHubSyncPlan(hubSyncPlan.remoteId, true));
+  document.getElementById('hub-sync-plan-refresh')?.addEventListener('click', () => openHubSyncPlan(hubSyncPlan.remoteId, true, 'review'));
   document.getElementById('hub-sync-plan-filter')?.addEventListener('change', renderHubSyncPlan);
+  document.getElementById('hub-sync-mode-pull')?.addEventListener('click', () => setHubSyncPreset('pull'));
+  document.getElementById('hub-sync-mode-safe')?.addEventListener('click', () => setHubSyncPreset('safe'));
+  document.getElementById('hub-sync-mode-push')?.addEventListener('click', () => setHubSyncPreset('push'));
+  document.getElementById('hub-sync-mode-clear')?.addEventListener('click', () => setHubSyncPreset('review'));
   document.getElementById('hub-sync-plan-apply')?.addEventListener('click', applyHubSyncPlan);
   document.getElementById('hub-sync-modal')?.addEventListener('click', event => { if (event.target.id === 'hub-sync-modal') closeHubSyncPlan(); });
   document.getElementById('panel-hub')?.addEventListener('click', handleHubAction);
@@ -1366,7 +1370,7 @@ function renderHubPlesk(connectors = hubSnapshot.connectors) {
 
 function renderHubRemotes(remotes = hubSnapshot.remotes) {
   const target = document.getElementById('hub-remote-list'); if (!target) return;
-  target.innerHTML = remotes.map(remote => `<article class="hub-resource-card hub-remote-card"><div class="hub-resource-top"><div><span class="hub-badge ${remote.status === 'online' ? 'success' : 'warning'}">${escapeHtml(remote.status)}</span><h3 style="margin-top:8px">${escapeHtml(remote.name)}</h3><p>${escapeHtml(remote.url)}</p></div><button class="btn btn-small btn-danger" data-hub-action="remove-remote" data-id="${escapeHtml(remote.id)}">Usuń</button></div><div class="hub-resource-meta"><span>token ${remote.configured ? '✓' : '—'}</span><span>pin certyfikatu ${remote.certificateFingerprint ? '✓' : '—'}</span><span>sprawdzono: ${hubDate(remote.lastCheckedAt)}</span></div><div class="hub-resource-actions"><button class="btn btn-small btn-primary" data-hub-action="compare-remote" data-id="${escapeHtml(remote.id)}">Porównaj lokalne ↔ serwer</button></div><p class="hub-sync-card-hint">Najpierw zobaczysz różnice. Żaden element nie zostanie wysłany ani pobrany automatycznie.</p></article>`).join('') || '<div class="hub-empty"><div><strong>Nie połączono jeszcze żadnego zewnętrznego Huba.</strong><br>Użyj „Połącz z Hubem” i podaj adres oraz token utworzony na serwerze docelowym. Ustawienia lokalnego Huba nie zostaną zmienione.</div></div>';
+  target.innerHTML = remotes.map(remote => `<article class="hub-resource-card hub-remote-card"><div class="hub-resource-top"><div><span class="hub-badge ${remote.status === 'online' ? 'success' : 'warning'}">${escapeHtml(remote.status)}</span><h3 style="margin-top:8px">${escapeHtml(remote.name)}</h3><p>${escapeHtml(remote.url)}</p></div><button class="btn btn-small btn-danger" data-hub-action="remove-remote" data-id="${escapeHtml(remote.id)}">Usuń</button></div><div class="hub-resource-meta"><span>token ${remote.configured ? '✓' : '—'}</span><span>pin certyfikatu ${remote.certificateFingerprint ? '✓' : '—'}</span><span>sprawdzono: ${hubDate(remote.lastCheckedAt)}</span></div><div class="hub-resource-actions hub-remote-sync-actions"><button class="btn btn-small" data-hub-action="compare-remote" data-sync-preset="pull" data-id="${escapeHtml(remote.id)}">← Pull</button><button class="btn btn-small btn-primary" data-hub-action="compare-remote" data-sync-preset="review" data-id="${escapeHtml(remote.id)}">Porównaj lokalne ↔ serwer</button><button class="btn btn-small" data-hub-action="compare-remote" data-sync-preset="push" data-id="${escapeHtml(remote.id)}">Push →</button></div><p class="hub-sync-card-hint"><strong>Pull:</strong> serwer → ten komputer · <strong>Push:</strong> ten komputer → serwer · każda akcja najpierw otwiera plan i niczego nie zmienia bez zatwierdzenia.</p></article>`).join('') || '<div class="hub-empty"><div><strong>Nie połączono jeszcze żadnego zewnętrznego Huba.</strong><br>Użyj „Połącz z Hubem” i podaj adres oraz token utworzony na serwerze docelowym. Ustawienia lokalnego Huba nie zostaną zmienione.</div></div>';
 }
 
 function renderHubDeployments(items = hubSnapshot.deployments) {
@@ -1381,25 +1385,25 @@ async function saveHubSettings() {
   } catch (error) { showToast(error.message, 'error'); }
 }
 
-async function publishHubLocal() { try { const result = await api.hub.publishLocal({ kinds: ['project', 'lab', 'api-flow'], nodeId: runtimeMode === 'desktop' ? 'desktop-local' : 'server-local' }); const conflicts = result.results?.filter(item => item.conflict).length || 0; showToast(conflicts ? `Synchronizacja zakończona: ${conflicts} konfliktów` : `Zsynchronizowano ${result.results?.length || 0} obiektów`, conflicts ? 'warning' : 'success'); await refreshHubPanel(); } catch (error) { showToast(error.message, 'error'); } }
+async function publishHubLocal() { try { const result = await api.hub.publishLocal({ kinds: ['project', 'lab', 'api-flow'], nodeId: runtimeMode === 'desktop' ? 'desktop-local' : 'server-local' }); showToast(`Zapisano ${result.results?.length || 0} lokalnych punktów wersji — nic nie wysłano na żaden serwer`, result.errors?.length ? 'warning' : 'success'); await refreshHubPanel(); } catch (error) { showToast(error.message, 'error'); } }
 
 async function saveHubRoute() { try { await api.hub.saveRoute({ name: document.getElementById('hub-route-name').value, kind: document.getElementById('hub-route-kind').value, target: document.getElementById('hub-route-target').value, authPolicy: document.getElementById('hub-route-auth').value }); document.getElementById('hub-route-form').classList.add('hidden'); showToast('Trasa gatewaya zapisana', 'success'); await refreshHubPanel(); } catch (error) { showToast(error.message, 'error'); } }
 async function saveHubUser() { try { await api.identity.createUser({ username: document.getElementById('hub-user-name').value, displayName: document.getElementById('hub-user-display').value, email: document.getElementById('hub-user-email').value, password: document.getElementById('hub-user-password').value, roles: [document.getElementById('hub-user-role').value] }); document.getElementById('hub-user-form').classList.add('hidden'); showToast('Konto utworzone', 'success'); await refreshHubPanel(); } catch (error) { showToast(error.message, 'error'); } }
 async function savePleskConnector() { try { const result = await api.hub.saveConnector({ baseUrl: document.getElementById('hub-plesk-url').value, name: document.getElementById('hub-plesk-name').value, authMode: document.getElementById('hub-plesk-auth').value }, document.getElementById('hub-plesk-secret').value); document.getElementById('hub-plesk-form').classList.add('hidden'); if (result.sharedSecret) await navigator.clipboard?.writeText(result.sharedSecret); showToast(result.sharedSecret ? 'Plesk dodany; sekret skopiowano do schowka' : 'Plesk zapisany', 'success'); await refreshHubPanel(); } catch (error) { showToast(error.message, 'error'); } }
 async function saveHubRemote() { try { await api.hub.saveRemote({ url: document.getElementById('hub-remote-url').value, name: document.getElementById('hub-remote-name').value, certificateFingerprint: document.getElementById('hub-remote-fingerprint').value }, document.getElementById('hub-remote-token').value); document.getElementById('hub-remote-token').value = ''; document.getElementById('hub-remote-form').classList.add('hidden'); selectHubTab('connections'); showToast('Połączenie ze zdalnym Hubem zapisane', 'success'); await refreshHubPanel(); } catch (error) { showToast(error.message, 'error'); } }
 
-async function openHubSyncPlan(remoteId, refresh = false) {
+async function openHubSyncPlan(remoteId, refresh = false, preset = 'review') {
   if (!remoteId) return; const modal = document.getElementById('hub-sync-modal'); const list = document.getElementById('hub-sync-plan-list');
-  hubSyncPlan = { remoteId, comparison: null, selections: new Map() }; modal?.classList.remove('hidden');
-  if (list) list.innerHTML = '<div class="hub-sync-loading"><i></i><strong>Porównuję dane lokalne z serwerem…</strong><span>To jest tylko odczyt. Jeszcze nic nie jest wysyłane ani pobierane.</span></div>';
-  const apply = document.getElementById('hub-sync-plan-apply'); if (apply) apply.disabled = true;
+  hubSyncPlan = { remoteId, comparison: null, selections: new Map(), preset }; modal?.classList.remove('hidden');
+  document.getElementById('hub-sync-plan-result')?.classList.add('hidden');
+  if (list) list.innerHTML = '<div class="hub-sync-loading"><i></i><strong>Porównuję kopię roboczą z serwerem…</strong><span>To jest wyłącznie odczyt. Nic nie jest jeszcze wysyłane, pobierane ani scalane.</span></div>';
+  const apply = document.getElementById('hub-sync-plan-apply'); if (apply) { apply.disabled = true; apply.textContent = 'Zatwierdź i wykonaj plan'; }
   try {
     const comparison = await api.hub.compareRemote(remoteId, { kinds: ['project', 'lab', 'api-flow'] }); hubSyncPlan.comparison = comparison;
-    for (const entry of comparison.entries) hubSyncPlan.selections.set(entry.id, entry.recommendedAction || 'skip');
     document.getElementById('hub-sync-plan-title').textContent = `Ten komputer ↔ ${comparison.remote.name}`;
     document.getElementById('hub-sync-server-name').textContent = comparison.remote.name; document.getElementById('hub-sync-server-url').textContent = comparison.remote.url;
-    document.getElementById('hub-sync-plan-subtitle').textContent = `Porównano ${comparison.entries.length} elementów · ${hubDate(comparison.remote.lastCheckedAt)} · podgląd bez zmian`;
-    renderHubSyncPlan(); if (refresh) showToast('Porównanie z serwerem zostało odświeżone', 'success');
+    document.getElementById('hub-sync-plan-subtitle').textContent = `Porównano ${comparison.entries.length} definicji · ${hubDate(comparison.remote.lastCheckedAt)} · dotąd nie wprowadzono żadnych zmian`;
+    setHubSyncPreset(preset); if (refresh) showToast('Odświeżono porównanie. Plan został wyczyszczony.', 'success');
   } catch (error) {
     if (list) list.innerHTML = `<div class="hub-empty"><div><strong>Nie udało się pobrać stanu serwera.</strong><br>${escapeHtml(error.message)}</div></div>`;
     document.getElementById('hub-sync-plan-warning').textContent = error.message; showToast(error.message, 'error');
@@ -1407,54 +1411,119 @@ async function openHubSyncPlan(remoteId, refresh = false) {
 }
 
 function closeHubSyncPlan() {
-  document.getElementById('hub-sync-modal')?.classList.add('hidden'); hubSyncPlan = { remoteId: '', comparison: null, selections: new Map() };
+  document.getElementById('hub-sync-modal')?.classList.add('hidden'); hubSyncPlan = { remoteId: '', comparison: null, selections: new Map(), preset: 'review' };
+}
+
+function setHubSyncPreset(preset) {
+  const comparison = hubSyncPlan.comparison; if (!comparison) return; hubSyncPlan.preset = preset; hubSyncPlan.selections.clear();
+  for (const entry of comparison.entries) {
+    let action = 'skip';
+    if (preset === 'pull' && entry.safeActions.includes('download')) action = 'download';
+    else if (preset === 'push' && entry.safeActions.includes('upload')) action = 'upload';
+    else if (preset === 'safe') action = entry.recommendedAction || 'skip';
+    hubSyncPlan.selections.set(entry.id, action);
+  }
+  renderHubSyncPlan();
+}
+
+function hubSyncActionChoices(entry) {
+  const choices = [['skip', entry.state === 'same' ? 'Bez zmian — wersje są zgodne' : 'Pomiń — niczego nie zmieniaj']];
+  if (entry.safeActions.includes('upload')) choices.push(['upload', 'PUSH  Lokalnie → serwer']);
+  if (entry.safeActions.includes('download')) choices.push(['download', 'PULL  Serwer → lokalnie']);
+  if (entry.safeActions.includes('merge')) choices.push(['merge', 'MERGE  Połącz → zapisz po obu stronach']);
+  if (entry.state === 'local-ahead') choices.push(['overwrite-local', 'WYMUSZ  Serwer → lokalnie; odrzuć lokalną zmianę']);
+  if (entry.state === 'remote-ahead') choices.push(['overwrite-server', 'WYMUSZ  Lokalnie → serwer; odrzuć zdalną zmianę']);
+  if (['mergeable', 'diverged'].includes(entry.state)) {
+    choices.push(['overwrite-server', 'WYMUSZ  Lokalnie → serwer; odrzuć wersję zdalną']);
+    choices.push(['overwrite-local', 'WYMUSZ  Serwer → lokalnie; odrzuć wersję lokalną']);
+  }
+  return choices;
+}
+
+function hubSyncActionEffect(entry, action) {
+  if (action === 'upload') return 'Serwer dostanie nową rewizję z tego komputera. Lokalna kopia pozostanie bez zmian.';
+  if (action === 'download') return 'Definicja z serwera zostanie zapisana i zastosowana na tym komputerze. Serwer pozostanie bez zmian.';
+  if (action === 'merge') return 'Różne pola obu wersji zostaną połączone. Ten sam wynik trafi na komputer i serwer.';
+  if (action === 'overwrite-server') return 'Wersja lokalna zastąpi aktywną wersję serwera. Poprzednia rewizja serwera zostanie w historii.';
+  if (action === 'overwrite-local') return 'Wersja serwera zastąpi lokalną definicję. Poprzedni lokalny punkt wersji zostanie w historii.';
+  return entry.state === 'same' ? 'Nic się nie wydarzy — zawartość po obu stronach jest identyczna.' : 'Ten zasób zostanie pominięty; obie strony pozostaną bez zmian.';
 }
 
 function renderHubSyncPlan() {
   const comparison = hubSyncPlan.comparison; if (!comparison) return; const filter = document.getElementById('hub-sync-plan-filter')?.value || '';
   const labels = {
-    same: ['ZGODNE', 'Ta sama wersja po obu stronach'], 'local-only': ['TYLKO LOKALNIE', 'Nowy element gotowy do wysłania'], 'remote-only': ['TYLKO NA SERWERZE', 'Nowy element gotowy do pobrania'],
-    'local-ahead': ['ZMIENIONE LOKALNIE', 'Serwer nie zmienił się od ostatniej synchronizacji'], 'remote-ahead': ['ZMIENIONE NA SERWERZE', 'Lokalna wersja nie zmieniła się od ostatniej synchronizacji'], diverged: ['KONFLIKT', 'Obie strony mają własne zmiany']
+    same: ['ZGODNE', 'Ta sama zawartość po obu stronach'], 'local-only': ['TYLKO LOKALNIE', 'Zasób istnieje wyłącznie na tym komputerze'], 'remote-only': ['TYLKO NA SERWERZE', 'Zasób istnieje wyłącznie na serwerze'],
+    'local-ahead': ['LOKALNIE DO PRZODU', 'Od wspólnego punktu zmienił się tylko komputer'], 'remote-ahead': ['SERWER DO PRZODU', 'Od wspólnego punktu zmienił się tylko serwer'],
+    mergeable: ['MOŻNA SCALIĆ', 'Obie strony zmieniły różne pola — dostępny 3-way merge'], diverged: ['KONFLIKT', 'Obie strony zmieniły te same pola albo brakuje wspólnej wersji']
   };
   const counts = comparison.summary || {}; const summary = document.getElementById('hub-sync-plan-summary');
-  summary.innerHTML = `<span class="same"><b>${counts.same || 0}</b> zgodnych</span><span class="upload"><b>${(counts['local-only'] || 0) + (counts['local-ahead'] || 0)}</b> do wysłania</span><span class="download"><b>${(counts['remote-only'] || 0) + (counts['remote-ahead'] || 0)}</b> do pobrania</span><span class="conflict"><b>${counts.diverged || 0}</b> konfliktów</span>`;
-  const entries = comparison.entries.filter(entry => !filter || (filter === 'changes' ? entry.state !== 'same' : filter === 'diverged' ? entry.state === 'diverged' : entry.kind === filter));
-  const options = entry => {
-    const selected = hubSyncPlan.selections.get(entry.id) || 'skip'; const choices = [['skip', entry.state === 'same' ? 'Bez zmian — wersje są zgodne' : 'Pomiń ten element']];
-    if (entry.safeActions.includes('upload')) choices.push(['upload', 'Wyślij lokalną wersję →']);
-    if (entry.safeActions.includes('download')) choices.push(['download', '← Pobierz i zastosuj lokalnie']);
-    if (entry.state === 'diverged') { choices.push(['overwrite-server', 'Nadpisz serwer wersją lokalną']); choices.push(['overwrite-local', 'Nadpisz lokalną wersją z serwera']); }
-    return choices.map(([value, label]) => `<option value="${value}" ${selected === value ? 'selected' : ''}>${label}</option>`).join('');
-  };
-  const side = (value, server = false) => value?.exists ? `<strong>${server ? `rewizja ${value.revision || '—'}` : 'zapis lokalny'}</strong><code>${escapeHtml((value.contentHash || '').slice(0, 10))}</code><small>${hubDate(value.updatedAt)}</small>` : '<strong class="missing">brak</strong><small>Ten element tu nie istnieje</small>';
+  summary.innerHTML = `<span class="same"><b>${counts.same || 0}</b> zgodnych</span><span class="upload"><b>${(counts['local-only'] || 0) + (counts['local-ahead'] || 0)}</b> tylko do push</span><span class="download"><b>${(counts['remote-only'] || 0) + (counts['remote-ahead'] || 0)}</b> tylko do pull</span><span class="merge"><b>${counts.mergeable || 0}</b> do scalenia</span><span class="conflict"><b>${counts.diverged || 0}</b> konfliktów ręcznych</span>`;
+  const entries = comparison.entries.filter(entry => !filter || (filter === 'changes' ? entry.state !== 'same' : ['mergeable', 'diverged'].includes(filter) ? entry.state === filter : entry.kind === filter));
+  const side = (value, server = false) => value?.exists ? `<strong>${server ? `Serwer · rewizja ${value.revision || '—'}` : 'Ten komputer · kopia robocza'}</strong><code>SHA ${escapeHtml((value.contentHash || '').slice(0, 10))}</code><small>zmiana: ${hubDate(value.updatedAt)}</small>` : `<strong class="missing">${server ? 'Brak na serwerze' : 'Brak lokalnie'}</strong><small>Ten zasób po tej stronie nie istnieje</small>`;
   document.getElementById('hub-sync-plan-list').innerHTML = entries.map(entry => {
-    const label = labels[entry.state] || [entry.state, '']; const paths = entry.changedPaths?.length ? `<details><summary>${entry.changedPathCount} zmienionych pól</summary><code>${entry.changedPaths.map(escapeHtml).join('<br>')}</code></details>` : '';
-    return `<article class="hub-sync-plan-row state-${escapeHtml(entry.state)}" data-sync-entry="${escapeHtml(entry.id)}"><div class="hub-sync-resource"><span class="hub-badge">${escapeHtml(entry.kind)}</span><strong>${escapeHtml(entry.name)}</strong><small>${escapeHtml(entry.id)}</small>${paths}</div><div class="hub-sync-side local">${side(entry.local)}</div><div class="hub-sync-side server">${side(entry.server, true)}</div><div class="hub-sync-decision"><span class="hub-sync-state ${escapeHtml(entry.state)}">${escapeHtml(label[0])}</span><small>${escapeHtml(label[1])}</small><select data-hub-sync-choice="${escapeHtml(entry.id)}" class="${(hubSyncPlan.selections.get(entry.id) || 'skip').startsWith('overwrite') ? 'danger' : ''}">${options(entry)}</select></div></article>`;
+    const label = labels[entry.state] || [entry.state, '']; const selected = hubSyncPlan.selections.get(entry.id) || 'skip'; const conflictPaths = entry.conflictPaths || [];
+    const paths = conflictPaths.length ? `<details open><summary>${entry.conflictPathCount} pól w kolizji</summary><code>${conflictPaths.map(escapeHtml).join('<br>')}</code></details>` : entry.changedPaths?.length ? `<details><summary>${entry.changedPathCount} różnych pól</summary><code>${entry.changedPaths.map(escapeHtml).join('<br>')}</code></details>` : '';
+    const base = entry.known ? `<small class="hub-sync-base">wspólny punkt: ${escapeHtml((entry.known.contentHash || '').slice(0, 10))} · ${hubDate(entry.known.syncedAt)}</small>` : '<small class="hub-sync-base missing">brak wspólnego punktu synchronizacji</small>';
+    const choices = hubSyncActionChoices(entry).map(([value, text]) => `<option value="${value}" ${selected === value ? 'selected' : ''}>${text}</option>`).join('');
+    return `<article class="hub-sync-plan-row state-${escapeHtml(entry.state)}" data-sync-entry="${escapeHtml(entry.id)}"><div class="hub-sync-resource"><span class="hub-badge">${escapeHtml(entry.kind)}</span><strong>${escapeHtml(entry.name)}</strong><small>${escapeHtml(entry.id)}</small>${base}${paths}</div><div class="hub-sync-side local">${side(entry.local)}</div><div class="hub-sync-side server">${side(entry.server, true)}</div><div class="hub-sync-decision"><span class="hub-sync-state ${escapeHtml(entry.state)}">${escapeHtml(label[0])}</span><small>${escapeHtml(label[1])}</small><select data-hub-sync-choice="${escapeHtml(entry.id)}" class="${selected.startsWith('overwrite') ? 'danger' : ''}">${choices}</select><span class="hub-sync-effect" data-hub-sync-effect="${escapeHtml(entry.id)}">${escapeHtml(hubSyncActionEffect(entry, selected))}</span></div></article>`;
   }).join('') || '<div class="hub-empty">Brak elementów pasujących do filtra.</div>';
-  document.querySelectorAll('[data-hub-sync-choice]').forEach(select => select.addEventListener('change', event => { hubSyncPlan.selections.set(event.currentTarget.dataset.hubSyncChoice, event.currentTarget.value); renderHubSyncPlanStatus(); event.currentTarget.classList.toggle('danger', event.currentTarget.value.startsWith('overwrite')); }));
+  document.querySelectorAll('[data-hub-sync-choice]').forEach(select => select.addEventListener('change', event => {
+    const id = event.currentTarget.dataset.hubSyncChoice; const entry = comparison.entries.find(item => item.id === id); hubSyncPlan.selections.set(id, event.currentTarget.value); hubSyncPlan.preset = 'custom';
+    event.currentTarget.classList.toggle('danger', event.currentTarget.value.startsWith('overwrite')); const effect = document.querySelector(`[data-hub-sync-effect="${CSS.escape(id)}"]`); if (effect && entry) effect.textContent = hubSyncActionEffect(entry, event.currentTarget.value); renderHubSyncPlanStatus();
+  }));
   const note = document.getElementById('hub-sync-plan-note'); const errors = comparison.errors || [];
-  if (note) note.innerHTML = errors.length ? `<strong>Nie udało się odczytać ${errors.length} lokalnych elementów</strong><span>${escapeHtml(errors.map(item => `${item.kind}:${item.resourceId} — ${item.error}`).join(' · '))}</span>` : '<strong>Bezpieczne domyślne ustawienia</strong><span>Automatycznie wybrane są tylko zmiany jednostronne. Każde nadpisanie zachowuje poprzednią rewizję w historii Huba.</span>';
+  if (note) note.innerHTML = errors.length ? `<strong>Nie udało się odczytać ${errors.length} lokalnych elementów</strong><span>${escapeHtml(errors.map(item => `${item.kind}:${item.resourceId} — ${item.error}`).join(' · '))}</span>` : '<strong>Zakres synchronizacji</strong><span>Synchronizowane są definicje i ustawienia projektów, Test Labów oraz API Flow — bez sekretów i bez plików z katalogów projektów. Nadpisanie zachowuje wcześniejszą rewizję w historii Huba.</span>';
   renderHubSyncPlanStatus();
 }
 
+function hubSyncPlanCounts() {
+  const actions = [...hubSyncPlan.selections.values()].filter(action => action !== 'skip');
+  return {
+    total: actions.length, pull: actions.filter(action => ['download', 'overwrite-local'].includes(action)).length,
+    push: actions.filter(action => ['upload', 'overwrite-server'].includes(action)).length, merge: actions.filter(action => action === 'merge').length,
+    overwrite: actions.filter(action => action.startsWith('overwrite')).length
+  };
+}
+
+function hubSyncPlanDescription(counts = hubSyncPlanCounts()) {
+  return `Plan: ${counts.pull} pull (serwer → komputer), ${counts.push} push (komputer → serwer), ${counts.merge} merge (wynik → obie strony), ${counts.overwrite} wymuszonych nadpisań.`;
+}
+
 function renderHubSyncPlanStatus() {
-  const selected = [...hubSyncPlan.selections.values()].filter(action => action !== 'skip'); const dangerous = selected.filter(action => action.startsWith('overwrite')).length;
-  const warning = document.getElementById('hub-sync-plan-warning'); const apply = document.getElementById('hub-sync-plan-apply');
-  if (warning) warning.textContent = selected.length ? `${selected.length} operacji w planie${dangerous ? ` · ${dangerous} wymaga potwierdzenia nadpisania` : ''}` : 'Nie wybrano żadnej operacji — nic nie zostanie zmienione.';
-  if (apply) apply.disabled = !selected.length;
+  const counts = hubSyncPlanCounts(); const warning = document.getElementById('hub-sync-plan-warning'); const apply = document.getElementById('hub-sync-plan-apply'); const impact = document.getElementById('hub-sync-plan-impact');
+  for (const [preset, id] of Object.entries({ pull: 'hub-sync-mode-pull', safe: 'hub-sync-mode-safe', push: 'hub-sync-mode-push', review: 'hub-sync-mode-clear' })) document.getElementById(id)?.classList.toggle('active', hubSyncPlan.preset === preset);
+  if (impact) impact.innerHTML = counts.total ? `<strong>${counts.total} operacji po zatwierdzeniu</strong><span>${escapeHtml(hubSyncPlanDescription(counts))}</span>` : '<strong>Plan jest pusty</strong><span>Porównanie niczego nie zmieniło. Wybierz pull, push, bezpieczne połączenie albo ustaw operacje osobno.</span>';
+  if (warning) warning.textContent = counts.total ? `${counts.total} operacji oczekuje${counts.overwrite ? ` · ${counts.overwrite} odrzuci aktywną wersję jednej strony` : ' · bez wymuszonych nadpisań'}` : 'Nie wybrano operacji — zamknięcie okna nie zmieni żadnych danych.';
+  if (apply) { apply.disabled = !counts.total; apply.textContent = counts.total ? `Zatwierdź i wykonaj (${counts.total})` : 'Zatwierdź i wykonaj plan'; }
+}
+
+function renderHubSyncResult(result, comparison) {
+  const target = document.getElementById('hub-sync-plan-result'); if (!target) return; const names = new Map((comparison?.entries || []).map(entry => [entry.id, entry.name]));
+  const actualEffect = item => {
+    if (item.success) return hubSyncActionEffect({ state: '' }, item.action);
+    const effects = []; if (item.effects?.serverUpdated) effects.push('serwer został zaktualizowany');
+    if (item.effects?.localApplied) effects.push('lokalna kopia robocza została zastosowana');
+    else if (item.effects?.localVersionSaved) effects.push('zapisano lokalny punkt wersji, ale nie zmieniono kopii roboczej');
+    if (!effects.length) effects.push('żadna strona nie została zmieniona');
+    return `${effects.join('; ')}. Błąd: ${item.error || 'operacja nie została ukończona'}`;
+  };
+  const items = (result.results || []).map(item => `<li class="${item.success ? 'success' : 'failed'}"><b>${item.success ? '✓' : item.partial ? '⚠' : '✕'} ${escapeHtml(names.get(item.id) || item.id)}</b><span>${escapeHtml(actualEffect(item))}</span></li>`).join('');
+  target.innerHTML = `<strong>${result.success ? 'Plan wykonany zgodnie z podglądem' : 'Plan wykonany częściowo'}</strong><span>Gotowe: ${result.count || 0} · nieudane: ${result.failed || 0} · pull: ${result.summary?.downloaded || 0} · push: ${result.summary?.uploaded || 0} · merge: ${result.summary?.merged || 0}</span>${items ? `<ul>${items}</ul>` : ''}`;
+  target.classList.remove('hidden');
 }
 
 async function applyHubSyncPlan() {
-  const comparison = hubSyncPlan.comparison; if (!comparison) return; const selections = comparison.entries.map(entry => ({ id: entry.id, action: hubSyncPlan.selections.get(entry.id) || 'skip', expectedLocalExists: Boolean(entry.local?.exists), expectedServerExists: Boolean(entry.server?.exists), expectedLocalHash: entry.local?.contentHash || '', expectedServerHash: entry.server?.contentHash || '' })).filter(item => item.action !== 'skip');
-  if (!selections.length) return showToast('Wybierz przynajmniej jedną operację', 'warning'); const dangerous = selections.filter(item => item.action.startsWith('overwrite'));
-  if (dangerous.length) { const phrase = 'NADPISZ'; if (prompt(`Plan zawiera ${dangerous.length} operacji nadpisania. Poprzednie rewizje zostaną zachowane, ale aktywna wersja danych się zmieni. Wpisz ${phrase}:`, '') !== phrase) return; }
-  const button = document.getElementById('hub-sync-plan-apply'); button.disabled = true; button.textContent = 'Synchronizuję…';
+  const comparison = hubSyncPlan.comparison; if (!comparison) return; const remoteId = hubSyncPlan.remoteId; const selections = comparison.entries.map(entry => ({ id: entry.id, action: hubSyncPlan.selections.get(entry.id) || 'skip', expectedLocalExists: Boolean(entry.local?.exists), expectedServerExists: Boolean(entry.server?.exists), expectedLocalHash: entry.local?.contentHash || '', expectedServerHash: entry.server?.contentHash || '' })).filter(item => item.action !== 'skip');
+  if (!selections.length) return showToast('Plan jest pusty — nic nie zostanie zmienione', 'warning'); const counts = hubSyncPlanCounts(); const description = hubSyncPlanDescription(counts);
+  if (counts.overwrite) { const phrase = 'NADPISZ'; if (prompt(`${description}\n\n${counts.overwrite} operacji odrzuci aktywną wersję jednej strony. Historia rewizji zostanie zachowana. Wpisz ${phrase}, aby wykonać dokładnie ten plan:`, '') !== phrase) return; }
+  else if (!confirm(`${description}\n\nWykonać dokładnie ten plan?`)) return;
+  const button = document.getElementById('hub-sync-plan-apply'); button.disabled = true; button.textContent = 'Wykonuję plan…';
   try {
-    const result = await api.hub.applyRemotePlan(hubSyncPlan.remoteId, selections, { kinds: ['project', 'lab', 'api-flow'], nodeId: runtimeMode === 'desktop' ? 'desktop-local' : 'server-local', apply: true });
-    const firstError = result.results?.find(item => !item.success)?.error; showToast(result.success ? `Wykonano ${result.count} operacji synchronizacji` : `Wykonano ${result.count}; nieudane: ${result.failed}${firstError ? ` — ${firstError}` : ''}`, result.success ? 'success' : 'warning');
-    await refreshHubPanel(); await openHubSyncPlan(hubSyncPlan.remoteId);
+    const result = await api.hub.applyRemotePlan(remoteId, selections, { kinds: ['project', 'lab', 'api-flow'], nodeId: runtimeMode === 'desktop' ? 'desktop-local' : 'server-local', apply: true });
+    const firstError = result.results?.find(item => !item.success)?.error; showToast(result.success ? `Plan wykonany: ${result.count} operacji` : `Gotowe: ${result.count}; nieudane: ${result.failed}${firstError ? ` — ${firstError}` : ''}`, result.success ? 'success' : 'warning');
+    await refreshHubPanel(); await openHubSyncPlan(remoteId, false, 'review'); renderHubSyncResult(result, comparison);
   } catch (error) { showToast(error.message, 'error'); }
-  finally { button.textContent = 'Wykonaj wybrane operacje'; renderHubSyncPlanStatus(); }
+  finally { renderHubSyncPlanStatus(); }
 }
 
 async function handleHubAction(event) {
@@ -1467,7 +1536,7 @@ async function handleHubAction(event) {
     if (button.dataset.hubAction === 'remove-user' && confirm('Usunąć konto, sesje i tokeny użytkownika?')) await api.identity.removeUser(id);
     if (button.dataset.hubAction === 'remove-connector' && confirm('Odłączyć ten panel Plesk?')) await api.hub.removeConnector(id);
     if (button.dataset.hubAction === 'remove-remote' && confirm('Usunąć połączenie ze zdalnym Hubem?')) await api.hub.removeRemote(id);
-    if (button.dataset.hubAction === 'compare-remote') { await openHubSyncPlan(id); return; }
+    if (button.dataset.hubAction === 'compare-remote') { await openHubSyncPlan(id, false, button.dataset.syncPreset || 'review'); return; }
     if (button.dataset.hubAction === 'apply-object') { await api.hub.applyObject(id, {}); showToast('Obiekt zastosowany lokalnie', 'success'); }
     if (button.dataset.hubAction === 'history-object') { const history = await api.hub.history(id); const revision = prompt(`Historia: ${history.map(item => `r${item.revision} · ${hubDate(item.updatedAt)}`).join('\n')}\n\nPodaj rewizję do rollbacku (Anuluj = bez zmian):`, ''); if (revision) { await api.hub.rollback(id, Number(revision)); showToast(`Przywrócono rewizję ${revision}`, 'success'); } }
     if (button.dataset.hubAction === 'deploy-object') { const node = hubSnapshot.nodes.find(item => item.status === 'online') || hubSnapshot.nodes[0]; if (!node) throw new Error('Najpierw sparuj węzeł docelowy'); const deployment = await api.hub.createDeployment({ objectId: id, targetNodeId: node.id, strategy: 'replace' }); showToast(`Wdrożenie ${deployment.status}: ${node.name}`, deployment.status === 'pending' ? 'warning' : 'success'); }

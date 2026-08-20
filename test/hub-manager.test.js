@@ -218,7 +218,7 @@ test('deployment workflow enforces approval and valid state transitions', t => {
   assert.equal(completed.health.token, '[configured]');
 });
 
-test('two-way remote sync is idempotent and preserves divergent edits as conflicts', async t => {
+test('two-way remote sync is idempotent, preserves conflicts and merges independent edits', async t => {
   const localFixture = fixture(t); const remoteFixture = fixture(t);
   const remotePrincipal = { userId: remoteFixture.owner.id, username: remoteFixture.owner.username, nodeId: 'remote-test' };
   const fetchImpl = async (url, options) => {
@@ -251,6 +251,8 @@ test('two-way remote sync is idempotent and preserves divergent edits as conflic
   assert.equal(comparison.entries[0].state, 'diverged');
   assert.deepEqual(comparison.entries[0].safeActions, []);
   assert.ok(comparison.entries[0].changedPaths.includes('/branch'));
+  assert.equal(comparison.entries[0].conflictReason, 'overlapping-changes');
+  assert.ok(comparison.entries[0].conflictPaths.includes('/branch'));
 
   const resolved = await localFixture.hub.applyRemotePlan(remote.id, [{
     id: 'project:shop', action: 'overwrite-server',
@@ -260,4 +262,37 @@ test('two-way remote sync is idempotent and preserves divergent edits as conflic
   assert.equal(resolved.success, true);
   assert.equal(remoteFixture.hub.getObject('project:shop').data.branch, 'desktop');
   assert.equal((await localFixture.hub.compareRemote(remote.id, { kinds: ['project'] })).entries[0].state, 'same');
+
+  const localRevision = localFixture.hub.getObject('project:shop').revision;
+  const remoteRevision = remoteFixture.hub.getObject('project:shop').revision;
+  localFixture.hub.publish({ kind: 'project', resourceId: 'shop', data: { name: 'Shop', branch: 'desktop', runtime: { node: '24' } }, baseRevision: localRevision }, { userId: localFixture.owner.id });
+  remoteFixture.hub.publish({ kind: 'project', resourceId: 'shop', data: { name: 'Shop', branch: 'release' }, baseRevision: remoteRevision }, remotePrincipal);
+
+  const mergeable = await localFixture.hub.compareRemote(remote.id, { kinds: ['project'] });
+  assert.equal(mergeable.entries[0].state, 'mergeable');
+  assert.deepEqual(mergeable.entries[0].safeActions, ['merge']);
+  assert.equal(mergeable.entries[0].base.exists, true);
+
+  const merged = await localFixture.hub.applyRemotePlan(remote.id, [{
+    id: 'project:shop', action: 'merge',
+    expectedLocalHash: mergeable.entries[0].local.contentHash,
+    expectedServerHash: mergeable.entries[0].server.contentHash
+  }], { kinds: ['project'], apply: false }, { userId: localFixture.owner.id });
+  assert.equal(merged.success, true);
+  assert.equal(merged.summary.merged, 1);
+  assert.deepEqual(localFixture.hub.getObject('project:shop').data, { name: 'Shop', branch: 'release', runtime: { node: '24' } });
+  assert.deepEqual(remoteFixture.hub.getObject('project:shop').data, { name: 'Shop', branch: 'release', runtime: { node: '24' } });
+  assert.equal((await localFixture.hub.compareRemote(remote.id, { kinds: ['project'] })).entries[0].state, 'same');
+
+  localFixture.hub.publish({ kind: 'project', resourceId: 'shop', data: { name: 'Shop', branch: 'release', runtime: { node: '24' }, mode: 'development' }, baseRevision: localFixture.hub.getObject('project:shop').revision }, { userId: localFixture.owner.id });
+  const stalePreview = await localFixture.hub.compareRemote(remote.id, { kinds: ['project'] });
+  remoteFixture.hub.publish({ kind: 'project', resourceId: 'shop', data: { name: 'Shop', branch: 'hotfix', runtime: { node: '24' } }, baseRevision: remoteFixture.hub.getObject('project:shop').revision }, remotePrincipal);
+  const stale = await localFixture.hub.applyRemotePlan(remote.id, [{
+    id: 'project:shop', action: 'upload',
+    expectedLocalHash: stalePreview.entries[0].local.contentHash,
+    expectedServerHash: stalePreview.entries[0].server.contentHash
+  }], { kinds: ['project'], apply: false }, { userId: localFixture.owner.id });
+  assert.equal(stale.success, false);
+  assert.equal(stale.results[0].stale, true);
+  assert.equal(remoteFixture.hub.getObject('project:shop').data.branch, 'hotfix');
 });
