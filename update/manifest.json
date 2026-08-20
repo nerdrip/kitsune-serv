@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-20T13:31:42.068Z",
+  "generatedAt": "2026-08-20T14:55:29.041Z",
   "packages": [
     {
       "order": 1,
@@ -27,7 +27,7 @@
       "version": "1.5.11",
       "release": "3",
       "file": "packages/03-kitsunecolab-manager-1.5.11-r3.zip",
-      "sha256": "183cd1480dacf9f08224c0e4b3a46fc515199ac6a75bb39c57f63c749c2037d6"
+      "sha256": "f5493db34c5f63d51032cd4ae93121ff6ace0041120ce38f2d40d94233716392"
     },
     {
       "order": 4,
@@ -78,10 +78,10 @@
       "order": 9,
       "id": "kitsune-git",
       "name": "KitsuneGIT Web",
-      "version": "1.3.0",
-      "release": "3",
-      "file": "packages/09-kitsune-git-1.3.0-r3.zip",
-      "sha256": "84eb310918fd5807b75ad34795c6a5fbf443609de3abbb6821202f6c42c4c9ca"
+      "version": "1.4.0",
+      "release": "1",
+      "file": "packages/09-kitsune-git-1.4.0-r1.zip",
+      "sha256": "38ec30cbdffa23f5729413be21a1d7ab064563150a81ae87dac9acd8892659ec"
     },
     {
       "order": 10,
@@ -106,18 +106,18 @@
       "id": "ultimate-tool",
       "name": "Ultimate Tool",
       "version": "0.1.1",
-      "release": "83",
-      "file": "packages/12-ultimate-tool-0.1.1-r83.zip",
-      "sha256": "4e105d8ceb8e74b9638928f2fea5be53c2141f52cf00ee15a7549849b4f2c7cc"
+      "release": "84",
+      "file": "packages/12-ultimate-tool-0.1.1-r84.zip",
+      "sha256": "fc06b2348dc4c2738c66c5fd5e29f7cacde3029681e37a21afd0b837fcf67604"
     },
     {
       "order": 99,
       "id": "kitsuneserv-bridge",
       "name": "KitsuneServ Bridge",
-      "version": "3.1.2",
-      "release": "22",
-      "file": "packages/99-kitsuneserv-bridge-3.1.2-r22.zip",
-      "sha256": "a22b225fe5f98618bdf551368e75c9a4a20fec79bb507463c12f63e25183fb31"
+      "version": "3.1.3",
+      "release": "1",
+      "file": "packages/99-kitsuneserv-bridge-3.1.3-r1.zip",
+      "sha256": "129fdee5315b4a3c2be6acac7f7511c39cdf44cc93162c7a1391dc56463c1ef4"
     }
   ]
 }

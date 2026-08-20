@@ -39,7 +39,7 @@ class Modules_KitsuneservBridge_HubClient
 
     public function heartbeat($nodeId, $token, array $inventory)
     {
-        return $this->request('/api/hub/heartbeat', ['nodeId' => $nodeId, 'input' => ['inventory' => $inventory, 'version' => '3.1.2', 'platform' => PHP_OS_FAMILY]], $token);
+        return $this->request('/api/hub/heartbeat', ['nodeId' => $nodeId, 'input' => ['inventory' => $inventory, 'version' => '3.1.3', 'platform' => PHP_OS_FAMILY]], $token);
     }
 
     public function probe()

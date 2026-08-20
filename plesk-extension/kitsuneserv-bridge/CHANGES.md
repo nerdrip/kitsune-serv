@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.1.3-1
+
+- Aligns the Plesk Bridge release with KitsuneServ 3.1.3 and its explicit Desktop-to-Hub synchronization plan.
+- Keeps automatic signed enrollment, API namespace routing, managed proxy generation and verified self-update behavior from the previous release.
+
 ## 3.1.2-21
 
 - Added Ultimate Tool to Kitsune Plesk Management and the deterministic aggregate update bundle.

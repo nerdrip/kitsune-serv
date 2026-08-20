@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.1.3 — 2026-08-20
+
+- Replaced the ambiguous one-click Desktop ↔ Hub synchronization with a read-only comparison followed by an explicit per-resource plan.
+- Added side-by-side local/server state, hashes, server revisions, changed-field paths and clear states for local-only, server-only, one-sided changes and divergence.
+- Added safe upload/download recommendations, revision history before replacement, stale-preview protection and an additional confirmation for overwriting either side.
+- Separated the local revision repository from actual remote-Hub synchronization in the interface so saving a snapshot can no longer be mistaken for transferring data.
+- Rebuilt KitsuneGIT Manager for Plesk 1.4.0-r1 with guided domain selection, managed reverse proxy, repository authentication, deployment keys, staged deployment, readiness checks and rollback.
+
 ## 3.1.2 — 2026-08-20
 
 - Added Kitsune Plesk Suite management in Hub: installed Kitsune extensions are detected automatically, linked from one screen and can be updated from validated Plesk ZIP packages.

@@ -18,11 +18,16 @@ test('remote suite exposes xterm PTY, server workspace and production guard cont
   assert.match(html, /REMOTE OPERATIONS/);
   assert.match(html, /Parameterized runbooks/);
   assert.match(html, /id="fm-sync"/);
+  assert.match(html, /id="hub-sync-modal"/);
+  assert.match(html, /id="hub-sync-plan-list"/);
   assert.match(html, /Atomic remote deployment/);
   assert.match(html, /PORTABLE TOOLKIT/);
   assert.match(html, /Otwórz w WinSCP/);
   assert.match(renderer, /new Terminal\(/);
   assert.match(renderer, /Production Guard/);
+  assert.match(renderer, /api\.hub\.compareRemote/);
+  assert.match(renderer, /api\.hub\.applyRemotePlan/);
+  assert.match(renderer, /Porównaj lokalne ↔ serwer/);
   assert.match(main, /nodePty\.spawn/);
   assert.match(main, /terminal:profiles/);
   assert.match(renderer, /api\.terminal\.attach\(id\)/);

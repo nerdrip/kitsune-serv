@@ -791,7 +791,7 @@ window.kitsuneAPI = {
     history: (id) => window.kitsuneAPI._call('hub/history', { id }), rollback: (id, revision) => window.kitsuneAPI._call('hub/rollback', { id, revision }), applyObject: (id, options) => window.kitsuneAPI._call('hub/applyObject', { id, options }),
     deployments: (filters) => window.kitsuneAPI._call('hub/deployments', { filters }), createDeployment: (input) => window.kitsuneAPI._call('hub/createDeployment', { input }), approveDeployment: (id) => window.kitsuneAPI._call('hub/approveDeployment', { id }), updateDeployment: (id, input) => window.kitsuneAPI._call('hub/updateDeployment', { id, input }),
     connectors: () => window.kitsuneAPI._call('hub/connectors'), saveConnector: (input, secret) => window.kitsuneAPI._call('hub/saveConnector', { input, secret }), removeConnector: (id) => window.kitsuneAPI._call('hub/removeConnector', { id }),
-    remotes: () => window.kitsuneAPI._call('hub/remotes'), saveRemote: (input, token) => window.kitsuneAPI._call('hub/saveRemote', { input, token }), removeRemote: (id) => window.kitsuneAPI._call('hub/removeRemote', { id }), pushRemote: (id, options) => window.kitsuneAPI._call('hub/pushRemote', { id, options }), pullRemote: (id, options) => window.kitsuneAPI._call('hub/pullRemote', { id, options }), syncRemote: (id, options) => window.kitsuneAPI._call('hub/syncRemote', { id, options }),
+    remotes: () => window.kitsuneAPI._call('hub/remotes'), saveRemote: (input, token) => window.kitsuneAPI._call('hub/saveRemote', { input, token }), removeRemote: (id) => window.kitsuneAPI._call('hub/removeRemote', { id }), pushRemote: (id, options) => window.kitsuneAPI._call('hub/pushRemote', { id, options }), pullRemote: (id, options) => window.kitsuneAPI._call('hub/pullRemote', { id, options }), syncRemote: (id, options) => window.kitsuneAPI._call('hub/syncRemote', { id, options }), compareRemote: (id, options) => window.kitsuneAPI._call('hub/compareRemote', { id, options }), applyRemotePlan: (id, selections, options) => window.kitsuneAPI._call('hub/applyRemotePlan', { id, selections, options }),
     reconcile: () => window.kitsuneAPI._call('hub/reconcile'), onChanged: (cb) => { window._kitsuneHubChangedCb = cb; }
   },
   security: {
@@ -1087,7 +1087,7 @@ function endpointPermission(endpoint, body = {}) {
   if (endpoint.startsWith('hub/saveTeam') || endpoint.startsWith('hub/removeTeam')) return 'teams.manage';
   if (endpoint === 'hub/routes') return 'routes.read';
   if (['hub/saveRoute', 'hub/removeRoute'].includes(endpoint)) return 'routes.*';
-  if (endpoint === 'hub/inventory' || endpoint === 'hub/history') return 'projects.read';
+  if (endpoint === 'hub/inventory' || endpoint === 'hub/history' || endpoint === 'hub/compareRemote') return 'projects.read';
   if (endpoint === 'hub/sync/publish') {
     const kind = String(body.input?.kind || 'project');
     return kind === 'api-flow' ? 'api-flows.sync' : `${kind}s.sync`;
@@ -1096,7 +1096,7 @@ function endpointPermission(endpoint, body = {}) {
   if (endpoint === 'hub/deployments') return 'deployments.read';
   if (endpoint === 'hub/createDeployment') return 'deployments.create';
   if (endpoint === 'hub/approveDeployment' || endpoint === 'hub/updateDeployment') return 'deployments.update';
-  if (['hub/pushRemote', 'hub/pullRemote', 'hub/syncRemote'].includes(endpoint)) return 'projects.sync';
+  if (['hub/pushRemote', 'hub/pullRemote', 'hub/syncRemote', 'hub/applyRemotePlan'].includes(endpoint)) return 'projects.sync';
   if (endpoint.startsWith('hub/') && /(configure|Connector|Remote)/.test(endpoint)) return 'settings.manage';
   if (endpoint.startsWith('config/') && !['config/get', 'config/getDefaults', 'config/getAppRoot'].includes(endpoint)) return 'settings.manage';
   if (endpoint.startsWith('workspace/')) return /\/(list|get|templates|detect|inspect|environment|url|secretKeys)$/.test(endpoint) ? 'projects.read' : (/\/(start|stop|open)$/.test(endpoint) ? 'projects.operate' : 'projects.sync');
@@ -1261,6 +1261,8 @@ async function handleAPI(endpoint, body, context = {}) {
     case 'hub/pushRemote': return hubManager.pushToRemote(body.id, body.options || {}, context.principal);
     case 'hub/pullRemote': return hubManager.pullFromRemote(body.id, body.options || {}, context.principal);
     case 'hub/syncRemote': return hubManager.syncRemote(body.id, body.options || {}, context.principal);
+    case 'hub/compareRemote': return hubManager.compareRemote(body.id, body.options || {});
+    case 'hub/applyRemotePlan': return hubManager.applyRemotePlan(body.id, body.selections || [], body.options || {}, context.principal);
     case 'hub/reconcile': return hubManager.reconcile();
     case 'audit/list': return auditManager.list(body.options || {});
     case 'audit/verify': return auditManager.verify();

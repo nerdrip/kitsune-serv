@@ -1,6 +1,6 @@
 # Usługi i wersje w KitsuneServ
 
-KitsuneServ 3.1.2 zarządza 16 usługami oraz dwoma wersjonowanymi narzędziami deweloperskimi: Composerem i Eclipse Temurin JDK. Instalowanie i usuwanie wydań odbywa się wyłącznie w panelu **Version Manager**. Można tam wyszukać usługę albo konkretną wersję, zsynchronizować katalogi, zobaczyć wszystkie wydania na dysku, śledzić postęp instalacji, przełączyć aktywny profil i zbiorczo usunąć nieużywane wydania. Panele usług pozwalają wybierać tylko wersje już zainstalowane. Warstwa Kitsune Hub 3.1.2 synchronizuje definicje projektów, Test Labów i API Flow między sparowanymi węzłami, ale nie zmienia katalogu obsługiwanych runtime'ów.
+KitsuneServ 3.1.3 zarządza 16 usługami oraz dwoma wersjonowanymi narzędziami deweloperskimi: Composerem i Eclipse Temurin JDK. Instalowanie i usuwanie wydań odbywa się wyłącznie w panelu **Version Manager**. Można tam wyszukać usługę albo konkretną wersję, zsynchronizować katalogi, zobaczyć wszystkie wydania na dysku, śledzić postęp instalacji, przełączyć aktywny profil i zbiorczo usunąć nieużywane wydania. Panele usług pozwalają wybierać tylko wersje już zainstalowane. Warstwa Kitsune Hub 3.1.3 porównuje lokalne definicje projektów, Test Labów i API Flow ze zdalnym Hubem, po czym wykonuje wyłącznie jawnie wybrany plan wysłania, pobrania lub nadpisania; nie zmienia katalogu obsługiwanych runtime'ów.
 
 ## Pełna lista
 

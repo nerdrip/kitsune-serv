@@ -1677,6 +1677,8 @@ ipcMain.handle('hub:removeRemote', (_event, id) => hubManager.removeRemote(id));
 ipcMain.handle('hub:pushRemote', (_event, id, options) => hubManager.pushToRemote(id, options, desktopPrincipal()));
 ipcMain.handle('hub:pullRemote', (_event, id, options) => hubManager.pullFromRemote(id, options, desktopPrincipal()));
 ipcMain.handle('hub:syncRemote', (_event, id, options) => hubManager.syncRemote(id, options, desktopPrincipal()));
+ipcMain.handle('hub:compareRemote', (_event, id, options) => hubManager.compareRemote(id, options));
+ipcMain.handle('hub:applyRemotePlan', (_event, id, selections, options) => auditOperation('hub.sync-plan', id, () => hubManager.applyRemotePlan(id, selections, options, desktopPrincipal())));
 ipcMain.handle('hub:reconcile', () => hubManager.reconcile());
 ipcMain.handle('observability:overview', () => observabilityManager.overview());
 ipcMain.handle('observability:collect', () => observabilityManager.collect());

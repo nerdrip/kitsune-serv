@@ -361,18 +361,53 @@ class HubManager {
   }
 
   async publishLocal(options = {}, principal = null) {
-    const results = []; const kinds = new Set(options.kinds || ['project', 'lab', 'api-flow']); const nodeId = String(options.nodeId || 'local');
-    if (kinds.has('project') && this.projectManager) for (const project of this.projectManager.list()) results.push(this.publish({ kind: 'project', resourceId: project.id, name: project.name, data: this.projectManager.exportManifest(project.id), baseRevision: this._revision('project', project.id), sourceNodeId: nodeId }, principal));
-    if (kinds.has('lab') && this.labManager) for (const lab of this.labManager.list()) { const { output: _output, pid: _pid, ...definition } = lab; results.push(this.publish({ kind: 'lab', resourceId: lab.id, name: lab.name, data: definition, baseRevision: this._revision('lab', lab.id), sourceNodeId: nodeId }, principal)); }
-    if (kinds.has('api-flow') && this.apiFlowManager) for (const flow of this.apiFlowManager.list()) { const { runtime: _runtime, running: _running, url: _url, ...definition } = flow; results.push(this.publish({ kind: 'api-flow', resourceId: flow.id, name: flow.name, data: definition, baseRevision: this._revision('api-flow', flow.id), sourceNodeId: nodeId }, principal)); }
-    return { success: results.every(result => result.success), results };
+    const results = []; const nodeId = String(options.nodeId || 'local'); const snapshot = this.localResources(options);
+    for (const resource of snapshot.resources) results.push(this._publishLocalResource(resource, nodeId, principal));
+    return { success: !snapshot.errors.length && results.every(result => result.success), results, errors: snapshot.errors };
+  }
+
+  localResources(options = {}) {
+    const kinds = new Set(options.kinds || ['project', 'lab', 'api-flow']); const resources = new Map(); const errors = [];
+    const add = input => {
+      try {
+        const normalized = this._normalizeObject(input); const id = `${normalized.kind}:${normalized.resourceId}`;
+        resources.set(id, { id, kind: normalized.kind, resourceId: normalized.resourceId, name: String(input.name || normalized.data.name || normalized.resourceId).slice(0, 120), data: normalized.data, contentHash: normalized.contentHash, updatedAt: input.updatedAt || normalized.data.updatedAt || normalized.data.project?.updatedAt || null });
+      } catch (error) { errors.push({ kind: input.kind, resourceId: input.resourceId, error: error.message }); }
+    };
+    const fallback = kind => {
+      for (const item of this.inventory({ kind, includeData: true })) add({ kind: item.kind, resourceId: item.resourceId, name: item.name, data: item.data, updatedAt: item.updatedAt });
+    };
+    if (kinds.has('project')) {
+      if (this.projectManager) for (const project of this.projectManager.list()) { try { add({ kind: 'project', resourceId: project.id, name: project.name, data: this.projectManager.exportManifest(project.id), updatedAt: project.updatedAt }); } catch (error) { errors.push({ kind: 'project', resourceId: project.id, error: error.message }); } }
+      else fallback('project');
+    }
+    if (kinds.has('lab')) {
+      if (this.labManager) for (const lab of this.labManager.list()) { const { output: _output, pid: _pid, ...definition } = lab; add({ kind: 'lab', resourceId: lab.id, name: lab.name, data: definition, updatedAt: lab.updatedAt }); }
+      else fallback('lab');
+    }
+    if (kinds.has('api-flow')) {
+      if (this.apiFlowManager) for (const flow of this.apiFlowManager.list()) { const { runtime: _runtime, running: _running, url: _url, ...definition } = flow; add({ kind: 'api-flow', resourceId: flow.id, name: flow.name, data: definition, updatedAt: flow.updatedAt }); }
+      else fallback('api-flow');
+    }
+    for (const kind of kinds) if (!['project', 'lab', 'api-flow'].includes(kind)) fallback(kind);
+    return { resources: [...resources.values()], errors };
+  }
+
+  _publishLocalResource(resource, nodeId, principal = null) {
+    return this.publish({ kind: resource.kind, resourceId: resource.resourceId, name: resource.name, data: resource.data, baseRevision: this._revision(resource.kind, resource.resourceId), sourceNodeId: nodeId, force: true }, principal);
   }
 
   _revision(kind, id) { return this._read().objects.find(item => item.id === `${kind}:${id}`)?.revision || 0; }
 
   async applyObject(id, options = {}) {
     const object = this.getObject(id); if (object.deletedAt) throw new Error('Cannot apply a deleted object');
-    if (object.kind === 'project') return this.projectManager.importManifest(object.data, options);
+    if (object.kind === 'project') {
+      const incoming = object.data?.project; if (!incoming) throw new Error('Synchronized project manifest is invalid');
+      const existing = this.projectManager.list().find(item => item.id === object.resourceId || item.slug === incoming.slug);
+      if (existing) return this.projectManager.update(existing.id, { ...incoming, id: existing.id, root: options.root || existing.root });
+      const root = options.root || path.join(this.projectManager.workspaceRoot, slugify(incoming.slug || incoming.name || object.name));
+      return this.projectManager.importManifest(object.data, { ...options, root, createDirectory: options.createDirectory !== false });
+    }
     if (object.kind === 'lab') { const existing = this.labManager.list().find(item => item.id === object.resourceId || item.slug === object.data.slug); return existing ? this.labManager.update(existing.id, object.data, {}) : this.labManager.create({ ...object.data, id: undefined }, {}); }
     if (object.kind === 'api-flow') {
       const existing = this.apiFlowManager.list().find(item => item.id === object.resourceId || item.slug === object.data.slug); if (existing?.running) await this.apiFlowManager.stop(existing.id);
@@ -535,6 +570,83 @@ class HubManager {
       });
       request.setTimeout(15_000, () => request.destroy(new Error('Remote Hub request timed out'))); request.on('error', reject); request.end(JSON.stringify(body));
     });
+  }
+
+  async _remoteComparison(remoteId, options = {}) {
+    const remoteObjects = await this.callRemote(remoteId, 'hub/inventory', { filters: { includeData: true } });
+    if (!Array.isArray(remoteObjects)) throw new Error('Remote Hub inventory is invalid');
+    const remote = this._read().remotes.find(item => item.id === remoteId); if (!remote) throw new Error('Remote Hub not found');
+    const localSnapshot = this.localResources(options); const local = new Map(localSnapshot.resources.map(item => [item.id, item]));
+    const server = new Map(remoteObjects.filter(item => !options.kinds || options.kinds.includes(item.kind)).map(item => [item.id, item]));
+    const entries = [];
+    for (const id of [...new Set([...local.keys(), ...server.keys()])].sort()) {
+      const localItem = local.get(id) || null; const serverItem = server.get(id) || null; const known = remote.syncState?.[id] || null; let state;
+      if (localItem?.contentHash === serverItem?.contentHash) state = 'same';
+      else if (!serverItem) state = 'local-only';
+      else if (!localItem) state = 'remote-only';
+      else if (!known) state = 'diverged';
+      else {
+        const localChanged = localItem.contentHash !== known.contentHash; const serverChanged = serverItem.contentHash !== known.contentHash;
+        state = localChanged && !serverChanged ? 'local-ahead' : serverChanged && !localChanged ? 'remote-ahead' : 'diverged';
+      }
+      const safeActions = state === 'local-only' || state === 'local-ahead' ? ['upload'] : state === 'remote-only' || state === 'remote-ahead' ? ['download'] : [];
+      entries.push({
+        id, kind: localItem?.kind || serverItem?.kind, resourceId: localItem?.resourceId || serverItem?.resourceId,
+        name: localItem?.name || serverItem?.name || id, state, local: localItem, server: serverItem, known,
+        safeActions, recommendedAction: safeActions[0] || 'skip',
+        diff: localItem && serverItem ? this.diffValues(localItem.data, serverItem.data) : []
+      });
+    }
+    return { remote, entries, errors: localSnapshot.errors };
+  }
+
+  async compareRemote(remoteId, options = {}) {
+    const comparison = await this._remoteComparison(remoteId, options); const summary = {};
+    for (const state of ['same', 'local-only', 'remote-only', 'local-ahead', 'remote-ahead', 'diverged']) summary[state] = comparison.entries.filter(item => item.state === state).length;
+    return {
+      remote: { id: comparison.remote.id, name: comparison.remote.name, url: comparison.remote.url, status: comparison.remote.status, lastCheckedAt: comparison.remote.lastCheckedAt },
+      summary, errors: comparison.errors,
+      entries: comparison.entries.map(item => ({
+        id: item.id, kind: item.kind, resourceId: item.resourceId, name: item.name, state: item.state,
+        local: item.local ? { exists: true, contentHash: item.local.contentHash, updatedAt: item.local.updatedAt } : { exists: false },
+        server: item.server ? { exists: true, contentHash: item.server.contentHash, revision: item.server.revision, updatedAt: item.server.updatedAt } : { exists: false },
+        known: item.known ? { contentHash: item.known.contentHash, remoteRevision: item.known.remoteRevision, syncedAt: item.known.syncedAt } : null,
+        safeActions: item.safeActions, recommendedAction: item.recommendedAction, changedPaths: item.diff.map(change => change.path).slice(0, 30), changedPathCount: item.diff.length
+      }))
+    };
+  }
+
+  async applyRemotePlan(remoteId, selections = [], options = {}, principal = null) {
+    if (!Array.isArray(selections) || selections.length > 500) throw new Error('Synchronization plan must contain at most 500 items');
+    const comparison = await this._remoteComparison(remoteId, options); const byId = new Map(comparison.entries.map(item => [item.id, item])); const results = [];
+    for (const selection of selections) {
+      const id = String(selection.id || ''); const action = String(selection.action || 'skip'); if (action === 'skip') continue;
+      if (!['upload', 'download', 'overwrite-server', 'overwrite-local'].includes(action)) { results.push({ id, action, success: false, error: 'Unsupported synchronization action' }); continue; }
+      const entry = byId.get(id); if (!entry) { results.push({ id, action, success: false, stale: true, error: 'Resource changed after the preview; compare again' }); continue; }
+      const expectedLocal = selection.expectedLocalHash || ''; const expectedServer = selection.expectedServerHash || '';
+      const existenceChanged = (typeof selection.expectedLocalExists === 'boolean' && selection.expectedLocalExists !== Boolean(entry.local)) || (typeof selection.expectedServerExists === 'boolean' && selection.expectedServerExists !== Boolean(entry.server));
+      if (existenceChanged || (expectedLocal && expectedLocal !== entry.local?.contentHash) || (expectedServer && expectedServer !== entry.server?.contentHash)) { results.push({ id, action, success: false, stale: true, error: 'Resource changed after the preview; compare again' }); continue; }
+      const safe = entry.safeActions.includes(action); if (!safe && !['overwrite-server', 'overwrite-local'].includes(action)) { results.push({ id, action, success: false, error: 'The selected direction is not safe for the current state' }); continue; }
+      try {
+        if (action === 'upload' || action === 'overwrite-server') {
+          if (!entry.local) throw new Error('The resource does not exist locally');
+          const localPublished = this._publishLocalResource(entry.local, options.nodeId || 'desktop-local', principal); if (!localPublished.success) throw new Error('Could not save the local revision');
+          const sent = await this.callRemote(remoteId, 'hub/sync/publish', { input: { kind: entry.local.kind, resourceId: entry.local.resourceId, name: entry.local.name, data: entry.local.data, baseRevision: entry.server?.revision || 0, sourceNodeId: options.nodeId || 'desktop-local', force: action === 'overwrite-server' } });
+          if (!sent.success) { results.push({ id, action, ...sent }); continue; }
+          this._recordRemoteSync(remoteId, id, sent.object?.revision || entry.server?.revision || 0, entry.local.contentHash);
+          results.push({ id, action, success: true, revision: sent.object?.revision || 0 });
+        } else {
+          if (!entry.server) throw new Error('The resource does not exist on the server');
+          if (entry.local) this._publishLocalResource(entry.local, options.nodeId || 'desktop-local', principal);
+          const published = this.publish({ kind: entry.server.kind, resourceId: entry.server.resourceId, name: entry.server.name, data: entry.server.data, baseRevision: this._revision(entry.server.kind, entry.server.resourceId), sourceNodeId: `remote:${remoteId}`, force: action === 'overwrite-local' }, principal);
+          if (!published.success) { results.push({ id, action, ...published }); continue; }
+          const applied = options.apply === false ? null : await this.applyObject(id, options.applyOptions?.[id] || options.applyOptions || {});
+          this._recordRemoteSync(remoteId, id, entry.server.revision, entry.server.contentHash);
+          results.push({ id, action, success: true, revision: entry.server.revision, applied: Boolean(applied) });
+        }
+      } catch (error) { results.push({ id, action, success: false, error: error.message }); }
+    }
+    return { success: results.every(item => item.success), count: results.filter(item => item.success).length, failed: results.filter(item => !item.success).length, results };
   }
 
   async pushToRemote(remoteId, options = {}, principal = null) {
