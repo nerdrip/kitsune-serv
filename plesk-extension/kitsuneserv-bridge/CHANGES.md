@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.1.1-15
+
+- Serialized status refreshes and state-changing operations through one lock, preventing a stale page refresh from overwriting update results.
+- Made Bridge update checks and update scheduling return their final result before the page redirects.
+- Kept status refreshes from clearing the last operation result and normalized a completed scheduled upgrade to the installed release.
+
 ## 3.1.1-14
 
 - Automatically migrates the legacy managed nginx block before Plesk rebuilds a domain, preventing duplicate internal locations while preserving unrelated vhost directives and a one-time backup.
