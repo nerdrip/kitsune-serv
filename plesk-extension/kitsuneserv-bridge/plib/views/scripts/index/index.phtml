@@ -9,6 +9,7 @@ $repository = (array) ($state['repository'] ?? []);
 $runtime = (array) ($state['runtime'] ?? []);
 $deployment = (array) ($state['deployment'] ?? []);
 $proxy = (array) ($state['proxy'] ?? []);
+$extensionUpdate = (array) ($state['extensionUpdate'] ?? []);
 $serviceActive = !empty($service['active']);
 $healthOk = ($service['health'] ?? null) === true;
 $paired = (bool) $this->paired;
@@ -59,6 +60,7 @@ $shortCommit = static function ($value) { return $value ? substr((string) $value
         <article><span>Wersja wdrożona</span><strong><?php echo $e($deployment['version'] ?? '—'); ?></strong><small>commit <?php echo $e($shortCommit($deployment['commit'] ?? null)); ?></small></article>
         <article><span>Repozytorium</span><strong><?php echo !empty($repository['updateAvailable']) ? 'Aktualizacja dostępna' : 'Stan lokalny'; ?></strong><small><?php echo $e($c['repository_branch']); ?> · <?php echo $e($shortCommit($repository['localCommit'] ?? null)); ?></small></article>
         <article><span>Zdrowie usługi</span><strong class="<?php echo $healthOk ? 'ks-good-text' : ''; ?>"><?php echo $healthOk ? 'HTTP odpowiada' : ($serviceActive ? 'Brak odpowiedzi' : 'Nie działa'); ?></strong><small>PID <?php echo $e(($service['pid'] ?? 0) ?: '—'); ?> · port <?php echo $e($c['hub_port']); ?></small></article>
+        <article><span>Plesk Bridge</span><strong><?php echo $e(($extensionUpdate['status'] ?? '') === 'scheduled' ? 'Aktualizacja zaplanowana' : (($extensionUpdate['status'] ?? '') === 'failed' ? 'Błąd aktualizacji' : 'Aktualny')); ?></strong><small><?php echo $e($extensionUpdate['current'] ?? $this->extensionVersion); ?><?php if (!empty($extensionUpdate['candidate']) && $extensionUpdate['candidate'] !== ($extensionUpdate['current'] ?? '')): ?> → <?php echo $e($extensionUpdate['candidate']); ?><?php endif; ?></small></article>
       </div>
 
       <div class="ks-grid ks-grid-2">

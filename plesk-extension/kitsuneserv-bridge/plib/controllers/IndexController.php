@@ -255,6 +255,7 @@ class IndexController extends pm_Controller_Action
         if (!Modules_KitsuneservBridge_Config::hasSecret('device_token')) $warnings[] = ['info', 'Ten Plesk nie jest jeszcze sparowany jako węzeł Kitsune Hub.'];
         if ($config['update_manifest_url'] !== '' && $config['update_public_key'] === '') $warnings[] = ['critical', 'Skonfigurowano kanał aktualizacji bez klucza publicznego do weryfikacji podpisu.'];
         if ($statusError) $warnings[] = ['warning', 'Nie udało się odświeżyć stanu usługi: ' . $statusError];
+        if (($state['extensionUpdate']['status'] ?? '') === 'failed') $warnings[] = ['warning', 'Automatyczna aktualizacja Plesk Bridge nie powiodła się: ' . ($state['extensionUpdate']['error'] ?? 'sprawdź log operacji.')];
         if (!empty($state['lastError'])) $warnings[] = ['critical', 'Ostatnia operacja zakończyła się błędem: ' . $state['lastError']];
         return $warnings;
     }
@@ -264,7 +265,7 @@ class IndexController extends pm_Controller_Action
         $runtime = null;
         try {
             $runtime = Modules_KitsuneservBridge_Config::createRuntimeConfig('status');
-            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r11', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
+            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r12', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
             if ((int) ($result['code'] ?? 1) !== 0) {
                 $detail = trim((string) ($result['stderr'] ?? $result['stdout'] ?? ''));
                 return mb_substr($detail !== '' ? $detail : 'Narzędzie statusu zakończyło się błędem.', -2000);

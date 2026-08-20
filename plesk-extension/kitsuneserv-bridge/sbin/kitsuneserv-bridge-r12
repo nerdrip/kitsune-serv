@@ -1,7 +1,7 @@
 #!/usr/bin/env php
 <?php
 
-const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.0.0-r11';
+const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.1.0-r12';
 
 final class KitsuneServBridgeManager
 {
@@ -91,6 +91,15 @@ final class KitsuneServBridgeManager
                     $this->configureProxy();
                     $this->refreshState();
                     break;
+            }
+            if (in_array($action, ['sync', 'deploy', 'sync-deploy'], true)) {
+                try {
+                    $this->scheduleExtensionUpdate();
+                } catch (Throwable $extensionError) {
+                    $message = $this->redact($extensionError->getMessage());
+                    $this->state['extensionUpdate'] = ['status' => 'failed', 'current' => KITSUNESERV_BRIDGE_EXECUTOR_RELEASE, 'candidate' => null, 'checkedAt' => gmdate('c'), 'error' => $message];
+                    $this->log('OSTRZEŻENIE: automatyczna aktualizacja Plesk Bridge nie została zaplanowana: ' . $message);
+                }
             }
             $this->state['lastSuccess'] = gmdate('c');
             $this->log('Operacja zakończona: ' . $action . '.');
@@ -399,6 +408,76 @@ final class KitsuneServBridgeManager
         ];
     }
 
+    private function scheduleExtensionUpdate()
+    {
+        $source = $this->config['repository_path'] . '/plesk-extension/kitsuneserv-bridge';
+        $metaPath = $source . '/meta.xml';
+        if (!is_file($metaPath)) {
+            $this->state['extensionUpdate'] = ['status' => 'not-available', 'current' => KITSUNESERV_BRIDGE_EXECUTOR_RELEASE, 'candidate' => null, 'checkedAt' => gmdate('c')];
+            return;
+        }
+        $meta = (string) file_get_contents($metaPath);
+        if (!preg_match('#<id>kitsuneserv-bridge</id>#', $meta) || !preg_match('#<version>([^<]+)</version>#', $meta, $versionMatch) || !preg_match('#<release>(\d+)</release>#', $meta, $releaseMatch)) {
+            throw new RuntimeException('Repository contains invalid KitsuneServ Bridge metadata.');
+        }
+        $candidateVersion = trim($versionMatch[1]);
+        $candidateRelease = (int) $releaseMatch[1];
+        if (!preg_match('/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/', $candidateVersion) || $candidateRelease < 1) throw new RuntimeException('Repository contains an invalid extension version.');
+        if (!preg_match('/^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)-r(\d+)$/', KITSUNESERV_BRIDGE_EXECUTOR_RELEASE, $currentMatch)) throw new RuntimeException('Current extension release marker is invalid.');
+        $candidate = $candidateVersion . '-r' . $candidateRelease;
+        $newer = version_compare($candidateVersion, $currentMatch[1], '>') || ($candidateVersion === $currentMatch[1] && $candidateRelease > (int) $currentMatch[2]);
+        if (!$newer) {
+            $this->state['extensionUpdate'] = ['status' => 'current', 'current' => KITSUNESERV_BRIDGE_EXECUTOR_RELEASE, 'candidate' => $candidate, 'checkedAt' => gmdate('c')];
+            return;
+        }
+        if (!class_exists('ZipArchive')) throw new RuntimeException('PHP ZipArchive is required for automatic Plesk extension updates.');
+        foreach (['htdocs', 'plib', 'sbin'] as $required) if (!is_dir($source . '/' . $required)) throw new RuntimeException('Repository extension source is incomplete: ' . $required);
+        $archive = $this->varDir . '/kitsuneserv-bridge-' . preg_replace('/[^A-Za-z0-9._-]/', '-', $candidate) . '.zip';
+        $this->createExtensionArchive($source, $archive);
+        $installer = $this->extensionInstallerCommand($archive);
+        $script = $this->varDir . '/install-extension-' . bin2hex(random_bytes(6)) . '.sh';
+        $command = implode(' ', array_map('escapeshellarg', $installer));
+        $cleanup = 'rm -f -- ' . escapeshellarg($archive) . ' ' . escapeshellarg($script);
+        $body = "#!/bin/sh\nset -eu\ntrap " . escapeshellarg($cleanup) . " EXIT\n" . $command . "\n";
+        $this->writeAtomicFile($script, $body, 0700);
+        $unit = 'kitsuneserv-bridge-update-' . preg_replace('/[^A-Za-z0-9]/', '-', $candidate) . '-' . bin2hex(random_bytes(3));
+        $scheduled = $this->run(['systemd-run', '--unit=' . $unit, '--on-active=10s', '--collect', $script], null, [], false);
+        if ($scheduled['code'] !== 0) { @unlink($script); @unlink($archive); throw new RuntimeException('Could not schedule the Plesk extension update: ' . trim($scheduled['stderr'] ?: $scheduled['stdout'])); }
+        $this->state['extensionUpdate'] = ['status' => 'scheduled', 'current' => KITSUNESERV_BRIDGE_EXECUTOR_RELEASE, 'candidate' => $candidate, 'checkedAt' => gmdate('c'), 'unit' => $unit];
+        $this->log('Zaplanowano automatyczną aktualizację Plesk Bridge do ' . $candidate . '.');
+    }
+
+    private function createExtensionArchive($source, $archive)
+    {
+        if (is_file($archive)) @unlink($archive);
+        $zip = new ZipArchive();
+        if ($zip->open($archive, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) throw new RuntimeException('Could not create the extension update archive.');
+        $sourceReal = realpath($source);
+        if ($sourceReal === false || !is_dir($sourceReal)) throw new RuntimeException('Extension update source does not exist.');
+        try {
+            $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($sourceReal, FilesystemIterator::SKIP_DOTS));
+            foreach ($iterator as $item) {
+                if ($item->isLink()) throw new RuntimeException('Extension source cannot contain symbolic links.');
+                if (!$item->isFile()) continue;
+                $file = $item->getRealPath();
+                if ($file === false || strpos($file, $sourceReal . DIRECTORY_SEPARATOR) !== 0) throw new RuntimeException('Extension archive path escaped its source.');
+                $relative = str_replace(DIRECTORY_SEPARATOR, '/', substr($file, strlen($sourceReal) + 1));
+                if (!$zip->addFile($file, $relative)) throw new RuntimeException('Could not add extension file: ' . $relative);
+            }
+            $icon = $this->config['repository_path'] . '/assets/icon.png';
+            if (is_file($icon)) { $zip->addFile($icon, 'htdocs/images/icon.png'); $zip->addFile($icon, '_meta/icons/64x64.png'); }
+        } finally { $zip->close(); }
+        if (!is_file($archive) || filesize($archive) < 1024) throw new RuntimeException('Created extension update archive is empty.');
+        @chmod($archive, 0600);
+    }
+
+    private function extensionInstallerCommand($archive)
+    {
+        if (is_executable('/usr/local/psa/bin/extension')) return ['/usr/local/psa/bin/extension', '--install', $archive];
+        if (is_executable('/usr/sbin/plesk')) return ['/usr/sbin/plesk', 'bin', 'extension', '--install', $archive];
+        throw new RuntimeException('Plesk extension CLI was not found.');
+    }
+
     private function runGit(array $command, $throw = true)
     {
         $environment = ['GIT_TERMINAL_PROMPT' => '0'];
@@ -690,7 +769,7 @@ final class KitsuneServBridgeManager
 
     private function readState()
     {
-        $empty = ['updatedAt' => null, 'lastOperation' => null, 'lastSuccess' => null, 'lastError' => null, 'repository' => [], 'runtime' => [], 'deployment' => [], 'service' => [], 'proxy' => [], 'log' => []];
+        $empty = ['updatedAt' => null, 'lastOperation' => null, 'lastSuccess' => null, 'lastError' => null, 'repository' => [], 'runtime' => [], 'deployment' => [], 'service' => [], 'proxy' => [], 'extensionUpdate' => ['status' => 'never-checked', 'current' => KITSUNESERV_BRIDGE_EXECUTOR_RELEASE, 'candidate' => null, 'checkedAt' => null], 'log' => []];
         if (!is_file($this->statePath)) return $empty;
         $decoded = json_decode((string) file_get_contents($this->statePath), true);
         return is_array($decoded) ? array_replace_recursive($empty, $decoded) : $empty;
@@ -719,7 +798,7 @@ final class KitsuneServBridgeManager
 
 function kitsuneConfigPath(array $arguments)
 {
-    if (count($arguments) !== 3 || $arguments[1] !== '--config') throw new RuntimeException('Usage: kitsuneserv-bridge-r11 --config /secure/operation.json');
+    if (count($arguments) !== 3 || $arguments[1] !== '--config') throw new RuntimeException('Usage: kitsuneserv-bridge-r12 --config /secure/operation.json');
     return (string) $arguments[2];
 }
 

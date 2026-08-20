@@ -2223,7 +2223,8 @@ async function refreshStatuses() {
     const profile = getActiveProfile(section);
     if (profile) {
       const dlKey = resolveDownloadKey(profile, section);
-      installChecks[section] = await api.download.isInstalled(dlKey, profile.version);
+      try { installChecks[section] = Boolean(await api.download.isInstalled(dlKey, profile.version)); }
+      catch { installChecks[section] = false; }
     } else {
       installChecks[section] = false;
     }
@@ -2776,7 +2777,9 @@ function renderTestLabs() {
     const running = lab.status === 'running'; const ready = Boolean(lab.provisionedAt);
     const icon = lab.kind === 'wordpress' ? 'ⓦ' : lab.recipeId === 'compose-stack' ? '🐳' : '⚡';
     const components = lab.kind === 'wordpress' ? [lab.wordpress.webService, lab.wordpress.databaseService, ...(lab.pluginPaths || []).map(value => `🧩 ${value.split(/[\\/]/).pop()}`)] : [...(lab.services || []), `127.0.0.1:${lab.port}`];
-    return `<article class="lab-card" data-lab-id="${escapeHtml(lab.id)}"><div class="lab-card-head"><div class="lab-card-title"><span>${icon}</span><div><h3>${escapeHtml(lab.name)}</h3><p>${escapeHtml(recipe?.name || lab.recipeId)}</p></div></div><span class="workspace-state ${running ? 'running' : ready ? 'completed' : 'stopped'}">${escapeHtml(states[lab.status] || lab.status)}</span></div><div class="lab-card-meta">${components.map(value => `<span class="workspace-chip">${escapeHtml(LAB_SERVICE_NAMES[value] || value)}</span>`).join('')}</div><div class="lab-card-path" title="${escapeHtml(lab.root || lab.url)}">${escapeHtml(lab.root || lab.url || 'Środowisko zarządzane przez KitsuneServ')}</div>${lab.lastError ? `<div class="db-error">${escapeHtml(lab.lastError)}</div>` : ''}<div class="lab-progress form-help"></div>${lab.output ? `<pre class="lab-output">${escapeHtml(lab.output)}</pre>` : ''}<div class="lab-card-actions">${!ready ? '<button class="btn btn-primary lab-provision">⚙ Przygotuj</button>' : ''}${running ? '<button class="btn lab-stop">⏹ Zatrzymaj</button>' : '<button class="btn btn-primary lab-start">▶ Uruchom</button>'}<button class="btn lab-health">🩺 Test</button><button class="btn lab-open" ${!lab.url ? 'disabled' : ''}>🌐 Otwórz</button><button class="btn lab-edit" ${running ? 'disabled' : ''}>✎ Diagram</button><button class="btn btn-danger lab-delete">🗑</button></div></article>`;
+    const endpoint = lab.url || (lab.port ? `http://127.0.0.1:${lab.port}${lab.healthPath || '/'}` : '—');
+    const envKeys = Object.keys(lab.env || {}); const runtimeCommand = lab.command || (lab.kind === 'wordpress' ? 'Zarządzany przez serwer WWW' : '—');
+    return `<article class="lab-card" data-lab-id="${escapeHtml(lab.id)}"><div class="lab-card-head"><div class="lab-card-title"><span>${icon}</span><div><h3>${escapeHtml(lab.name)}</h3><p>${escapeHtml(recipe?.name || lab.recipeId)}</p></div></div><span class="workspace-state ${running ? 'running' : ready ? 'completed' : 'stopped'}">${escapeHtml(states[lab.status] || lab.status)}</span></div><div class="lab-card-meta">${components.map(value => `<span class="workspace-chip">${escapeHtml(LAB_SERVICE_NAMES[value] || value)}</span>`).join('')}</div><div class="lab-card-path" title="${escapeHtml(lab.root || lab.url)}">${escapeHtml(lab.root || lab.url || 'Środowisko zarządzane przez KitsuneServ')}</div><div class="lab-access"><div class="lab-access-row"><span>Endpoint</span><code title="${escapeHtml(endpoint)}">${escapeHtml(endpoint)}</code><button class="lab-copy-value" data-copy="${escapeHtml(endpoint)}" title="Kopiuj endpoint">⧉</button></div><div class="lab-access-row"><span>PORT</span><code>${lab.port || 'zarządzany'}</code><small>generowany przez Lab</small></div><div class="lab-access-row"><span>Polecenie</span><code title="${escapeHtml(runtimeCommand)}">${escapeHtml(runtimeCommand)}</code><small>blueprint</small></div><div class="lab-access-row"><span>ENV</span><code>${escapeHtml(envKeys.join(', ') || 'brak własnych')}</code><small>wartości z blueprintu</small></div></div><div class="lab-value-help">Kod odczytuje port przez <code>PORT</code> (np. <code>process.env.PORT</code> lub <code>os.getenv('PORT')</code>). Własne zmienne są przekazywane do procesu przy starcie.</div>${lab.lastError ? `<div class="db-error">${escapeHtml(lab.lastError)}</div>` : ''}<div class="lab-progress form-help"></div>${lab.output ? `<pre class="lab-output">${escapeHtml(lab.output)}</pre>` : ''}<div class="lab-card-actions">${!ready ? '<button class="btn btn-primary lab-provision">⚙ Przygotuj</button>' : ''}${running ? '<button class="btn lab-stop">⏹ Zatrzymaj</button>' : '<button class="btn btn-primary lab-start">▶ Uruchom</button>'}<button class="btn lab-health">🩺 Test</button><button class="btn lab-open" ${!lab.url ? 'disabled' : ''}>🌐 Otwórz</button><button class="btn lab-publish" ${!lab.url ? 'disabled' : ''}>↗ Domena</button><button class="btn lab-edit" ${running ? 'disabled' : ''}>✎ Diagram</button><button class="btn btn-danger lab-delete">🗑</button></div></article>`;
   }).join('');
   grid.querySelectorAll('[data-lab-id]').forEach(bindTestLabCard);
 }
@@ -2794,6 +2797,14 @@ function bindTestLabCard(card) {
   card.querySelector('.lab-stop')?.addEventListener('click', event => run(event.currentTarget, () => api.lab.stop(id)));
   card.querySelector('.lab-health')?.addEventListener('click', async () => { const result = await api.lab.health(id); showToast(result.healthy ? `Działa · HTTP ${result.statusCode || 'OK'} · ${result.responseTime} ms` : result.error || 'Brak odpowiedzi', result.healthy ? 'success' : 'error'); });
   card.querySelector('.lab-open')?.addEventListener('click', () => lab.url && api.shell.openExternal(lab.kind === 'wordpress' ? `${lab.url.replace(/\/?$/, '/')}wp-admin/` : lab.url));
+  card.querySelector('.lab-copy-value')?.addEventListener('click', event => navigator.clipboard.writeText(event.currentTarget.dataset.copy).then(() => showToast('Endpoint skopiowany', 'success')));
+  card.querySelector('.lab-publish')?.addEventListener('click', async () => {
+    if (!lab.url || !api.hub?.saveRoute) return;
+    const suggested = `lab-${lab.slug || lab.id}`; const hostname = prompt('Publiczna domena Labu (musi być bezpośrednią subdomeną domeny Huba):', suggested);
+    if (!hostname) return;
+    try { const route = await api.hub.saveRoute({ name: lab.name, slug: lab.slug, kind: 'lab', resourceId: lab.id, hostname: hostname.includes('.') ? hostname : undefined, target: lab.url, authPolicy: 'public', websocket: true }); showToast(`Opublikowano: https://${route.hostname}`, 'success'); }
+    catch (error) { showToast(`${error.message}. Skonfiguruj domenę bazową w Hub & Servers; Plesk Bridge utworzy reverse proxy przy wdrożeniu.`, 'error'); }
+  });
   card.querySelector('.lab-edit')?.addEventListener('click', () => openTestLabEditor(lab));
   card.querySelector('.lab-delete')?.addEventListener('click', async () => { if (!confirm(`Usunąć Lab „${lab.name}”? Kod źródłowy pozostanie nietknięty.`)) return; const deleteInstance = lab.kind === 'wordpress' && confirm('Usunąć także zarządzaną kopię WordPress i bazę testową? Pluginy źródłowe pozostaną.'); const result = await api.lab.remove(id, { deleteInstance }); showToast(result.success ? 'Lab usunięty' : result.error, result.success ? 'success' : 'error'); await refreshTestLabs(); });
 }
@@ -3082,6 +3093,7 @@ function initApiFlowBuilder() {
   document.getElementById('api-flow-new')?.addEventListener('click', newApiFlowProject);
   document.getElementById('api-flow-save')?.addEventListener('click', saveAndRestartApiFlow);
   document.getElementById('api-flow-toggle')?.addEventListener('click', toggleApiFlowServer);
+  document.getElementById('api-flow-publish')?.addEventListener('click', publishApiFlowDomain);
   document.getElementById('api-flow-delete')?.addEventListener('click', deleteApiFlowProject);
   document.getElementById('api-flow-add-endpoint')?.addEventListener('click', addApiFlowEndpoint);
   document.getElementById('api-flow-remove-endpoint')?.addEventListener('click', removeApiFlowEndpoint);
@@ -5741,6 +5753,8 @@ function initRemoteAccess() {
   document.getElementById('fm-remote-up').addEventListener('click', () => remoteState.remote?.parent && loadRemoteFiles(remoteState.remote.parent));
   document.getElementById('fm-upload').addEventListener('click', () => transferSelected('upload'));
   document.getElementById('fm-download').addEventListener('click', () => transferSelected('download'));
+  bindFilePaneDrop('local');
+  bindFilePaneDrop('remote');
   document.getElementById('fm-server-transfer').addEventListener('click', transferServerToServer);
   document.getElementById('fm-mkdir').addEventListener('click', () => mutateSelected('mkdir'));
   document.getElementById('fm-rename').addEventListener('click', () => mutateSelected('rename'));
@@ -5843,7 +5857,21 @@ async function selectRemoteSession(id) {
   remoteState.cloudActive = null;
   remoteState.remote = null; remoteState.selectedRemote = null;
   await loadRemoteSessions();
+  const hint = document.getElementById('fm-transfer-hint'); if (hint) hint.textContent = remoteState.active ? `${remoteState.active.name} · przeciągnij pliki między kolumnami` : 'Wybierz połączenie po prawej';
   if (remoteState.active) await loadRemoteFiles(remoteState.active.remotePath || '/');
+}
+
+async function publishApiFlowDomain() {
+  let project = apiFlowState.project; if (!project || !api.hub?.saveRoute) return;
+  try {
+    if (apiFlowState.dirty || !apiFlowState.projects.some(item => item.id === project.id)) project = await saveApiFlowProject(true);
+    if (!project) return;
+    if (!project.running) { await api.apiFlow.start(project.id); project = await api.apiFlow.get(project.id); apiFlowState.project = structuredClone(project); }
+    const hostname = prompt('Publiczna domena API, np. api.serv.kitsune.website (bez https://):', ''); if (!hostname) return;
+    const normalized = hostname.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+    const route = await api.hub.saveRoute({ name: project.name, kind: 'api-flow', resourceId: project.id, hostname: normalized, target: project.url || `http://127.0.0.1:${project.port}`, authPolicy: 'public', websocket: false });
+    showToast(`API opublikowane: https://${route.hostname}${project.basePath || '/api'}`, 'success'); await refreshApiFlowRuntimeStatus();
+  } catch (error) { showToast(`${error.message}. Domena musi być bezpośrednią subdomeną domeny bazowej Huba; Plesk Bridge zastosuje vhost proxy przy redeployu.`, 'error'); }
 }
 
 async function selectStorageProfile(id) { remoteState.cloudActive = remoteState.storageProfiles.find(item => item.id === id) || null; remoteState.active = null; remoteState.remote = null; remoteState.selectedRemote = null; renderRemoteSessions(); renderStorageSessions(); if (remoteState.cloudActive) await loadRemoteFiles(remoteState.cloudActive.rootPath || ''); }
@@ -5861,6 +5889,8 @@ function renderFileList(kind, listing) {
   for (const entry of listing.entries) {
     const row = document.createElement('div');
     row.className = 'file-row';
+    row.draggable = true;
+    row.dataset.filePath = entry.path;
     row.innerHTML = `<span>${entry.directory ? '📁' : '📄'} ${escapeHtml(entry.name)}</span><span>${entry.directory ? 'DIR' : formatFileSize(entry.size)}</span><span>${entry.modifiedAt ? new Date(entry.modifiedAt).toLocaleString() : ''}</span>`;
     row.addEventListener('click', () => {
       list.querySelectorAll('.selected').forEach(item => item.classList.remove('selected'));
@@ -5870,9 +5900,35 @@ function renderFileList(kind, listing) {
       document.getElementById('fm-download').disabled = !connected || !remoteState.selectedRemote;
     });
     row.addEventListener('dblclick', () => entry.directory && (kind === 'local' ? loadLocalFiles(entry.path) : loadRemoteFiles(entry.path)));
+    row.addEventListener('dragstart', event => {
+      remoteState[kind === 'local' ? 'selectedLocal' : 'selectedRemote'] = entry; remoteState.lastSide = kind;
+      row.classList.add('dragging'); event.dataTransfer.effectAllowed = 'copy';
+      event.dataTransfer.setData('application/x-kitsuneserv-file', JSON.stringify({ kind, path: entry.path }));
+      event.dataTransfer.setData('text/plain', entry.path);
+    });
+    row.addEventListener('dragend', () => row.classList.remove('dragging'));
     list.appendChild(row);
   }
   if (!listing.entries.length) list.innerHTML = '<div class="file-empty">This directory is empty</div>';
+}
+
+function bindFilePaneDrop(targetKind) {
+  const pane = document.getElementById(`fm-${targetKind}-list`)?.closest('.file-pane'); if (!pane) return;
+  pane.addEventListener('dragover', event => {
+    if (!event.dataTransfer.types.includes('application/x-kitsuneserv-file')) return;
+    event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; pane.classList.add('drag-target');
+  });
+  pane.addEventListener('dragleave', event => { if (!pane.contains(event.relatedTarget)) pane.classList.remove('drag-target'); });
+  pane.addEventListener('drop', async event => {
+    event.preventDefault(); pane.classList.remove('drag-target');
+    let payload; try { payload = JSON.parse(event.dataTransfer.getData('application/x-kitsuneserv-file')); } catch { return; }
+    if (!payload || payload.kind === targetKind) return;
+    if (!remoteState.active && !remoteState.cloudActive) return showToast('Najpierw wybierz serwer SFTP lub magazyn', 'warning');
+    const listing = payload.kind === 'local' ? remoteState.local : remoteState.remote;
+    const source = listing?.entries?.find(item => item.path === payload.path);
+    if (!source) return showToast('Źródło nie jest już dostępne — odśwież widok', 'warning');
+    await transferSelected(payload.kind === 'local' ? 'upload' : 'download', source);
+  });
 }
 
 async function loadLocalFiles(directory) {
@@ -5892,9 +5948,9 @@ async function loadRemoteFiles(directory) {
   } catch (error) { status.textContent = `Connection failed · ${error.message}`; showToast(error.message, 'error'); }
 }
 
-async function transferSelected(direction) {
+async function transferSelected(direction, draggedSource = null) {
   if ((!remoteState.active && !remoteState.cloudActive) || !remoteState.local || !remoteState.remote) return;
-  const source = direction === 'upload' ? remoteState.selectedLocal : remoteState.selectedRemote;
+  const source = draggedSource || (direction === 'upload' ? remoteState.selectedLocal : remoteState.selectedRemote);
   if (!source) return;
   const separator = remoteState.local.path.includes('\\') ? '\\' : '/';
   const localPath = direction === 'upload' ? source.path : `${remoteState.local.path}${separator}${source.name}`;
@@ -6111,6 +6167,8 @@ function opsPromptSession(message = 'Choose a server first') { const session = o
 function initOperationsCenter() {
   if (!api.advanced) return;
   document.getElementById('ops-refresh')?.addEventListener('click', refreshOperationsCenter);
+  document.querySelectorAll('[data-ops-section]').forEach(button => button.addEventListener('click', () => setOperationsSection(button.dataset.opsSection)));
+  document.getElementById('ops-server-select')?.addEventListener('change', updateOperationsContext);
   document.querySelectorAll('[data-ops]').forEach(button => button.addEventListener('click', () => runOperationsAction(button.dataset.ops)));
   document.querySelectorAll('[data-vision-tab]').forEach(button => button.addEventListener('click', () => selectVisionTab(button.dataset.visionTab)));
   document.querySelectorAll('[data-vision]').forEach(button => button.addEventListener('click', () => selectVisionFeature(button.dataset.vision)));
@@ -6124,11 +6182,35 @@ function initOperationsCenter() {
   document.querySelectorAll('[data-deep-mode]').forEach(button => button.addEventListener('click', () => switchTerminalFileDeepMode(button.dataset.deepMode)));
   document.querySelectorAll('[data-deep-tool]').forEach(button => button.addEventListener('click', () => runTerminalFileDeepTool(button.dataset.deepTool, button)));
   document.getElementById('ops-command-query')?.addEventListener('keydown', event => { if (event.key === 'Enter') runOperationsAction('command-run'); });
+  setOperationsSection('start');
+}
+
+function updateOperationsContext() {
+  const session = opsSession(); const label = document.getElementById('ops-context-state');
+  if (label) label.textContent = session ? `${session.production ? '◆ Produkcja · ' : ''}${session.name} · ${session.host}` : 'Brak wybranego serwera';
+}
+
+function setOperationsSection(section) {
+  document.querySelectorAll('[data-ops-section]').forEach(button => button.classList.toggle('active', button.dataset.opsSection === section));
+  const deck = document.querySelector('#panel-operations-center .tf-deck');
+  const grid = document.querySelector('#panel-operations-center .ops-center-grid');
+  if (deck) deck.classList.toggle('hidden', !['start', 'sessions', 'advanced'].includes(section));
+  if (grid) {
+    grid.classList.toggle('hidden', section === 'sessions');
+    const groups = {
+      start: null,
+      safety: /safety|state|time machine|incident|polic|zero-trust|resilience|compliance|disaster|evidence/i,
+      automation: /automation|runbook|release|network|configuration|gitops|canary|fleet|observability|database/i,
+      advanced: /intelligence|replay|copilot|laborator|digital twin|chaos|advanced|terminal/i
+    };
+    grid.querySelectorAll(':scope > article').forEach(card => { const filter = groups[section]; card.classList.toggle('hidden', Boolean(filter && !filter.test(card.textContent))); });
+  }
 }
 
 async function refreshOperationsCenter() {
   if (!api.advanced) return; if (!remoteState.sessions.length) await loadRemoteSessions();
   const select = document.getElementById('ops-server-select'); if (!select) return; const selected = select.value; select.innerHTML = '<option value="">Choose server…</option>'; for (const session of remoteState.sessions.filter(item => ['ssh', 'sftp'].includes(item.type))) { const option = document.createElement('option'); option.value = session.id; option.textContent = `${session.production ? '◆ ' : ''}${session.name} · ${session.host}`; select.appendChild(option); } select.value = selected || remoteState.active?.id || '';
+  updateOperationsContext();
   const [graph, incidents, commands, workspaces, capabilities, fabric, enterprise, nextgen, opsWorkspace, terminalFilePro, terminalFileVision, terminalFileRuntime, terminalFileDeep] = await Promise.all([api.advanced.graph(), api.incident.list(), api.advanced.commands(), api.advanced.workspaces(), api.resilience.capabilities(), api.fabric.summary(), api.enterprise?.summary?.() || {}, api.nextgen?.summary?.() || {}, api.opsWorkspace?.summary?.() || {}, api.terminalFilePro?.summary?.() || {}, api.terminalFileVision?.summary?.() || {}, api.terminalFileRuntime?.summary?.() || {}, api.terminalFileDeep?.summary?.() || {}]); operationsState.graph = graph; operationsState.incidents = incidents; operationsState.commands = commands; operationsState.workspaces = workspaces; operationsState.fabric = fabric; operationsState.enterprise = enterprise; operationsState.nextgen = nextgen; operationsState.opsWorkspace = opsWorkspace; operationsState.terminalFilePro = terminalFilePro; operationsState.terminalFileVision = terminalFileVision; operationsState.terminalFileRuntime = terminalFileRuntime; operationsState.terminalFileDeep = terminalFileDeep;
   document.getElementById('ops-summary').innerHTML = `<span>${graph.nodes.length} nodes</span><span>${graph.edges.length} relations</span><span>${incidents.filter(item => item.status !== 'resolved').length} active incident(s)</span><span>${fabric.policies} access policies</span><span>${fabric.activeGrants} active grant(s)</span><span>${enterprise.agents || 0} agent(s)</span><span>${nextgen.relayNodes || 0} relay node(s)</span><span>${nextgen.frozenRoots || 0} guarded root(s)</span><span>${opsWorkspace.workspaces || 0} universal workspace(s)</span><span>${opsWorkspace.undoableEvents || 0} undoable action(s)</span><span>${terminalFilePro.notebooks || 0} notebook(s)</span><span>${terminalFilePro.encryptedIndexes || 0} encrypted index(es)</span><span>${terminalFilePro.pendingAirDrops || 0} pending AirDrop(s)</span><span>Mosh ${capabilities.mosh ? 'ready' : 'not installed'}</span>`; renderOperationsGraph();
   const visionSummary = document.getElementById('tf-vision-summary'); if (visionSummary) visionSummary.querySelector('span').textContent = `${terminalFileVision.features || 89} capabilities · ${terminalFileVision.runbooks || 0} runbooks · ${terminalFileVision.activeLeases || 0} active leases`;

@@ -2,7 +2,7 @@
 
 class Modules_KitsuneservBridge_Config
 {
-    public const EXTENSION_VERSION = '3.0.0-r11';
+    public const EXTENSION_VERSION = '3.1.0-r12';
 
     private const SECRET_FIELDS = [
         'git_token' => 'secret_git_token',
@@ -122,6 +122,7 @@ class Modules_KitsuneservBridge_Config
             'deployment' => ['version' => null, 'commit' => null, 'path' => null, 'deployedAt' => null],
             'service' => ['installed' => false, 'active' => false, 'enabled' => false, 'health' => null, 'pid' => null],
             'proxy' => ['mode' => null, 'domain' => null, 'configuredAt' => null, 'path' => null],
+            'extensionUpdate' => ['status' => 'never-checked', 'current' => self::EXTENSION_VERSION, 'candidate' => null, 'checkedAt' => null],
             'log' => [],
         ];
         $path = pm_Context::getVarDir() . '/state.json';

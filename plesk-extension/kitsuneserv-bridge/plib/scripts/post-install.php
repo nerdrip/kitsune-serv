@@ -15,10 +15,10 @@ foreach (['node_binary' => '/usr/bin/node', 'npm_binary' => '/usr/bin/npm'] as $
 }
 
 try {
-    $selfCheck = pm_ApiCli::callSbin('kitsuneserv-bridge-r11', ['--self-check'], pm_ApiCli::RESULT_FULL);
+    $selfCheck = pm_ApiCli::callSbin('kitsuneserv-bridge-r12', ['--self-check'], pm_ApiCli::RESULT_FULL);
 } catch (Throwable $exception) {
-    throw new RuntimeException('Nie udało się uruchomić uprzywilejowanego executora KitsuneServ Bridge r11 przez Plesk.', 0, $exception);
+    throw new RuntimeException('Nie udało się uruchomić uprzywilejowanego executora KitsuneServ Bridge r12 przez Plesk.', 0, $exception);
 }
-if ((int) ($selfCheck['code'] ?? 1) !== 0 || trim((string) ($selfCheck['stdout'] ?? '')) !== '3.0.0-r11') {
-    throw new RuntimeException('Executor KitsuneServ Bridge r11 nie przeszedł kontroli wersji przez Plesk.');
+if ((int) ($selfCheck['code'] ?? 1) !== 0 || trim((string) ($selfCheck['stdout'] ?? '')) !== '3.1.0-r12') {
+    throw new RuntimeException('Executor KitsuneServ Bridge r12 nie przeszedł kontroli wersji przez Plesk.');
 }
