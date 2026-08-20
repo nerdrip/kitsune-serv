@@ -28,3 +28,8 @@ test('Hub UI renders independent local and remote status and responsive guidance
   for (const marker of ['hub-local-config-status', 'hub-remote-summary', "selectHubTab('connections')", 'Ustawienia tego Huba zapisane']) assert.ok(app.includes(marker), `missing UI state: ${marker}`);
   for (const marker of ['.hub-context-banner', '.hub-connection-flow', '.hub-settings-next', '.hub-remote-form']) assert.ok(styles.includes(marker), `missing Hub UI style: ${marker}`);
 });
+
+test('Test Lab and API publication use domains synchronized from the Plesk bridge', () => {
+  for (const marker of ['chooseHubPublicationDomain', 'inventory?.apiDomains', 'publish-domain-overlay', 'dodaniu domeny w Plesk Bridge']) assert.ok(app.includes(marker), `missing publication flow: ${marker}`);
+  for (const marker of ['.publish-domain-overlay', '.publish-domain-dialog', '.publish-domain-warning']) assert.ok(styles.includes(marker), `missing publication style: ${marker}`);
+});

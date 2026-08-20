@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.1.1-13
+
+- Added explicit Hub/API domain selection with one Plesk-managed reverse-proxy hook for Hub, Test Lab and API Flow hostnames.
+- Replaced direct `vhost_nginx.conf` writes with `pm_Hook_WebServer` and Plesk domain reconfiguration.
+- Reworked the overview into accurate configuration, deployment, service-health and update states with a guided setup checklist.
+- Added manual Bridge update checks and upgrades; automatic upgrades now use the Plesk CLI upgrade operation.
+- Published selected API domains in paired-node inventory for the KitsuneServ publication dialog.
+
 ## 3.1.0-12
 
 - Added automatic Plesk Bridge self-updates after repository synchronization and managed deployment. A newer extension from the verified checkout is packaged locally and installed through the Plesk CLI after the active long task completes.

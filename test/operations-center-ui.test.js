@@ -28,4 +28,10 @@ test('Operations Center exposes the advanced safety, incident and resilience sur
   assert.match(html, /@xterm\/addon-image\/lib\/addon-image\.js/); assert.match(app, /registerOscHandler\(52/); assert.match(app, /new ImageAddon\.ImageAddon/);
   assert.match(html, /kitty-graphics\.js/); assert.match(app, /KittyGraphicsRenderer/); assert.match(app, /winfsp-install/); assert.match(app, /index-directory/);
   assert.match(html, /id="fm-command-deck"/); assert.match(html, /id="btn-terminal-command-deck"/); assert.match(app, /selectVisionTab\('workspace'\)/); assert.match(app, /selectVisionTab\('intelligence'\)/);
+  assert.match(html, /id="ops-overview"/);
+  for (const section of ['start', 'sessions', 'safety', 'automation', 'advanced']) assert.match(html, new RegExp(`data-ops-section="${section}"`));
+  assert.match(app, /panel\.dataset\.opsSection = section/);
+  assert.match(app, /#ops-section-tabs \[data-ops-section\]/);
+  assert.match(app, /overview\.classList\.toggle\('hidden', section !== 'start'\)/);
+  assert.match(app, /deck\.classList\.toggle\('hidden', !\['sessions', 'advanced'\]\.includes\(section\)\)/);
 });

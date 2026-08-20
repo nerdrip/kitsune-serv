@@ -586,6 +586,7 @@ ipcMain.handle('download:remove', async (_event, service, version) => {
 });
 ipcMain.handle('app:getInfo', () => ({
   name: app.getName(), version: app.getVersion(), dataRoot: _appRoot, platform: process.platform, mode: 'desktop', safeMode: SAFE_MODE,
+  capabilities: { hostTerminal: true, remoteShell: true, hostFiles: true, remoteFiles: true, nativeLaunch: true, nativeDesktop: true },
   initialPanel: requestedPanel(), migration: configManager.getMigrationInfo(), recovery: projectManager?.getRecoveryReport()
 }));
 

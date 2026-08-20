@@ -97,6 +97,7 @@ contextBridge.exposeInMainWorld('kitsuneAPI', {
   },
   terminal: {
     create: (connection) => ipcRenderer.invoke('terminal:create', connection),
+    attach: () => Promise.resolve({ success: true, data: '' }),
     profiles: () => ipcRenderer.invoke('terminal:profiles'),
     write: (id, data) => ipcRenderer.invoke('terminal:write', id, data),
     kill: (id) => ipcRenderer.invoke('terminal:kill', id),

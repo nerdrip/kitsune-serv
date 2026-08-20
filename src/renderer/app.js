@@ -51,6 +51,7 @@ let diskUsageMap = {};
 let runtimePlatform = 'unknown';
 let runtimeMode = window.__KITSUNE_WEB_MODE__ ? 'server' : 'desktop';
 let runtimeSafeMode = false;
+let runtimeCapabilities = {};
 let startupPanel = '';
 const DB_SECTIONS = ['postgresql', 'mysql', 'mariadb', 'mongodb'];
 const dbState = {}; // { section: { currentDb, currentTable, loaded } }
@@ -70,6 +71,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const info = await api.app.getInfo();
     runtimePlatform = info.platform || 'unknown';
     runtimeMode = info.mode || runtimeMode;
+    runtimeCapabilities = info.capabilities || {};
     runtimeSafeMode = Boolean(info.safeMode);
     startupPanel = info.initialPanel || '';
     const versionLabel = document.querySelector('.titlebar-version');
@@ -198,6 +200,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
   });
+  document.documentElement.dataset.kitsuneReady = 'true';
 });
 
 /* ===== Window Controls ===== */
@@ -339,6 +342,12 @@ function applyPlatformLabels() {
       const control = document.getElementById(id);
       control?.closest('.form-group')?.classList.add('hidden');
     }
+    for (const id of ['fm-open-winscp', 'workspace-open-putty', 'workspace-open-winscp', 'workspace-mount-sftp', 'workspace-open-rdp', 'workspace-open-vnc']) document.getElementById(id)?.classList.add('hidden');
+    document.querySelectorAll('#remote-session-type option').forEach(option => option.hidden = !['ssh', 'sftp'].includes(option.value));
+    const fileSubtitle = document.getElementById('file-manager-subtitle'); if (fileSubtitle) fileSubtitle.textContent = 'Pliki hosta KitsuneServ i zdalne SFTP — wszystkie operacje wykonuje serwer';
+    const localLabel = document.getElementById('fm-local-label'); if (localLabel) localLabel.textContent = 'HOST KITSUNESERV';
+    const terminalButton = document.getElementById('btn-new-terminal'); if (terminalButton) terminalButton.textContent = '+ Terminal hosta';
+    const terminalEmpty = document.querySelector('#terminal-empty .terminal-empty-text'); if (terminalEmpty) terminalEmpty.textContent = 'Kliknij „Terminal hosta”, aby otworzyć powłokę na serwerze KitsuneServ';
   }
 }
 
@@ -2800,10 +2809,8 @@ function bindTestLabCard(card) {
   card.querySelector('.lab-copy-value')?.addEventListener('click', event => navigator.clipboard.writeText(event.currentTarget.dataset.copy).then(() => showToast('Endpoint skopiowany', 'success')));
   card.querySelector('.lab-publish')?.addEventListener('click', async () => {
     if (!lab.url || !api.hub?.saveRoute) return;
-    const suggested = `lab-${lab.slug || lab.id}`; const hostname = prompt('Publiczna domena Labu (musi być bezpośrednią subdomeną domeny Huba):', suggested);
-    if (!hostname) return;
-    try { const route = await api.hub.saveRoute({ name: lab.name, slug: lab.slug, kind: 'lab', resourceId: lab.id, hostname: hostname.includes('.') ? hostname : undefined, target: lab.url, authPolicy: 'public', websocket: true }); showToast(`Opublikowano: https://${route.hostname}`, 'success'); }
-    catch (error) { showToast(`${error.message}. Skonfiguruj domenę bazową w Hub & Servers; Plesk Bridge utworzy reverse proxy przy wdrożeniu.`, 'error'); }
+    try { const hostname = await chooseHubPublicationDomain({ kind: 'Test Lab', name: lab.name, resourceId: lab.id, slug: `lab-${lab.slug || lab.id}` }); if (!hostname) return; const route = await api.hub.saveRoute({ name: lab.name, slug: lab.slug, kind: 'lab', resourceId: lab.id, hostname, target: lab.url, authPolicy: 'public', websocket: true }); showToast(`Opublikowano: https://${route.hostname}`, 'success'); }
+    catch (error) { showToast(`${error.message}. Skonfiguruj domenę w Hub & Servers oraz Plesk Bridge.`, 'error'); }
   });
   card.querySelector('.lab-edit')?.addEventListener('click', () => openTestLabEditor(lab));
   card.querySelector('.lab-delete')?.addEventListener('click', async () => { if (!confirm(`Usunąć Lab „${lab.name}”? Kod źródłowy pozostanie nietknięty.`)) return; const deleteInstance = lab.kind === 'wordpress' && confirm('Usunąć także zarządzaną kopię WordPress i bazę testową? Pluginy źródłowe pozostaną.'); const result = await api.lab.remove(id, { deleteInstance }); showToast(result.success ? 'Lab usunięty' : result.error, result.success ? 'success' : 'error'); await refreshTestLabs(); });
@@ -5620,7 +5627,7 @@ async function refreshPlatformInventory() {
 }
 
 /* ===== Remote access and SFTP file manager ===== */
-const remoteState = { sessions: [], storageProfiles: [], active: null, cloudActive: null, local: null, remote: null, selectedLocal: null, selectedRemote: null, lastSide: 'local', modalPurpose: 'files', transfers: [], editor: null, syncPreview: null };
+const remoteState = { sessions: [], storageProfiles: [], active: null, cloudActive: null, local: null, remote: null, selectedLocal: null, selectedRemote: null, draggedFile: null, lastSide: 'local', modalPurpose: 'files', transfers: [], editor: null, syncPreview: null };
 
 function remoteInput() {
   return {
@@ -5684,7 +5691,7 @@ function openStorageProfile(profile = {}) { document.getElementById('storage-pro
 function closeStorageProfile() { document.getElementById('storage-profile-modal').classList.add('hidden'); }
 
 function initRemoteAccess() {
-  document.getElementById('fm-command-deck')?.addEventListener('click', () => { switchToPanel('operations-center'); selectVisionTab('workspace'); document.querySelector('.tf-deck')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+  document.getElementById('fm-command-deck')?.addEventListener('click', () => { switchToPanel('operations-center'); setOperationsSection('advanced'); selectVisionTab('workspace'); document.querySelector('.tf-deck')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   const panel = document.getElementById('panel-file-manager');
   if (!panel) return;
   if (!api.remote || !api.files) {
@@ -5867,11 +5874,37 @@ async function publishApiFlowDomain() {
     if (apiFlowState.dirty || !apiFlowState.projects.some(item => item.id === project.id)) project = await saveApiFlowProject(true);
     if (!project) return;
     if (!project.running) { await api.apiFlow.start(project.id); project = await api.apiFlow.get(project.id); apiFlowState.project = structuredClone(project); }
-    const hostname = prompt('Publiczna domena API, np. api.serv.kitsune.website (bez https://):', ''); if (!hostname) return;
-    const normalized = hostname.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+    const normalized = await chooseHubPublicationDomain({ kind: 'API', name: project.name, resourceId: project.id, slug: `api-${project.slug || project.id}` }); if (!normalized) return;
     const route = await api.hub.saveRoute({ name: project.name, kind: 'api-flow', resourceId: project.id, hostname: normalized, target: project.url || `http://127.0.0.1:${project.port}`, authPolicy: 'public', websocket: false });
     showToast(`API opublikowane: https://${route.hostname}${project.basePath || '/api'}`, 'success'); await refreshApiFlowRuntimeStatus();
-  } catch (error) { showToast(`${error.message}. Domena musi być bezpośrednią subdomeną domeny bazowej Huba; Plesk Bridge zastosuje vhost proxy przy redeployu.`, 'error'); }
+  } catch (error) { showToast(`${error.message}. W Plesk Bridge zaznacz domenę API, zapisz ustawienia i zsynchronizuj węzeł.`, 'error'); }
+}
+
+async function chooseHubPublicationDomain({ kind, name, resourceId, slug }) {
+  const [status, nodes, routes] = await Promise.all([api.hub.status(), api.hub.nodes?.() || [], api.hub.routes?.() || []]);
+  const base = String(status.panelDomain || '').toLowerCase();
+  if (!base) throw new Error('Najpierw skonfiguruj domenę bazową w Hub & Servers');
+  const direct = value => value.endsWith(`.${base}`) && value.split('.').length === base.split('.').length + 1;
+  const occupied = new Set((routes || []).filter(route => route.resourceId !== resourceId).map(route => route.hostname));
+  const configured = [...new Set((nodes || []).filter(node => node.kind === 'plesk').flatMap(node => node.inventory?.apiDomains || []).map(value => String(value).toLowerCase()).filter(value => direct(value) && !occupied.has(value)))];
+  const label = String(slug || name || kind).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-|-$/g, '').slice(0, 63) || 'api';
+  const suggested = configured[0] || `${label}.${base}`;
+  return new Promise(resolve => {
+    const overlay = document.createElement('div'); overlay.className = 'publish-domain-overlay';
+    overlay.innerHTML = `<form class="publish-domain-dialog"><header><div><span>PUBLICZNY ADRES</span><h3>Opublikuj ${escapeHtml(kind)} „${escapeHtml(name)}”</h3><p>Gateway Huba skieruje tę domenę do uruchomionego procesu. HTTPS i reverse proxy zapewnia Plesk Bridge.</p></div><button type="button" data-domain-cancel aria-label="Zamknij">×</button></header>${configured.length ? `<label><span>Domena skonfigurowana w Plesk Bridge</span><select data-domain-select>${configured.map(value => `<option>${escapeHtml(value)}</option>`).join('')}</select><small>Lista pochodzi z ostatniej synchronizacji sparowanego węzła Plesk.</small></label>` : `<div class="publish-domain-warning"><strong>Brak zsynchronizowanej domeny API z Pleska</strong><span>Możesz przygotować trasę teraz, ale dostęp z internetu zacznie działać dopiero po dodaniu domeny w Plesk Bridge.</span></div>`}<label><span>Pełna nazwa domeny</span><input data-domain-input value="${escapeHtml(suggested)}" autocomplete="off" spellcheck="false"><small>Musi to być jedna bezpośrednia subdomena <code>${escapeHtml(base)}</code>.</small></label><footer><button type="button" class="btn" data-domain-cancel>Anuluj</button><button type="submit" class="btn btn-primary">Zapisz trasę</button></footer></form>`;
+    document.body.appendChild(overlay); const input = overlay.querySelector('[data-domain-input]'); const select = overlay.querySelector('[data-domain-select]');
+    select?.addEventListener('change', () => { input.value = select.value; });
+    const close = value => { overlay.remove(); resolve(value); };
+    overlay.querySelectorAll('[data-domain-cancel]').forEach(button => button.addEventListener('click', () => close('')));
+    overlay.addEventListener('click', event => { if (event.target === overlay) close(''); });
+    overlay.querySelector('form').addEventListener('submit', event => {
+      event.preventDefault(); const hostname = input.value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+      if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]*$/.test(hostname) || !direct(hostname)) { input.setCustomValidity(`Wpisz bezpośrednią subdomenę ${base}`); input.reportValidity(); return; }
+      if (occupied.has(hostname)) { input.setCustomValidity('Ta domena jest już używana przez inny zasób.'); input.reportValidity(); return; }
+      close(hostname);
+    });
+    input.addEventListener('input', () => input.setCustomValidity('')); input.focus(); input.select();
+  });
 }
 
 async function selectStorageProfile(id) { remoteState.cloudActive = remoteState.storageProfiles.find(item => item.id === id) || null; remoteState.active = null; remoteState.remote = null; remoteState.selectedRemote = null; renderRemoteSessions(); renderStorageSessions(); if (remoteState.cloudActive) await loadRemoteFiles(remoteState.cloudActive.rootPath || ''); }
@@ -5902,11 +5935,12 @@ function renderFileList(kind, listing) {
     row.addEventListener('dblclick', () => entry.directory && (kind === 'local' ? loadLocalFiles(entry.path) : loadRemoteFiles(entry.path)));
     row.addEventListener('dragstart', event => {
       remoteState[kind === 'local' ? 'selectedLocal' : 'selectedRemote'] = entry; remoteState.lastSide = kind;
+      remoteState.draggedFile = { kind, path: entry.path, entry };
       row.classList.add('dragging'); event.dataTransfer.effectAllowed = 'copy';
-      event.dataTransfer.setData('application/x-kitsuneserv-file', JSON.stringify({ kind, path: entry.path }));
-      event.dataTransfer.setData('text/plain', entry.path);
+      try { event.dataTransfer.setData('application/x-kitsuneserv-file', JSON.stringify({ kind, path: entry.path })); } catch {}
+      try { event.dataTransfer.setData('text/plain', entry.path); } catch {}
     });
-    row.addEventListener('dragend', () => row.classList.remove('dragging'));
+    row.addEventListener('dragend', () => { row.classList.remove('dragging'); remoteState.draggedFile = null; document.querySelectorAll('.file-pane.drag-target').forEach(value => value.classList.remove('drag-target')); });
     list.appendChild(row);
   }
   if (!listing.entries.length) list.innerHTML = '<div class="file-empty">This directory is empty</div>';
@@ -5915,17 +5949,20 @@ function renderFileList(kind, listing) {
 function bindFilePaneDrop(targetKind) {
   const pane = document.getElementById(`fm-${targetKind}-list`)?.closest('.file-pane'); if (!pane) return;
   pane.addEventListener('dragover', event => {
-    if (!event.dataTransfer.types.includes('application/x-kitsuneserv-file')) return;
+    const types = Array.from(event.dataTransfer?.types || []);
+    if (!remoteState.draggedFile && !types.includes('application/x-kitsuneserv-file')) return;
+    if (remoteState.draggedFile?.kind === targetKind) return;
     event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; pane.classList.add('drag-target');
   });
   pane.addEventListener('dragleave', event => { if (!pane.contains(event.relatedTarget)) pane.classList.remove('drag-target'); });
   pane.addEventListener('drop', async event => {
     event.preventDefault(); pane.classList.remove('drag-target');
-    let payload; try { payload = JSON.parse(event.dataTransfer.getData('application/x-kitsuneserv-file')); } catch { return; }
+    let payload = remoteState.draggedFile;
+    if (!payload) { try { payload = JSON.parse(event.dataTransfer.getData('application/x-kitsuneserv-file')); } catch { return; } }
     if (!payload || payload.kind === targetKind) return;
     if (!remoteState.active && !remoteState.cloudActive) return showToast('Najpierw wybierz serwer SFTP lub magazyn', 'warning');
     const listing = payload.kind === 'local' ? remoteState.local : remoteState.remote;
-    const source = listing?.entries?.find(item => item.path === payload.path);
+    const source = payload.entry || listing?.entries?.find(item => item.path === payload.path);
     if (!source) return showToast('Źródło nie jest już dostępne — odśwież widok', 'warning');
     await transferSelected(payload.kind === 'local' ? 'upload' : 'download', source);
   });
@@ -6168,6 +6205,8 @@ function initOperationsCenter() {
   if (!api.advanced) return;
   document.getElementById('ops-refresh')?.addEventListener('click', refreshOperationsCenter);
   document.querySelectorAll('[data-ops-section]').forEach(button => button.addEventListener('click', () => setOperationsSection(button.dataset.opsSection)));
+  document.querySelectorAll('[data-ops-section-jump]').forEach(button => button.addEventListener('click', () => setOperationsSection(button.dataset.opsSectionJump)));
+  document.querySelectorAll('[data-ops-nav]').forEach(button => button.addEventListener('click', () => switchToPanel(button.dataset.opsNav)));
   document.getElementById('ops-server-select')?.addEventListener('change', updateOperationsContext);
   document.querySelectorAll('[data-ops]').forEach(button => button.addEventListener('click', () => runOperationsAction(button.dataset.ops)));
   document.querySelectorAll('[data-vision-tab]').forEach(button => button.addEventListener('click', () => selectVisionTab(button.dataset.visionTab)));
@@ -6188,17 +6227,27 @@ function initOperationsCenter() {
 function updateOperationsContext() {
   const session = opsSession(); const label = document.getElementById('ops-context-state');
   if (label) label.textContent = session ? `${session.production ? '◆ Produkcja · ' : ''}${session.name} · ${session.host}` : 'Brak wybranego serwera';
+  const overview = document.getElementById('ops-overview-context');
+  if (overview) overview.textContent = session ? `${session.name} · ${session.host}` : 'Nie wybrano serwera';
 }
 
 function setOperationsSection(section) {
-  document.querySelectorAll('[data-ops-section]').forEach(button => button.classList.toggle('active', button.dataset.opsSection === section));
+  document.querySelectorAll('#ops-section-tabs [data-ops-section]').forEach(button => button.classList.toggle('active', button.dataset.opsSection === section));
   const deck = document.querySelector('#panel-operations-center .tf-deck');
   const grid = document.querySelector('#panel-operations-center .ops-center-grid');
-  if (deck) deck.classList.toggle('hidden', !['start', 'sessions', 'advanced'].includes(section));
+  const panel = document.getElementById('panel-operations-center');
+  const overview = document.getElementById('ops-overview');
+  const commandBar = panel?.querySelector('.ops-command-bar');
+  const summary = document.getElementById('ops-summary');
+  if (panel) panel.dataset.opsSection = section;
+  if (overview) overview.classList.toggle('hidden', section !== 'start');
+  if (commandBar) commandBar.classList.toggle('hidden', !['sessions', 'automation'].includes(section));
+  if (summary) summary.classList.toggle('hidden', section === 'sessions' || section === 'advanced');
+  if (deck) deck.classList.toggle('hidden', !['sessions', 'advanced'].includes(section));
   if (grid) {
-    grid.classList.toggle('hidden', section === 'sessions');
+    grid.classList.toggle('hidden', section === 'sessions' || section === 'advanced');
     const groups = {
-      start: null,
+      start: /connection graph|incident|service health/i,
       safety: /safety|state|time machine|incident|polic|zero-trust|resilience|compliance|disaster|evidence/i,
       automation: /automation|runbook|release|network|configuration|gitops|canary|fleet|observability|database/i,
       advanced: /intelligence|replay|copilot|laborator|digital twin|chaos|advanced|terminal/i
@@ -6209,10 +6258,16 @@ function setOperationsSection(section) {
 
 async function refreshOperationsCenter() {
   if (!api.advanced) return; if (!remoteState.sessions.length) await loadRemoteSessions();
-  const select = document.getElementById('ops-server-select'); if (!select) return; const selected = select.value; select.innerHTML = '<option value="">Choose server…</option>'; for (const session of remoteState.sessions.filter(item => ['ssh', 'sftp'].includes(item.type))) { const option = document.createElement('option'); option.value = session.id; option.textContent = `${session.production ? '◆ ' : ''}${session.name} · ${session.host}`; select.appendChild(option); } select.value = selected || remoteState.active?.id || '';
+  const select = document.getElementById('ops-server-select'); if (!select) return; const selected = select.value; select.innerHTML = '<option value="">Wybierz serwer…</option>'; for (const session of remoteState.sessions.filter(item => ['ssh', 'sftp'].includes(item.type))) { const option = document.createElement('option'); option.value = session.id; option.textContent = `${session.production ? '◆ ' : ''}${session.name} · ${session.host}`; select.appendChild(option); } select.value = selected || remoteState.active?.id || '';
   updateOperationsContext();
   const [graph, incidents, commands, workspaces, capabilities, fabric, enterprise, nextgen, opsWorkspace, terminalFilePro, terminalFileVision, terminalFileRuntime, terminalFileDeep] = await Promise.all([api.advanced.graph(), api.incident.list(), api.advanced.commands(), api.advanced.workspaces(), api.resilience.capabilities(), api.fabric.summary(), api.enterprise?.summary?.() || {}, api.nextgen?.summary?.() || {}, api.opsWorkspace?.summary?.() || {}, api.terminalFilePro?.summary?.() || {}, api.terminalFileVision?.summary?.() || {}, api.terminalFileRuntime?.summary?.() || {}, api.terminalFileDeep?.summary?.() || {}]); operationsState.graph = graph; operationsState.incidents = incidents; operationsState.commands = commands; operationsState.workspaces = workspaces; operationsState.fabric = fabric; operationsState.enterprise = enterprise; operationsState.nextgen = nextgen; operationsState.opsWorkspace = opsWorkspace; operationsState.terminalFilePro = terminalFilePro; operationsState.terminalFileVision = terminalFileVision; operationsState.terminalFileRuntime = terminalFileRuntime; operationsState.terminalFileDeep = terminalFileDeep;
-  document.getElementById('ops-summary').innerHTML = `<span>${graph.nodes.length} nodes</span><span>${graph.edges.length} relations</span><span>${incidents.filter(item => item.status !== 'resolved').length} active incident(s)</span><span>${fabric.policies} access policies</span><span>${fabric.activeGrants} active grant(s)</span><span>${enterprise.agents || 0} agent(s)</span><span>${nextgen.relayNodes || 0} relay node(s)</span><span>${nextgen.frozenRoots || 0} guarded root(s)</span><span>${opsWorkspace.workspaces || 0} universal workspace(s)</span><span>${opsWorkspace.undoableEvents || 0} undoable action(s)</span><span>${terminalFilePro.notebooks || 0} notebook(s)</span><span>${terminalFilePro.encryptedIndexes || 0} encrypted index(es)</span><span>${terminalFilePro.pendingAirDrops || 0} pending AirDrop(s)</span><span>Mosh ${capabilities.mosh ? 'ready' : 'not installed'}</span>`; renderOperationsGraph();
+  const activeIncidents = incidents.filter(item => item.status !== 'resolved').length;
+  const runtimeHealthy = Number(terminalFileRuntime.healthy || 0); const runtimeTotal = Number(terminalFileRuntime.total || 0);
+  document.getElementById('ops-summary').innerHTML = `<span><b>${graph.nodes.length}</b> węzłów</span><span><b>${graph.edges.length}</b> relacji</span><span><b>${activeIncidents}</b> otwartych incydentów</span><span><b>${runtimeHealthy}/${runtimeTotal || '—'}</b> silników gotowych</span>`;
+  const infra = document.getElementById('ops-overview-infra'); if (infra) infra.textContent = `${graph.nodes.length} węzłów · ${graph.edges.length} relacji`;
+  const incidentSummary = document.getElementById('ops-overview-incidents'); if (incidentSummary) incidentSummary.textContent = activeIncidents ? `${activeIncidents} wymaga uwagi` : 'Brak otwartych incydentów';
+  const runtimeSummary = document.getElementById('ops-overview-runtime'); if (runtimeSummary) runtimeSummary.textContent = runtimeTotal ? `${runtimeHealthy} z ${runtimeTotal} gotowych` : 'Brak danych';
+  renderOperationsGraph();
   const visionSummary = document.getElementById('tf-vision-summary'); if (visionSummary) visionSummary.querySelector('span').textContent = `${terminalFileVision.features || 89} capabilities · ${terminalFileVision.runbooks || 0} runbooks · ${terminalFileVision.activeLeases || 0} active leases`;
   const reviewCount = document.getElementById('tf-review-count'); if (reviewCount) reviewCount.textContent = terminalFileVision.pendingReviews ? `${terminalFileVision.pendingReviews} pending plan${terminalFileVision.pendingReviews === 1 ? '' : 's'}` : 'No pending plans';
   renderTerminalFileRuntime(terminalFileRuntime);
@@ -6975,7 +7030,7 @@ function parseAnsi(text) {
 }
 
 function initTerminal() {
-  document.getElementById('btn-terminal-command-deck')?.addEventListener('click', () => { switchToPanel('operations-center'); selectVisionTab('intelligence'); document.querySelector('.tf-deck')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+  document.getElementById('btn-terminal-command-deck')?.addEventListener('click', () => { switchToPanel('operations-center'); setOperationsSection('advanced'); selectVisionTab('intelligence'); document.querySelector('.tf-deck')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   void loadLocalShellProfiles();
   document.getElementById('btn-new-terminal')?.addEventListener('click', () => createTerminal({ localProfile: document.getElementById('terminal-local-profile')?.value || '' }));
   document.getElementById('btn-terminal-clear')?.addEventListener('click', () => {
@@ -7122,6 +7177,15 @@ async function createTerminal(connection = null) {
   if (typeof KittyGraphicsRenderer !== 'undefined') terminalState.kittyRenderers[id] = new KittyGraphicsRenderer(pane, { maxImageBytes: 2_097_152, maxStorageBytes: 33_554_432 });
   term.parser.registerOscHandler(52, data => { api.terminalFileDeep?.execute('modern-terminal-media', { action: 'parse', data: `\x1b]52;${data}\x07`, clipboardApproved: false }).then(parsed => { const item = parsed.clipboard?.[0]; if (!item || item.bytes > 2 * 1024 * 1024 || !confirm(`Remote terminal requests clipboard access (${formatBytes(item.bytes)}). Allow once?`)) return; return api.terminalFileDeep.execute('modern-terminal-media', { action: 'parse', data: `\x1b]52;${data}\x07`, clipboardApproved: true }).then(approved => api.fabric.clipboardWrite(approved.clipboard[0].value, { ttlSeconds: 60, sessionId: savedSession?.id || '', allowSecrets: false })); }).catch(error => showToast(`Clipboard request blocked: ${error.message}`, 'warning')); return true; });
   terminalState.instances[id] = term; terminalState.fitAddons[id] = fit; terminalState.searchAddons[id] = search;
+  if (api.terminal.attach) {
+    try {
+      const attached = await api.terminal.attach(id);
+      if (attached?.data) term.write(attached.data);
+      if (attached?.exited) term.writeln(`\r\n\x1b[90m[KitsuneServ: terminal exited with code ${attached.code || 0}]\x1b[0m`);
+    } catch (error) {
+      term.writeln(`\r\n\x1b[31m[KitsuneServ: nie udało się podłączyć strumienia terminala: ${error.message}]\x1b[0m`);
+    }
+  }
   term.onData(async data => {
     const tab = terminalState.tabs.find(item => item.id === id);
     if (api.terminalFilePro?.pasteAnalyze && !data.startsWith('\x1b') && (data.includes('\n') || data.includes('\r') || data.length >= 8)) { const analysis = await api.terminalFilePro.pasteAnalyze(data); if (analysis.requiresConfirmation && !confirm(`Secure Paste Firewall · risk ${analysis.risk}/100\n\n${analysis.findings.map(item => item.kind).join(', ') || 'Review requested'}\n\nSend this input to ${tab?.name || 'terminal'}?`)) return; }

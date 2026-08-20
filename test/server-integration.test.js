@@ -140,6 +140,9 @@ test('web mode authenticates and exposes a desktop-parity API', { timeout: 30000
   assert.equal(info.mode, 'server');
   assert.equal(info.safeMode, true);
   assert.equal(info.migration.to, 2);
+  assert.equal(info.capabilities.hostTerminal, true);
+  assert.equal(info.capabilities.remoteShell, true);
+  assert.equal(info.capabilities.nativeLaunch, false);
 
   const templates = await (await request('workspace/templates')).json();
   assert.ok(Array.isArray(templates) && templates.some(template => template.id === 'blank'));
@@ -203,6 +206,10 @@ test('web mode authenticates and exposes a desktop-parity API', { timeout: 30000
   assert.ok(Array.isArray(tunnelProviders));
   const apiFlowCatalog = await (await request('apiFlow/catalog')).json();
   assert.ok(Array.isArray(apiFlowCatalog) && apiFlowCatalog.some(block => block.type === 'database-query'));
+  const incidents = await (await request('incident/list')).json();
+  assert.ok(Array.isArray(incidents));
+  const resilience = await (await request('resilience/capabilities')).json();
+  assert.ok(resilience && typeof resilience === 'object');
 
   const directories = await (await request('shell/listDirectories', { path: dataRoot })).json();
   assert.equal(directories.success, true);
@@ -226,6 +233,9 @@ test('web mode authenticates and exposes a desktop-parity API', { timeout: 30000
   assert.match(preload, /apiFlow\/catalog/);
   assert.match(preload, /hub\/publishLocal/);
   assert.match(preload, /identity\/users/);
+  assert.match(preload, /terminal\/attach/);
+  assert.match(preload, /incident\/list/);
+  assert.match(preload, /resilience\/capabilities/);
 
   const home = await (await fetch(base, { headers: { cookie } })).text();
   assert.match(home, /web-preload\.js/);
@@ -237,8 +247,13 @@ test('web mode authenticates and exposes a desktop-parity API', { timeout: 30000
 
   const terminal = await (await request('terminal/create')).json();
   assert.equal(typeof terminal.id, 'number');
+  await new Promise(resolve => setTimeout(resolve, 150));
+  const attachment = await (await request('terminal/attach', { id: terminal.id })).json();
+  assert.equal(attachment.success, true);
+  if (terminal.pty) assert.ok(typeof attachment.data === 'string' && attachment.data.length > 0, 'PTY startup output must be retained until the web terminal attaches');
   const oversizedInput = await (await request('terminal/write', { id: terminal.id, data: 'x'.repeat(65537) })).json();
   assert.equal(oversizedInput.success, false);
+  assert.equal((await (await request('terminal/kill', { id: terminal.id })).json()).success, true);
 
   const logout = await fetch(`${base}/auth/logout`, { headers: { cookie }, redirect: 'manual' });
   assert.equal(logout.status, 302);

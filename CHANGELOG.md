@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.1.1 — 2026-08-20
+
+- Fixed web terminal startup output and added real SSH terminal sessions in server mode.
+- Removed native Windows launch actions from the web interface and clarified server-host file semantics.
+- Hardened drag-and-drop transfers between file panes.
+- Restored the missing web incident/resilience API surface so live Operations Center status no longer remains in a loading state.
+- Grouped File Manager actions by transfer, review and management outcomes instead of one overflowing toolbar.
+- Simplified Operations Center with progressive disclosure and readable typography.
+- Added guided Hub-domain publication for Test Lab and API Flow resources.
+- Reworked Plesk Bridge status, API-domain configuration, web-server integration and self-updates.
+
 ## 3.1.0 — 2026-08-20
 
 - Reorganized the desktop and web interface into clearer workspace, operations and management sections with contextual descriptions and improved responsive presentation.
