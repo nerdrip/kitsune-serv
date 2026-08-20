@@ -42,6 +42,8 @@ class IndexController extends pm_Controller_Action
         $this->view->automaticConnectionError = $automaticConnectionError;
         $this->view->warnings = $this->warnings($config, $domains, $state, $statusError, $automaticConnectionError);
         $this->view->manualProxy = $this->manualProxy($config);
+        $this->view->suiteExtensions = $client->isAdmin() ? Modules_KitsuneservBridge_Suite::installedExtensions() : [];
+        $this->view->modulesListUrl = pm_Context::getModulesListUrl();
     }
 
     public function saveAction()
@@ -105,6 +107,29 @@ class IndexController extends pm_Controller_Action
             $this->_status->addMessage('error', 'Nie uruchomiono operacji: ' . $exception->getMessage());
         }
         $this->_helper->redirector('index');
+    }
+
+    public function extensionUploadAction()
+    {
+        $this->requireAdmin();
+        if (!$this->getRequest()->isPost()) throw new pm_Exception('POST is required.');
+        try {
+            $upload = isset($_FILES['extension_package']) && is_array($_FILES['extension_package']) ? $_FILES['extension_package'] : [];
+            $error = (int) ($upload['error'] ?? UPLOAD_ERR_NO_FILE);
+            if ($error !== UPLOAD_ERR_OK) throw new RuntimeException($error === UPLOAD_ERR_NO_FILE ? 'Wybierz paczkę ZIP rozszerzenia.' : 'Plesk nie odebrał paczki ZIP (kod ' . $error . ').');
+            $path = (string) ($upload['tmp_name'] ?? '');
+            $name = (string) ($upload['name'] ?? '');
+            $size = (int) ($upload['size'] ?? 0);
+            if (!is_uploaded_file($path)) throw new RuntimeException('Paczka nie pochodzi z poprawnego uploadu HTTP.');
+            if ($size < 1 || $size > 128 * 1024 * 1024) throw new RuntimeException('Paczka musi mieć od 1 B do 128 MB.');
+            if (!preg_match('/\.zip$/i', $name)) throw new RuntimeException('Dozwolone są wyłącznie paczki ZIP Pleska.');
+            $metadata = Modules_KitsuneservBridge_Suite::inspectPackage($path);
+            pm_Extension::installByFile($path);
+            $this->_status->addMessage('info', 'Zainstalowano ' . $metadata['name'] . ' ' . $metadata['version'] . '-r' . $metadata['release'] . '. Menu pozostaje skupione w Kitsune Hub.');
+        } catch (Throwable $exception) {
+            $this->_status->addMessage('error', 'Nie zaktualizowano rozszerzenia: ' . $exception->getMessage());
+        }
+        $this->_helper->redirector('index', 'index', null, ['tab' => 'plesk']);
     }
 
     public function connectAction()
@@ -331,7 +356,7 @@ class IndexController extends pm_Controller_Action
         $runtime = null;
         try {
             $runtime = Modules_KitsuneservBridge_Config::createRuntimeConfig('status');
-            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r18', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
+            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r20', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
             if ((int) ($result['code'] ?? 1) !== 0) {
                 $detail = trim((string) ($result['stderr'] ?? $result['stdout'] ?? ''));
                 return mb_substr($detail !== '' ? $detail : 'Narzędzie statusu zakończyło się błędem.', -2000);
@@ -347,7 +372,7 @@ class IndexController extends pm_Controller_Action
     private function runImmediateOperation($runtime)
     {
         try {
-            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r18', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
+            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r20', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
             if ((int) ($result['code'] ?? 1) !== 0) {
                 $detail = trim((string) ($result['stderr'] ?? $result['stdout'] ?? ''));
                 throw new RuntimeException($detail !== '' ? $detail : 'Operacja zakończyła się błędem.');

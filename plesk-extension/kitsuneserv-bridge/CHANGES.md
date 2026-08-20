@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.1.2-20
+
+- Added WPKit Parse Manager and Nerd Apps Runtime Manager to central discovery, navigation and the aggregate update bundle.
+- Extended the shared Suite contract and deterministic builder to the Android/Nerd project workspace.
+
+## 3.1.2-19
+
+- Added the central Plesk Management screen with dynamic discovery, product configuration links and validated manual ZIP updates.
+- Unified Suite navigation so Kitsune Hub remains the single menu entry while active product managers stay independently functional.
+- Added the shared visual shell, aggregate update bundle and reusable extension template contract.
+
 ## 3.1.2-18
 
 - Treats every selected API domain as a reusable namespace and proxies one child hostname per API Flow project.

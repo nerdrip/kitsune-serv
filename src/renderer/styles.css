@@ -1333,6 +1333,160 @@ select { cursor: pointer; appearance: none; background-image: url("data:image/sv
   .api-flow-tabs #api-flow-dirty-state { display:none; }.api-flow-tabs button { padding:5px; }
 }
 
+/* API Flow workspace: readable inside the application column (the 260px sidebar is outside this container). */
+.api-flow-studio { container-type:inline-size; border-color:rgba(111,123,255,.55); box-shadow:0 12px 38px rgba(0,0,0,.22); }
+.api-flow-projectbar { display:flex; min-height:70px; align-items:center; gap:20px; padding:12px 18px; }
+.api-flow-project-select { width:clamp(250px,27cqw,390px); flex:0 0 auto; }
+.api-flow-projectbar label,.api-flow-project-select label { margin-bottom:6px; font-size:10px; letter-spacing:.08em; }
+.api-flow-project-select select { height:38px; padding:0 11px; font-size:12px; }
+.api-flow-project-summary { min-width:0; flex:1; }
+.api-flow-project-summary small,.api-flow-project-summary strong,.api-flow-project-summary span { display:block; }
+.api-flow-project-summary small { color:var(--text-muted); font-size:9px; font-weight:800; letter-spacing:.13em; }
+.api-flow-project-summary strong { margin-top:4px; overflow:hidden; font-size:14px; text-overflow:ellipsis; white-space:nowrap; }
+.api-flow-project-summary span { margin-top:3px; overflow:hidden; color:var(--text-muted); font:10px var(--font-mono); text-overflow:ellipsis; white-space:nowrap; }
+.api-flow-project-actions { display:flex; flex:0 1 auto; align-items:center; justify-content:flex-end; gap:7px; height:auto; padding:0; }
+.api-flow-project-actions .btn { min-width:0; min-height:36px; padding:7px 11px; font-size:11px; }
+.api-flow-project-actions #api-flow-toggle { min-width:132px; }
+
+.api-flow-runtime { display:grid; grid-template-columns:175px minmax(300px,1fr) auto; min-height:92px; gap:10px 18px; padding:13px 18px; }
+.api-flow-runtime-state > i { width:14px; height:14px; }
+.api-flow-runtime-state small { font-size:8px; }
+.api-flow-runtime-state strong { margin-top:4px; font-size:13px; }
+.api-flow-runtime-address { min-width:0; }
+.api-flow-runtime-address > small { display:block; margin-bottom:6px; color:var(--text-muted); font-size:9px; font-weight:800; letter-spacing:.08em; }
+.api-flow-runtime-url { gap:7px; min-height:42px; padding:5px 6px 5px 12px; border-radius:8px; }
+.api-flow-runtime-url code { font-size:11px; }
+.api-flow-runtime-url button { display:flex; width:auto; height:30px; align-items:center; gap:5px; padding:0 10px; font-size:10px; white-space:nowrap; }
+.api-flow-runtime-metrics { gap:0; }
+.api-flow-runtime-metrics span { min-width:70px; padding:7px 10px; }
+.api-flow-runtime-metrics small { font-size:8px; }
+.api-flow-runtime-metrics b { margin-top:4px; font-size:11px; }
+.api-flow-runtime-message { padding:7px 10px; font-size:10px; line-height:1.45; }
+
+.api-flow-shell,.api-flow-studio.inspector-collapsed .api-flow-shell { position:relative; display:grid; grid-template-columns:270px minmax(0,1fr); height:clamp(620px,calc(100vh - 300px),820px); min-height:620px; }
+.api-flow-left-rail { border-right-color:rgba(111,123,255,.22); }
+.api-flow-rail-tabs { height:48px; padding:6px; gap:5px; }
+.api-flow-rail-tabs button { font-size:11px; }
+.api-flow-endpoints,.api-flow-palette { height:calc(100% - 48px); }
+.api-flow-side-head { min-height:64px; padding:12px 14px; }
+.api-flow-side-head strong { font-size:11px; }
+.api-flow-side-head small { margin-top:4px; font-size:9px; }
+.api-flow-side-head > button { width:30px; height:30px; font-size:16px; }
+.api-flow-side-head > input { width:125px; padding:7px 8px; font-size:10px; }
+.api-flow-endpoint-list { max-height:calc(100% - 282px); padding:9px; }
+.api-flow-endpoint { grid-template-columns:48px minmax(0,1fr) auto; gap:8px; margin-bottom:6px; padding:10px 9px; }
+.api-flow-endpoint strong { font-size:11px; }
+.api-flow-endpoint small { margin-top:4px; font-size:9px; }
+.api-flow-endpoint > i { font-size:9px; }
+.method { min-width:43px; height:23px; font-size:9px; }
+.api-flow-route-editor { padding:12px; }
+.api-flow-route-editor > label { margin:8px 0 5px; font-size:9px; }
+.api-flow-route-editor select,.api-flow-route-editor input { min-height:32px; font-size:10px; }
+.api-flow-route-editor .api-flow-enabled { margin:9px 0; font-size:10px; }
+.api-flow-block-palette { height:calc(100% - 64px); padding:10px; }
+.api-flow-block-palette section > strong { margin:8px 5px; font-size:9px; }
+.api-flow-block-palette button { grid-template-columns:34px minmax(0,1fr); gap:9px; margin-bottom:6px; padding:8px; }
+.api-flow-block-palette button > i { width:32px; height:32px; font-size:10px; }
+.api-flow-block-palette b { font-size:10px; }
+.api-flow-block-palette small { margin-top:3px; font-size:8px; }
+
+.api-flow-workspace { grid-template-rows:52px minmax(0,1fr); }
+.api-flow-tabs { height:52px; gap:5px; padding:0 12px; overflow-x:auto; }
+.api-flow-tabs button { padding:8px 10px; font-size:10px; }
+.api-flow-tabs span { font-size:9px; }
+.api-flow-canvas,.api-flow-tester,.api-flow-logs { grid-row:2; }
+.api-flow-node { width:250px; min-height:120px; }
+.api-flow-node header { height:44px; gap:9px; padding:7px 9px; }
+.api-flow-node header > i { width:28px; height:28px; font-size:10px; }
+.api-flow-node header strong { font-size:11px; }
+.api-flow-node header > button { width:23px; height:23px; }
+.api-flow-node > div:not(.api-flow-node-ports) { padding:11px 13px 13px; }
+.api-flow-node > div small { font-size:8px; }
+.api-flow-node > div p { margin-top:7px; font-size:10px; }
+.api-flow-node-result { margin-top:8px; font-size:9px; }
+.api-flow-port.input { top:62px; }
+.api-flow-node-ports label { font-size:8px; }
+.api-flow-canvas-help { max-width:620px; padding:8px 11px; font-size:9px; }
+
+.api-flow-inspector-scrim { position:absolute; inset:0; z-index:29; display:none; padding:0; border:0; background:rgba(4,4,10,.52); backdrop-filter:blur(2px); cursor:default; }
+.api-flow-inspector { position:absolute; top:0; right:0; bottom:0; z-index:30; width:min(510px,calc(100% - 32px)); height:100%; border-left:1px solid var(--accent); box-shadow:-22px 0 55px rgba(0,0,0,.48); opacity:0; transform:translateX(101%); pointer-events:none; transition:transform .18s ease,opacity .18s ease; }
+.api-flow-studio.inspector-open .api-flow-inspector { opacity:1; transform:translateX(0); pointer-events:auto; }
+.api-flow-studio.inspector-open .api-flow-inspector-scrim { display:block; }
+.api-flow-inspector-body { height:calc(100% - 64px); padding:16px; font-size:11px; }
+.api-flow-inspector-body .form-group { margin-bottom:14px; }
+.api-flow-inspector-body label { font-size:10px; }
+.api-flow-inspector-body input,.api-flow-inspector-body select,.api-flow-inspector-body textarea { font-size:11px; }
+.api-flow-result-help,.api-flow-placeholder-help,.api-flow-connections { padding:12px; }
+.api-flow-result-help>strong,.api-flow-placeholder-help>strong,.api-flow-connections summary { font-size:11px; }
+.api-flow-result-help>p,.api-flow-placeholder-help>p { font-size:10px; }
+.api-flow-result-help small,.api-flow-placeholder-help small,.api-flow-link-row span { font-size:9px; }
+.api-flow-result-help code,.api-flow-placeholder-help code,.api-flow-link-row code { font-size:9px; }
+
+.api-flow-rest-client-head strong { font-size:12px; }
+.api-flow-rest-client-head small,.api-flow-rest-client-head > label { font-size:10px; }
+.api-flow-live-badge { font-size:8px; }
+.api-flow-test-url strong { font-size:10px; }
+.api-flow-test-url input { height:34px; font-size:10px; }
+.api-flow-test-columns label,.api-flow-test-response > div:first-child { font-size:10px; }
+.api-flow-test-response pre { font-size:10px; }
+.api-flow-log-head strong { font-size:11px; }
+.api-flow-log-head small,.api-flow-log time,.api-flow-log small,.api-flow-log code,.api-flow-log b,.api-flow-log p { font-size:9px; }
+.api-flow-footer { min-height:62px; padding:10px 16px; }
+.api-flow-footer strong { font-size:10px; }
+.api-flow-footer small { font-size:9px; }
+.api-flow-legend span { font-size:8px; }
+
+.api-flow-dialog-backdrop { position:fixed; inset:0; z-index:1000; display:grid; padding:24px; place-items:center; background:rgba(4,4,10,.76); backdrop-filter:blur(6px); }
+.api-flow-dialog-backdrop.hidden { display:none; }
+.api-flow-dialog { width:min(680px,100%); max-height:min(820px,calc(100vh - 48px)); overflow:hidden; border:1px solid rgba(111,123,255,.6); border-radius:14px; background:var(--bg-secondary); box-shadow:0 28px 90px rgba(0,0,0,.58); }
+.api-flow-dialog > header { display:flex; align-items:flex-start; gap:20px; padding:20px 22px; border-bottom:1px solid var(--border); background:linear-gradient(135deg,rgba(111,123,255,.13),var(--bg-card)); }
+.api-flow-dialog > header > div { min-width:0; flex:1; }
+.api-flow-dialog > header small { color:var(--accent); font-size:9px; font-weight:800; letter-spacing:.13em; }
+.api-flow-dialog > header h2 { margin:5px 0 6px; font-size:20px; }
+.api-flow-dialog > header p { color:var(--text-muted); font-size:11px; line-height:1.5; }
+.api-flow-dialog > header button { width:32px; height:32px; flex:0 0 auto; border:1px solid var(--border); border-radius:7px; color:var(--text-muted); background:var(--bg-input); font-size:20px; cursor:pointer; }
+.api-flow-dialog-body { max-height:620px; padding:20px 22px; overflow:auto; }
+.api-flow-dialog-body .form-group { margin-bottom:16px; }
+.api-flow-dialog-body .form-group > label { font-size:11px; }
+.api-flow-dialog-body input,.api-flow-dialog-body select { width:100%; margin-top:6px; font-size:12px; }
+.api-flow-dialog-body .form-help { margin-top:6px; font-size:9px; line-height:1.45; }
+.api-flow-dialog .api-flow-cors { display:flex!important; height:auto; align-items:flex-start; gap:10px; margin:4px 0 18px!important; padding:12px; border:1px solid var(--border); border-radius:8px; white-space:normal; }
+.api-flow-dialog .api-flow-cors input { width:auto; margin:2px 0 0; }
+.api-flow-dialog .api-flow-cors strong,.api-flow-dialog .api-flow-cors small { display:block; }
+.api-flow-dialog .api-flow-cors strong { font-size:11px; }
+.api-flow-dialog .api-flow-cors small { margin-top:4px; color:var(--text-muted); font-size:9px; line-height:1.45; }
+.api-flow-desktop-network,.api-flow-publication-note { margin-top:18px; padding:14px; border:1px solid var(--border); border-radius:9px; background:var(--bg-card); }
+.api-flow-desktop-network.hidden { display:none; }
+.api-flow-desktop-network h3 { margin-bottom:10px; font-size:12px; }
+.api-flow-network-fields { display:grid; grid-template-columns:1fr 160px; gap:12px; }
+.api-flow-desktop-network > small { color:var(--text-muted); font-size:9px; }
+.api-flow-publication-note { border-color:rgba(46,204,113,.28); background:rgba(46,204,113,.05); }
+.api-flow-publication-note strong { font-size:12px; }
+.api-flow-publication-note p { margin:6px 0 12px; color:var(--text-muted); font-size:10px; line-height:1.5; word-break:break-word; }
+.api-flow-dialog > footer { display:flex; justify-content:flex-end; padding:14px 22px; border-top:1px solid var(--border); background:var(--bg-card); }
+.api-flow-dialog > footer .btn { min-width:120px; }
+
+@container (max-width:1050px) {
+  .api-flow-projectbar { flex-wrap:wrap; gap:12px; }
+  .api-flow-project-select { width:min(360px,100%); }
+  .api-flow-project-summary { display:none; }
+  .api-flow-project-actions { flex:1; flex-wrap:wrap; }
+  .api-flow-runtime { grid-template-columns:150px minmax(260px,1fr); }
+  .api-flow-runtime-metrics { grid-column:1/-1; justify-content:flex-end; }
+  .api-flow-shell,.api-flow-studio.inspector-collapsed .api-flow-shell { grid-template-columns:235px minmax(0,1fr); }
+  .api-flow-tabs #api-flow-dirty-state { display:none; }
+}
+@container (max-width:760px) {
+  .api-flow-project-select { width:100%; }
+  .api-flow-project-actions { justify-content:flex-start; }
+  .api-flow-runtime { grid-template-columns:1fr; }
+  .api-flow-runtime-address,.api-flow-runtime-metrics,.api-flow-runtime-message { grid-column:1; }
+  .api-flow-runtime-metrics { justify-content:flex-start; overflow-x:auto; }
+  .api-flow-shell,.api-flow-studio.inspector-collapsed .api-flow-shell { grid-template-columns:205px minmax(0,1fr); }
+  .api-flow-runtime-url button span { display:none; }
+  .api-flow-tabs button { padding:7px; font-size:9px; }
+}
+
 /* Responsive environment builder: preserve the canvas and reveal settings on demand. */
 .lab-builder-shell { position:relative; }
 .lab-inspector-head { display:flex; align-items:flex-start; gap:8px; }

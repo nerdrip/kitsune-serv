@@ -17,6 +17,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const dns = require('dns').promises;
 const { execSync, execFileSync } = require('child_process');
 const { isPathInside, resolveInside, assertProjectSection, assertProjectName } = require('./path-utils');
 const { initializeServerDataRoot } = require('./runtime-paths');
@@ -1238,7 +1239,7 @@ async function handleAPI(endpoint, body, context = {}) {
     case 'hub/createPairing': return hubManager.createPairing(body.input || {}, context.principal);
     case 'hub/heartbeat': return hubManager.heartbeat(body.nodeId || context.principal?.nodeId, body.input || {});
     case 'hub/revokeNode': return hubManager.revokeNode(body.id);
-    case 'hub/routes': return hubManager.listRoutes();
+    case 'hub/routes': return annotateApiRouteAvailability(hubManager.listRoutes());
     case 'hub/saveRoute': return hubManager.saveRoute(body.input || {});
     case 'hub/removeRoute': return hubManager.removeRoute(body.id);
     case 'hub/inventory': return hubManager.inventory(body.filters || {});
@@ -1961,8 +1962,9 @@ async function handleAPI(endpoint, body, context = {}) {
       try {
         publication = hubManager.ensureApiFlowRoute({
           resourceId: project.id, name: project.name, slug: project.slug,
-          target: `http://127.0.0.1:${project.port}`, authPolicy: 'public', ownerNodeId: 'server-local'
+          target: `http://127.0.0.1:${started.port}`, authPolicy: 'public', ownerNodeId: 'server-local'
         });
+        if (publication) [publication] = await annotateApiRouteAvailability([publication]);
         if (!publication) publicationWarning = 'Plesk Bridge nie zsynchronizował bazowej domeny API';
       } catch (error) { publicationWarning = error.message; }
       return { ...started, publication, ...(publicationWarning ? { publicationWarning } : {}) };
@@ -2046,11 +2048,27 @@ function routeAuthentication(req, route) {
   return { allowed: Boolean(session || token), authentication: session || token };
 }
 
-function proxyHubRequest(req, res, route) {
+async function annotateApiRouteAvailability(routes) {
+  return Promise.all((routes || []).map(async route => {
+    if (route.kind !== 'api-flow' || !route.hostname) return route;
+    let timer;
+    try {
+      await Promise.race([
+        dns.lookup(route.hostname),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('DNS lookup timeout')), 1500); timer.unref?.(); })
+      ]);
+      return { ...route, subdomainReady: true };
+    } catch {
+      return { ...route, subdomainReady: false };
+    } finally { if (timer) clearTimeout(timer); }
+  }));
+}
+
+function proxyHubRequest(req, res, route, proxyPath = req.url) {
   const target = new URL(route.target); const transport = target.protocol === 'https:' ? https : http;
   const headers = { ...req.headers, host: target.host, 'x-forwarded-host': req.headers.host || '', 'x-forwarded-proto': IS_HTTPS ? 'https' : 'http', 'x-kitsune-route': route.id };
   delete headers['proxy-authorization']; delete headers['proxy-connection'];
-  const upstream = transport.request({ protocol: target.protocol, hostname: target.hostname, port: target.port || undefined, method: req.method, path: req.url, headers, timeout: 30_000 }, response => {
+  const upstream = transport.request({ protocol: target.protocol, hostname: target.hostname, port: target.port || undefined, method: req.method, path: proxyPath, headers, timeout: 30_000 }, response => {
     const responseHeaders = { ...response.headers }; delete responseHeaders['transfer-encoding'];
     res.writeHead(response.statusCode || 502, responseHeaders); response.pipe(res);
   });
@@ -2063,11 +2081,14 @@ async function handleRequest(req, res) {
   const url = new URL(req.url, 'http://localhost');
   const pathname = url.pathname;
   const clientAddress = normalizeIp(req.socket.remoteAddress || '');
-  const hubRoute = hubManager.resolveRoute(req.headers.host || '');
+  const directHubRoute = hubManager.resolveRoute(req.headers.host || '');
+  const pathHubRoute = directHubRoute ? null : hubManager.resolveApiFlowPathRoute(req.headers.host || '', pathname);
+  const hubRoute = directHubRoute || pathHubRoute;
   if (hubManager.settings().gatewayEnabled !== false && hubRoute) {
     const authorization = routeAuthentication(req, hubRoute);
     if (!authorization.allowed) { sendJSON(res, { error: 'Authentication is required for this Hub route' }, 401); return; }
-    proxyHubRequest(req, res, hubRoute); return;
+    const proxyPath = pathHubRoute ? `${pathHubRoute.upstreamPath}${url.search}` : req.url;
+    proxyHubRequest(req, res, hubRoute, proxyPath); return;
   }
   const apiNamespace = hubManager.settings().gatewayEnabled !== false ? hubManager.apiNamespaceForHost(req.headers.host || '') : null;
   if (apiNamespace) {

@@ -1,7 +1,7 @@
 #!/usr/bin/env php
 <?php
 
-const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.1.2-r18';
+const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.1.2-r20';
 
 final class KitsuneServBridgeManager
 {
@@ -841,7 +841,7 @@ final class KitsuneServBridgeManager
 
 function kitsuneConfigPath(array $arguments)
 {
-    if (count($arguments) !== 3 || $arguments[1] !== '--config') throw new RuntimeException('Usage: kitsuneserv-bridge-r18 --config /secure/operation.json');
+    if (count($arguments) !== 3 || $arguments[1] !== '--config') throw new RuntimeException('Usage: kitsuneserv-bridge-r20 --config /secure/operation.json');
     return (string) $arguments[2];
 }
 

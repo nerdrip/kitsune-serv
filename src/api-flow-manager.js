@@ -160,10 +160,11 @@ class ApiFlowManager {
 
   _public(project) {
     const runtime = this.servers.get(project.id);
+    const activePort = runtime?.port || project.port;
     return structuredClone({
-      ...project, running: Boolean(runtime), url: runtime ? `http://${project.host}:${project.port}${project.basePath}` : null,
+      ...project, port: activePort, running: Boolean(runtime), url: runtime ? `http://${project.host}:${activePort}${project.basePath}` : null,
       runtime: runtime ? {
-        startedAt: runtime.startedAt, uptimeMs: Math.max(0, Date.now() - Date.parse(runtime.startedAt)),
+        startedAt: runtime.startedAt, uptimeMs: Math.max(0, Date.now() - Date.parse(runtime.startedAt)), port: runtime.port,
         requestCount: runtime.requestCount, errorCount: runtime.errorCount,
         lastRequestAt: runtime.lastRequestAt, lastStatus: runtime.lastStatus, lastDurationMs: runtime.lastDurationMs
       } : null
@@ -197,13 +198,14 @@ class ApiFlowManager {
     if (!/^[A-Za-z0-9_-]{2,100}$/.test(id)) throw new Error('Invalid API project id');
     const name = String(input.name || previous?.name || 'Nowe API').trim().slice(0, 100);
     if (!name) throw new Error('API project name is required');
-    const port = Number(input.port ?? previous?.port ?? 9393);
-    if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('API port must be between 1024 and 65535');
+    const autoPort = input.autoPort === true || (input.autoPort == null && previous?.autoPort === true);
+    const port = autoPort ? 0 : Number(input.port ?? previous?.port ?? 9393);
+    if (!Number.isInteger(port) || (!autoPort && (port < 1024 || port > 65535))) throw new Error('API port must be automatic or between 1024 and 65535');
     const host = String(input.host || previous?.host || '127.0.0.1');
     if (!['127.0.0.1', '0.0.0.0'].includes(host)) throw new Error('API host must be 127.0.0.1 or 0.0.0.0');
     const endpoints = (Array.isArray(input.endpoints) ? input.endpoints : previous?.endpoints || []).map(endpoint => this._normalizeEndpoint(endpoint));
     return {
-      id, name, slug: slugify(input.slug || previous?.slug || name) || id.slice(0, 20), port, host,
+      id, name, slug: slugify(input.slug || previous?.slug || name) || id.slice(0, 20), port, autoPort, host,
       basePath: normalizeBasePath(input.basePath ?? previous?.basePath ?? '/api'), cors: input.cors !== false,
       endpoints, createdAt: previous?.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString()
     };
@@ -333,9 +335,11 @@ class ApiFlowManager {
     await new Promise((resolve, reject) => {
       const onError = error => { server.off('listening', onListening); reject(error); };
       const onListening = () => { server.off('error', onError); resolve(); };
-      server.once('error', onError); server.once('listening', onListening); server.listen(project.port, project.host);
+      server.once('error', onError); server.once('listening', onListening); server.listen(project.autoPort ? 0 : project.port, project.host);
     });
-    this.servers.set(id, { server, startedAt: new Date().toISOString(), requestCount: 0, errorCount: 0, lastRequestAt: null, lastStatus: 0, lastDurationMs: 0 });
+    const address = server.address();
+    const activePort = address && typeof address === 'object' ? Number(address.port) : project.port;
+    this.servers.set(id, { server, port: activePort, startedAt: new Date().toISOString(), requestCount: 0, errorCount: 0, lastRequestAt: null, lastStatus: 0, lastDurationMs: 0 });
     try { this.onChanged?.({ type: 'started', projectId: id, url: this.get(id).url }); } catch {}
     return { success: true, ...this.status(id) };
   }

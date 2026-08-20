@@ -53,8 +53,14 @@ test('Plesk API domains act as namespaces and API Flow routes are created below 
   assert.equal(hub.hostname('api-flow', 'Nowe API'), 'nowe-api.api.serv.example.test');
   const route = hub.ensureApiFlowRoute({ resourceId: 'orders', name: 'Nowe API', target: 'http://127.0.0.1:9393' });
   assert.equal(route.hostname, 'nowe-api.api.serv.example.test');
+  assert.equal(route.namespace, 'api.serv.example.test');
+  assert.equal(route.pathPrefix, '/nowe-api');
   assert.equal(hub.apiNamespaceForHost(route.hostname), 'api.serv.example.test');
   assert.equal(hub.apiNamespaceForHost('api.serv.example.test'), 'api.serv.example.test');
+  const fallback = hub.resolveApiFlowPathRoute('api.serv.example.test:443', '/nowe-api/api/hello');
+  assert.equal(fallback.id, route.id);
+  assert.equal(fallback.upstreamPath, '/api/hello');
+  assert.equal(hub.resolveApiFlowPathRoute('api.serv.example.test', '/missing/api/hello'), null);
   assert.throws(() => hub.saveRoute({ kind: 'api-flow', resourceId: 'base', hostname: 'api.serv.example.test', target: 'http://127.0.0.1:9494' }), /synchronized Plesk API domain/);
   assert.throws(() => hub.saveRoute({ kind: 'api-flow', resourceId: 'bad', hostname: 'too.deep.api.serv.example.test', target: 'http://127.0.0.1:9494' }), /synchronized Plesk API domain/);
 
@@ -87,7 +93,7 @@ test('managed Plesk connector enrolls automatically with a replay-protected sign
   const connector = hub.saveConnector({ id: 'plesk-managed', baseUrl: 'https://plesk.example.test', authMode: 'hybrid' }, secret);
   const request = {
     connectorId: connector.id, timestamp: 1_800_000_000_000, nonce: crypto.randomBytes(16).toString('hex'),
-    device: { name: 'Plesk production', platform: 'Linux', version: '3.1.2-r18', capabilities: ['plesk-sso', 'inventory'] }
+    device: { name: 'Plesk production', platform: 'Linux', version: '3.1.2-r20', capabilities: ['plesk-sso', 'inventory'] }
   };
   const signature = crypto.createHmac('sha256', secret).update(stable(request)).digest('base64url');
   const enrolled = hub.enrollPleskConnector(request, signature);

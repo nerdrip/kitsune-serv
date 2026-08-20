@@ -24,6 +24,7 @@
     "build:linux": "electron-builder --linux --config.directories.output=artifacts/linux",
     "build:server": "node scripts/build-server-package.js",
     "build:plesk": "node scripts/build-plesk-extension.js",
+    "build:plesk-suite": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-plesk-suite-assets.ps1 && node scripts/build-plesk-suite-update.js",
     "dist:release": "npm run dist:win && npm run build:server && npm run build:plesk && npm run build:sbom && npm run build:manifest && npm run build:checksums",
     "build:checksums": "node scripts/write-checksums.js",
     "build:sbom": "node scripts/generate-sbom.js",

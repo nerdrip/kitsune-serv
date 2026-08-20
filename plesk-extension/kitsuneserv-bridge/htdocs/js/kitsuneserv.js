@@ -19,7 +19,10 @@
       try { sessionStorage.setItem('kitsuneserv-bridge-tab', name); } catch (_) {}
     }
     tabs.forEach(function (tab) { tab.addEventListener('click', function () { openTab(tab.getAttribute('data-ks-tab')); }); });
-    try { openTab(sessionStorage.getItem('kitsuneserv-bridge-tab') || 'overview'); } catch (_) { openTab('overview'); }
+    try {
+      var requestedTab = new URLSearchParams(window.location.search).get('tab');
+      openTab(requestedTab || sessionStorage.getItem('kitsuneserv-bridge-tab') || 'overview');
+    } catch (_) { openTab('overview'); }
 
     var deploymentMode = document.getElementById('ks-deployment-mode');
     var urlMode = document.getElementById('ks-url-mode');

@@ -167,7 +167,7 @@ test('web mode authenticates and exposes a desktop-parity API', { timeout: 30000
   assert.equal(managedConnectors[0].id, 'managed-plesk');
   assert.equal(managedConnectors[0].baseUrl, `http://127.0.0.1:${upstreamPort}`);
   assert.equal(managedConnectors[0].configured, true);
-  const enrollmentRequest = { connectorId: 'managed-plesk', timestamp: Date.now(), nonce: crypto.randomBytes(16).toString('hex'), device: { name: 'Managed Plesk', platform: 'Linux', version: '3.1.2-r18', capabilities: ['plesk-sso', 'inventory'] } };
+  const enrollmentRequest = { connectorId: 'managed-plesk', timestamp: Date.now(), nonce: crypto.randomBytes(16).toString('hex'), device: { name: 'Managed Plesk', platform: 'Linux', version: '3.1.2-r20', capabilities: ['plesk-sso', 'inventory'] } };
   const enrollmentSignature = crypto.createHmac('sha256', managedConnectorSecret).update(stable(enrollmentRequest)).digest('base64url');
   const enrollmentResponse = await fetch(`${base}/auth/plesk/enroll`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-kitsune-enrollment-signature': enrollmentSignature }, body: JSON.stringify(enrollmentRequest) });
   assert.equal(enrollmentResponse.status, 200);
@@ -197,6 +197,9 @@ test('web mode authenticates and exposes a desktop-parity API', { timeout: 30000
   const publicApi = await requestWithHost(port, '/api/hello', startedApiFlow.publication.hostname);
   assert.equal(publicApi.status, 200);
   assert.deepEqual(JSON.parse(publicApi.body), { published: true });
+  const fallbackApi = await requestWithHost(port, '/nowe-api/api/hello?source=fallback', 'api.panel.example.test');
+  assert.equal(fallbackApi.status, 200);
+  assert.deepEqual(JSON.parse(fallbackApi.body), { published: true });
   const namespaceWithoutApi = await requestWithHost(port, '/', 'api.panel.example.test');
   assert.equal(namespaceWithoutApi.status, 404);
   assert.match(namespaceWithoutApi.body, /No published API matches this hostname/);

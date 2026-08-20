@@ -1609,7 +1609,7 @@
           <div class="panel-header-left"><h1>🧪 Visual Test Lab</h1><p class="panel-subtitle">Buduj środowiska testowe albo prawdziwe endpointy REST z połączonych bloków</p></div>
           <div class="panel-header-right"><button class="btn btn-toolbar" id="lab-refresh">↻ Odśwież</button><button class="btn btn-add" id="lab-new">＋ Otwórz kreator</button></div>
         </div>
-        <div class="module-guide"><span>01</span><div><strong>Wybierz środowisko</strong><small>Szablon ustawi runtime, polecenia i zależności.</small></div><i></i><span>02</span><div><strong>Sprawdź wartości</strong><small>Lab pokaże port, URL, zmienne i sposób uruchomienia.</small></div><i></i><span>03</span><div><strong>Uruchom lub opublikuj</strong><small>Na serwerze przypisz domenę przez Hub i Plesk.</small></div></div>
+        <div class="module-guide"><span>01</span><div><strong>Wybierz środowisko</strong><small>Szablon ustawi runtime, polecenia i zależności.</small></div><i></i><span>02</span><div><strong>Sprawdź wartości</strong><small>Lab pokaże URL, zmienne i sposób uruchomienia.</small></div><i></i><span>03</span><div><strong>Uruchom lub opublikuj</strong><small>Na serwerze przypisz domenę przez Hub i Plesk.</small></div></div>
         <nav class="lab-mode-switch"><button class="active" type="button" data-lab-mode="environment">▦ Środowiska</button><button type="button" data-lab-mode="api-flow">⤳ API Flow Builder <span>NOWE</span></button></nav>
         <div id="lab-environment-mode">
         <div class="lab-template-gallery" id="lab-template-gallery"><div class="workspace-empty compact">Ładowanie gotowych szablonów…</div></div>
@@ -1663,16 +1663,13 @@
         </div>
         <div class="api-flow-studio hidden" id="api-flow-mode">
           <header class="api-flow-projectbar">
-            <div class="api-flow-project-select"><label>Projekt API</label><select id="api-flow-project-select"><option value="">Nowy projekt API</option></select></div>
-            <div class="form-group"><label>Nazwa</label><input id="api-flow-name" type="text" maxlength="100" placeholder="np. Nerd REST API"></div>
-            <div class="form-group api-flow-listen"><label id="api-flow-listen-label">Host / port</label><div><select id="api-flow-host"><option value="127.0.0.1">localhost</option><option value="0.0.0.0">sieć LAN</option></select><input id="api-flow-port" type="number" min="1024" max="65535" value="9393" aria-describedby="api-flow-listen-help"></div><small id="api-flow-listen-help">Desktop udostępnia API lokalnie jako localhost:port.</small></div>
-            <div class="form-group"><label>Ścieżka bazowa</label><input id="api-flow-base-path" type="text" value="/api" placeholder="/api"></div>
-            <label class="api-flow-cors"><input id="api-flow-cors" type="checkbox" checked> CORS</label>
-            <div class="api-flow-project-actions"><button class="btn btn-small" id="api-flow-new">＋ Nowy</button><button class="btn btn-small" id="api-flow-save">💾 Zapisz</button><button class="btn btn-small btn-primary" id="api-flow-toggle">▶ Uruchom API</button><button class="btn btn-small" id="api-flow-publish" title="Wybierz bazową domenę API; w webie publikacja następuje także automatycznie przy uruchomieniu">↗ Adres publiczny</button><button class="btn btn-small btn-danger" id="api-flow-delete" title="Usuń projekt API">🗑</button></div>
+            <div class="api-flow-project-select"><label>Aktywny projekt API</label><select id="api-flow-project-select"><option value="">Nowy projekt API</option></select></div>
+            <div class="api-flow-project-summary"><small>EDYTUJESZ</small><strong id="api-flow-project-title">Nowe REST API</strong><span id="api-flow-project-route">GET /api/hello</span></div>
+            <div class="api-flow-project-actions"><button class="btn btn-small" id="api-flow-new">＋ Nowy</button><button class="btn btn-small" id="api-flow-settings">⚙ Ustawienia</button><button class="btn btn-small" id="api-flow-save">💾 Zapisz</button><button class="btn btn-small btn-primary" id="api-flow-toggle">▶ Uruchom API</button><button class="btn btn-small btn-danger" id="api-flow-delete" title="Usuń projekt API">🗑</button></div>
           </header>
           <section class="api-flow-runtime" id="api-flow-runtime" data-state="stopped">
             <div class="api-flow-runtime-state"><i id="api-flow-runtime-led"></i><div><small>RUNTIME</small><strong id="api-flow-runtime-label">API zatrzymane</strong></div></div>
-            <div class="api-flow-runtime-url"><code id="api-flow-runtime-url">Zapisz i uruchom projekt, aby otrzymać aktywny adres.</code><button type="button" id="api-flow-copy-url" title="Kopiuj URL">⧉</button><button type="button" id="api-flow-open-url" title="Otwórz API w przeglądarce">↗</button></div>
+            <div class="api-flow-runtime-address"><small>PUBLICZNY ADRES WYBRANEGO ENDPOINTU</small><div class="api-flow-runtime-url"><code id="api-flow-runtime-url">Zapisz i uruchom projekt, aby otrzymać aktywny adres.</code><button type="button" id="api-flow-copy-url" title="Kopiuj URL">⧉ <span>Kopiuj adres</span></button><button type="button" id="api-flow-open-url" title="Otwórz API w nowej karcie">↗ <span>Otwórz API</span></button></div></div>
             <div class="api-flow-runtime-metrics"><span><small>UPTIME</small><b id="api-flow-runtime-uptime">—</b></span><span><small>ŻĄDANIA</small><b id="api-flow-runtime-requests">0</b></span><span><small>BŁĘDY</small><b id="api-flow-runtime-errors">0</b></span><span><small>OSTATNIE</small><b id="api-flow-runtime-last">—</b></span></div>
             <div class="api-flow-runtime-message" id="api-flow-runtime-message">Serwer nie nasłuchuje. Tester może uruchomić go automatycznie.</div>
           </section>
@@ -1708,12 +1705,26 @@
               </section>
               <section class="api-flow-logs hidden" data-api-flow-pane="logs"><div class="api-flow-log-head"><div><strong>ŻĄDANIA</strong><small>Tester i ruch prawdziwego serwera</small></div><button class="btn btn-small" id="api-flow-refresh-logs">↻</button><button class="btn btn-small btn-danger" id="api-flow-clear-logs">Wyczyść</button></div><div id="api-flow-log-list" class="api-flow-log-list"></div></section>
             </main>
+            <button class="api-flow-inspector-scrim" id="api-flow-inspector-scrim" type="button" aria-label="Zamknij inspektor"></button>
             <aside class="api-flow-inspector">
               <div class="api-flow-side-head"><div><strong>INSPEKTOR BLOKU</strong><small id="api-flow-inspector-help">Wybierz blok na diagramie</small></div><button type="button" id="api-flow-inspector-close" title="Zwiń inspektor">×</button></div>
               <div id="api-flow-inspector" class="api-flow-inspector-body"><div class="workspace-empty compact">Tutaj pojawią się ustawienia, połączenia i ścieżka błędu wybranego bloku.</div></div>
             </aside>
           </div>
           <footer class="api-flow-footer"><div id="api-flow-validation"><span>○</span><div><strong>Graf nie został sprawdzony</strong><small>Połącz Input z blokami i zakończ przepływ Outputem.</small></div></div><div class="api-flow-legend"><span><i class="green"></i> wejście</span><span><i class="cyan"></i> dane</span><span><i class="orange"></i> sieć</span><span><i class="yellow"></i> sterowanie</span><span><i class="red"></i> bezpieczeństwo</span></div></footer>
+          <div class="api-flow-dialog-backdrop hidden" id="api-flow-settings-dialog">
+            <section class="api-flow-dialog" role="dialog" aria-modal="true" aria-labelledby="api-flow-settings-title">
+              <header><div><small>USTAWIENIA PROJEKTU</small><h2 id="api-flow-settings-title">Konfiguracja API</h2><p>W webie warstwa uruchomieniowa jest obsługiwana automatycznie. Tutaj ustawiasz wyłącznie publiczny kształt API.</p></div><button type="button" id="api-flow-settings-close" aria-label="Zamknij">×</button></header>
+              <div class="api-flow-dialog-body">
+                <div class="form-group"><label>Nazwa API</label><input id="api-flow-name" type="text" maxlength="100" placeholder="np. Orders API"><small class="form-help">Na jej podstawie powstaje czytelna nazwa publicznego adresu.</small></div>
+                <div class="form-group"><label>Ścieżka bazowa</label><input id="api-flow-base-path" type="text" value="/api" placeholder="/api"><small class="form-help">Każdy endpoint zostanie dodany pod tą ścieżką, np. /api/hello.</small></div>
+                <label class="api-flow-cors"><input id="api-flow-cors" type="checkbox" checked><span><strong>Zezwalaj na CORS</strong><small>Potrzebne, jeśli API będzie wywoływane bezpośrednio z innej strony WWW.</small></span></label>
+                <div class="api-flow-desktop-network" id="api-flow-desktop-network"><h3>Sieć aplikacji desktopowej</h3><div class="api-flow-network-fields"><div class="form-group"><label>Widoczność</label><select id="api-flow-host"><option value="127.0.0.1">Tylko ten komputer</option><option value="0.0.0.0">Sieć lokalna LAN</option></select></div><div class="form-group"><label>Port</label><input id="api-flow-port" type="number" min="1024" max="65535" value="9393"></div></div><small id="api-flow-listen-help">Desktop udostępnia API jako localhost:port. W wersji webowej ta sekcja jest ukryta.</small></div>
+                <div class="api-flow-publication-note"><strong>Publikacja w wersji webowej</strong><p id="api-flow-publication-preview">Po uruchomieniu publiczny adres zostanie utworzony automatycznie z domeny zsynchronizowanej przez Plesk Bridge.</p><button class="btn btn-small" id="api-flow-publish" type="button">Zmień nazwę publicznego adresu</button></div>
+              </div>
+              <footer><button class="btn btn-primary" id="api-flow-settings-done" type="button">Gotowe</button></footer>
+            </section>
+          </div>
         </div>
       </section>
 
