@@ -19,6 +19,24 @@ class Modules_KitsuneservBridge_HubClient
         return $this->request('/auth/pair', ['code' => $code, 'device' => $device]);
     }
 
+    public function autoEnroll($connectorId, $sharedSecret, array $device)
+    {
+        $connectorId = trim((string) $connectorId);
+        $sharedSecret = (string) $sharedSecret;
+        if ($connectorId === '' || $sharedSecret === '') throw new pm_Exception('Automatic enrollment requires the connector ID and shared secret.');
+        $capabilities = array_values(array_unique(array_map('strval', (array) ($device['capabilities'] ?? []))));
+        sort($capabilities, SORT_STRING);
+        $device['capabilities'] = $capabilities;
+        $payload = [
+            'connectorId' => $connectorId,
+            'timestamp' => (int) round(microtime(true) * 1000),
+            'nonce' => bin2hex(random_bytes(16)),
+            'device' => $device,
+        ];
+        $signature = rtrim(strtr(base64_encode(hash_hmac('sha256', $this->stable($payload), $sharedSecret, true)), '+/', '-_'), '=');
+        return $this->request('/auth/plesk/enroll', $payload, '', ['X-Kitsune-Enrollment-Signature: ' . $signature]);
+    }
+
     public function heartbeat($nodeId, $token, array $inventory)
     {
         return $this->request('/api/hub/heartbeat', ['nodeId' => $nodeId, 'input' => ['inventory' => $inventory, 'version' => '3.1.1', 'platform' => PHP_OS_FAMILY]], $token);
@@ -30,10 +48,10 @@ class Modules_KitsuneservBridge_HubClient
         return $this->request('/api/hub/status', [], $token);
     }
 
-    private function request($path, array $payload, $token = '')
+    private function request($path, array $payload, $token = '', array $extraHeaders = [])
     {
         $handle = curl_init($this->hubUrl . $path);
-        $headers = ['Accept: application/json', 'Content-Type: application/json'];
+        $headers = array_merge(['Accept: application/json', 'Content-Type: application/json'], $extraHeaders);
         if ($token !== '') $headers[] = 'Authorization: Bearer ' . $token;
         curl_setopt_array($handle, [
             CURLOPT_POST => true,
@@ -53,5 +71,21 @@ class Modules_KitsuneservBridge_HubClient
         if ($status < 200 || $status >= 300) throw new pm_Exception(isset($result['error']) ? $result['error'] : 'Hub returned HTTP ' . $status);
         if (!is_array($result)) throw new pm_Exception('Hub returned an invalid response.');
         return $result;
+    }
+
+    private function stable($value)
+    {
+        if (is_array($value)) {
+            $keys = array_keys($value);
+            $isList = $keys === ($value === [] ? [] : range(0, count($value) - 1));
+            if ($isList) return '[' . implode(',', array_map([$this, 'stable'], $value)) . ']';
+            ksort($value, SORT_STRING);
+            $parts = [];
+            foreach ($value as $key => $child) {
+                $parts[] = json_encode((string) $key, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ':' . $this->stable($child);
+            }
+            return '{' . implode(',', $parts) . '}';
+        }
+        return (string) json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     }
 }

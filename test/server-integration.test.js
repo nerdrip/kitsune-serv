@@ -49,6 +49,12 @@ function requestWithHost(port, pathname, host) {
   });
 }
 
+function stable(value) {
+  if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`;
+  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stable(value[key])}`).join(',')}}`;
+  return JSON.stringify(value);
+}
+
 test('web mode authenticates and exposes a desktop-parity API', { timeout: 30000 }, async (t) => {
   const root = path.resolve(__dirname, '..');
   const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'kitsune-web-'));
@@ -160,6 +166,13 @@ test('web mode authenticates and exposes a desktop-parity API', { timeout: 30000
   assert.equal(managedConnectors[0].id, 'managed-plesk');
   assert.equal(managedConnectors[0].baseUrl, `http://127.0.0.1:${upstreamPort}`);
   assert.equal(managedConnectors[0].configured, true);
+  const enrollmentRequest = { connectorId: 'managed-plesk', timestamp: Date.now(), nonce: crypto.randomBytes(16).toString('hex'), device: { name: 'Managed Plesk', platform: 'Linux', version: '3.1.1-r16', capabilities: ['plesk-sso', 'inventory'] } };
+  const enrollmentSignature = crypto.createHmac('sha256', managedConnectorSecret).update(stable(enrollmentRequest)).digest('base64url');
+  const enrollmentResponse = await fetch(`${base}/auth/plesk/enroll`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-kitsune-enrollment-signature': enrollmentSignature }, body: JSON.stringify(enrollmentRequest) });
+  assert.equal(enrollmentResponse.status, 200);
+  const automaticEnrollment = await enrollmentResponse.json();
+  assert.equal(automaticEnrollment.node.connectorId, 'managed-plesk');
+  assert.match(automaticEnrollment.token, /^ks_/);
   const matchingLocal = await (await request('identity/createUser', { input: { username: 'boberski', displayName: 'Local Boberski', password: 'hub-password-b', roles: ['operator'] } })).json();
   const localPasswordRejected = await fetch(`${base}/auth/login`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'username=boberski&password=hub-password-b' });
   assert.equal(localPasswordRejected.status, 200, 'Plesk password has priority for a matching Plesk account');

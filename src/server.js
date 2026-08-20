@@ -195,6 +195,8 @@ if (managedPleskConnectorId && managedPleskConnectorSecret && managedPleskUrl) {
     enabled: process.env.KITSUNE_HUB_AUTH_MODE !== 'independent',
     autoProvisionUsers: process.env.KITSUNE_HUB_AUTO_PROVISION !== '0'
   }, managedPleskConnectorSecret);
+  const pleskConnectorHeartbeat = setInterval(() => hubManager.touchConnectorNodes(managedPleskConnectorId), 60_000);
+  pleskConnectorHeartbeat.unref();
 }
 const supportManager = new SupportManager(appRoot, { configManager, downloadManager, serviceManager, diagnosticsManager, projectManager, activityManager, environmentManager, pluginManager, platformManager });
 const observabilityManager = new ObservabilityManager(appRoot, serviceManager);
@@ -2118,6 +2120,20 @@ async function handleRequest(req, res) {
   if (pathname === '/auth/pair' && req.method === 'POST') {
     try { const body = await parseBody(req); sendJSON(res, hubManager.completePairing(body.code, body.device || {})); }
     catch (error) { sendJSON(res, { error: error.message }, 400); }
+    return;
+  }
+
+  // The managed Plesk Bridge proves possession of the connector secret and enrolls itself.
+  if (pathname === '/auth/plesk/enroll' && req.method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const enrolled = hubManager.enrollPleskConnector(body, req.headers['x-kitsune-enrollment-signature'] || '');
+      auditManager.record({ actor: body.connectorId || 'plesk-connector', source: 'plesk-bridge', action: 'node.enroll', target: enrolled.node.id, success: true });
+      sendJSON(res, enrolled);
+    } catch (error) {
+      auditManager.record({ actor: 'plesk-connector', source: 'plesk-bridge', action: 'node.enroll', target: clientAddress, success: false, details: { error: error.message } });
+      sendJSON(res, { error: error.message }, 401);
+    }
     return;
   }
 
