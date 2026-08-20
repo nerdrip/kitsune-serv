@@ -12,8 +12,8 @@ Równoważna jednolinijkowa komenda Pleska:
 for package in /root/kitsune-plesk-update/packages/*.zip; do plesk bin extension -g "$package" || exit 1; done
 ```
 
-Kolejność paczek jest zakodowana w prefiksach nazw. Kitsune Hub instaluje się jako ostatni, dzięki czemu po zakończeniu przejmuje centralną nawigację. `manifest.json` opisuje wersje i sumy SHA-256, a `SHA256SUMS` pozwala wykonać kontrolę przez `sha256sum -c SHA256SUMS`.
+Kolejność paczek jest zakodowana w prefiksach nazw. Kitsune Hub instaluje się jako ostatni, dzięki czemu po zakończeniu przejmuje centralną nawigację. `manifest.json` opisuje wersje i sumy SHA-256, a `SHA256SUMS` jest sprawdzany automatycznie przez instalator. Instalator akceptuje manifesty z końcami linii LF i CRLF.
 
 Uwaga migracyjna: KitsuneColab i Kitsune Artifactory otrzymały unikalne identyfikatory `kitsunecolab-manager` oraz `kitsuneartifactory-manager`, ponieważ historyczne `kitsune-manager` było współdzielone. Paczki instalują nowe managery obok starego wpisu i celowo go nie nadpisują. Po potwierdzeniu poprawnej konfiguracji stary, jednoznacznie rozpoznany wpis można usunąć ręcznie.
 
-Zestaw obejmuje także WPKit Parse Manager i Nerd Apps Runtime Manager. Oba zachowują własne operacje wdrożeniowe, ale po wykryciu aktywnego Kitsune Hub oddają mu wpis menu i pozostają dostępne w **Plesk Management**.
+Zestaw obejmuje także WPKit Parse Manager, Nerd Apps Runtime Manager i Ultimate Tool. Każdy zachowuje własne operacje wdrożeniowe, ale po wykryciu aktywnego Kitsune Hub oddaje mu wpis menu i pozostaje dostępny w **Plesk Management**.

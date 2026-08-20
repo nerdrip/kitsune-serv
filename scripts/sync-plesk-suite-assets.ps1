@@ -5,6 +5,7 @@ $ErrorActionPreference = 'Stop'
 $workspace = Split-Path -Parent $PSScriptRoot
 $projects = Split-Path -Parent $workspace
 $androidNerd = Join-Path (Split-Path -Parent $projects) 'Android\Nerd'
+$phpWordpressPlugins = Join-Path (Split-Path -Parent $projects) 'PHP\wordpress\wordpress-plugins'
 $sourceCss = Join-Path $workspace 'plesk-extension\kitsuneserv-bridge\htdocs\css\kitsune-platform.css'
 $sourceJs = Join-Path $workspace 'plesk-extension\kitsuneserv-bridge\htdocs\js\kitsune-platform.js'
 $targets = @(
@@ -18,7 +19,8 @@ $targets = @(
     @{ Path = Join-Path $projects 'NailIT\tools\plesk-extension\nailit-manager'; Label = 'NailIT\tools\plesk-extension\nailit-manager' },
     @{ Path = Join-Path $projects 'kitsune-git\deploy\plesk'; Label = 'kitsune-git\deploy\plesk' },
     @{ Path = Join-Path $androidNerd 'wpkit\tools\plesk-extension\wpkit-parse-manager'; Label = 'Android\Nerd\wpkit\tools\plesk-extension\wpkit-parse-manager' },
-    @{ Path = Join-Path $androidNerd 'dicex\tools\plesk-extension\nerd-apps-runtime-manager'; Label = 'Android\Nerd\dicex\tools\plesk-extension\nerd-apps-runtime-manager' }
+    @{ Path = Join-Path $androidNerd 'dicex\tools\plesk-extension\nerd-apps-runtime-manager'; Label = 'Android\Nerd\dicex\tools\plesk-extension\nerd-apps-runtime-manager' },
+    @{ Path = Join-Path $phpWordpressPlugins 'ultimate-tool\plesk-extension'; Label = 'PHP\wordpress\wordpress-plugins\ultimate-tool\plesk-extension' }
 )
 
 foreach ($source in @($sourceCss, $sourceJs)) {

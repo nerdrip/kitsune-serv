@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.1.2-21
+
+- Added Ultimate Tool to Kitsune Plesk Management and the deterministic aggregate update bundle.
+- Made the one-command suite installer tolerate checksum manifests copied with Windows CRLF line endings.
+
 ## 3.1.2-20
 
 - Added WPKit Parse Manager and Nerd Apps Runtime Manager to central discovery, navigation and the aggregate update bundle.

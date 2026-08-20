@@ -10,7 +10,8 @@ const { spawnSync } = require('child_process');
 const root = path.resolve(__dirname, '..');
 const projects = path.dirname(root);
 const androidNerd = path.resolve(projects, '..', 'Android', 'Nerd');
-const allowedSourceRoots = [projects, androidNerd];
+const phpWordpressPlugins = path.resolve(projects, '..', 'PHP', 'wordpress', 'wordpress-plugins');
+const allowedSourceRoots = [projects, androidNerd, phpWordpressPlugins];
 const outputRoot = path.join(root, 'update');
 const packagesRoot = path.join(outputRoot, 'packages');
 const timestamp = new Date(Number(process.env.SOURCE_DATE_EPOCH || 315532800) * 1000);
@@ -26,8 +27,10 @@ const registry = [
   ['09', 'kitsune-git', 'kitsune-git/deploy/plesk'],
   ['10', 'wpkit-parse-manager', '../Android/Nerd/wpkit/tools/plesk-extension/wpkit-parse-manager'],
   ['11', 'nerd-apps-runtime-manager', '../Android/Nerd/dicex/tools/plesk-extension/nerd-apps-runtime-manager'],
+  ['12', 'ultimate-tool', '../PHP/wordpress/wordpress-plugins/ultimate-tool/plesk-extension', '../tools/build-plesk-extension.ps1'],
   ['99', 'kitsuneserv-bridge', 'kitsune-serv/plesk-extension/kitsuneserv-bridge'],
 ];
+const textExtensions = new Set(['.css', '.htaccess', '.js', '.json', '.md', '.php', '.phtml', '.sh', '.txt', '.xml', '.yaml', '.yml']);
 
 let crcTable;
 
@@ -72,7 +75,7 @@ function createZip(directory, destination) {
     const nameBytes = Buffer.from(name, 'utf8');
     let content = fs.readFileSync(file);
     const executable = name.startsWith('sbin/');
-    if (executable) content = Buffer.from(content.toString('utf8').replace(/\r\n?/g, '\n'), 'utf8');
+    if (executable || textExtensions.has(path.extname(name).toLowerCase())) content = Buffer.from(content.toString('utf8').replace(/\r\n?/g, '\n'), 'utf8');
     const compressed = zlib.deflateRawSync(content, { level: 9 });
     const checksum = crc32(content);
     const { date, time } = dosTimestamp(timestamp);
@@ -95,6 +98,24 @@ function createZip(directory, destination) {
   end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(files.length, 8); end.writeUInt16LE(files.length, 10);
   end.writeUInt32LE(centralBuffer.length, 12); end.writeUInt32LE(offset, 16);
   fs.writeFileSync(destination, Buffer.concat([...locals, centralBuffer, end]), { mode: 0o600 });
+}
+
+function createProjectZip(source, builderRelative, destination) {
+  const projectRoot = path.dirname(source);
+  const builder = path.resolve(source, builderRelative);
+  const temporary = path.join(projectRoot, `.kitsune-suite-${process.pid}-${crypto.randomBytes(8).toString('hex')}.zip`);
+  if (!fs.existsSync(builder)) throw new Error(`Missing project-specific Plesk builder: ${builder}`);
+  try {
+    const executable = process.platform === 'win32' ? 'powershell' : 'pwsh';
+    const commandArguments = process.platform === 'win32'
+      ? ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', builder, '-Output', temporary]
+      : ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', builder, '-Output', temporary];
+    const result = spawnSync(executable, commandArguments, { cwd: projectRoot, encoding: 'utf8', windowsHide: true });
+    if (result.status !== 0 || !fs.existsSync(temporary)) throw new Error(`Project-specific Plesk build failed for ${source}:\n${result.stdout || ''}${result.stderr || ''}`);
+    fs.copyFileSync(temporary, destination);
+  } finally {
+    fs.rmSync(temporary, { force: true });
+  }
 }
 
 function matchMetadata(xml, tag) {
@@ -136,7 +157,7 @@ fs.mkdirSync(packagesRoot, { recursive: true });
 const manifest = [];
 const sums = [];
 
-for (const [order, expectedId, relative] of registry) {
+for (const [order, expectedId, relative, packageBuilder] of registry) {
   const source = path.resolve(projects, relative);
   const sourceAllowed = allowedSourceRoots.some(allowedRoot => source === allowedRoot || source.startsWith(allowedRoot + path.sep));
   if (!sourceAllowed || !fs.existsSync(path.join(source, 'meta.xml'))) throw new Error(`Missing extension source: ${source}`);
@@ -151,7 +172,8 @@ for (const [order, expectedId, relative] of registry) {
   checkSource(source);
   const fileName = `${order}-${id}-${version}-r${release}.zip`;
   const destination = path.join(packagesRoot, fileName);
-  createZip(source, destination);
+  if (packageBuilder) createProjectZip(source, packageBuilder, destination);
+  else createZip(source, destination);
   const digest = crypto.createHash('sha256').update(fs.readFileSync(destination)).digest('hex');
   sums.push(`${digest}  packages/${fileName}`);
   manifest.push({ order: Number(order), id, name, version, release, file: `packages/${fileName}`, sha256: digest });

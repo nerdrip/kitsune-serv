@@ -4,8 +4,8 @@
 
 - Added Kitsune Plesk Suite management in Hub: installed Kitsune extensions are detected automatically, linked from one screen and can be updated from validated Plesk ZIP packages.
 - Unified the Plesk managers with one shared visual shell and Hub-aware navigation; product entries remain standalone only when Kitsune Hub is unavailable.
-- Added a reproducible twelve-package Plesk update bundle, including WPKit and Nerd Apps, with a checksum manifest, one-command installer and reusable extension template; KitsuneColab and Artifactory now use collision-free extension IDs.
-- Released KitsuneServ Bridge r20 with central Plesk Management while preserving the guarded Hub self-update workflow.
+- Added a reproducible thirteen-package Plesk update bundle, including WPKit, Nerd Apps and Ultimate Tool, with a CRLF-safe checksum manifest, one-command installer and reusable extension template; KitsuneColab and Artifactory now use collision-free extension IDs.
+- Released KitsuneServ Bridge r21 with central Plesk Management while preserving the guarded Hub self-update workflow.
 - Made Plesk API domains reusable namespaces: starting `Nowe API` in web mode now publishes `nowe-api.api.example.com` automatically while keeping the process port internal.
 - Prevented unmatched API namespace requests from falling through to the Kitsune Hub login page and added explicit API-not-found responses.
 - Added automatic wildcard DNS provisioning attempts and wildcard nginx host routing in Plesk Bridge r18, with actionable DNS/TLS warnings when the provider is external.
