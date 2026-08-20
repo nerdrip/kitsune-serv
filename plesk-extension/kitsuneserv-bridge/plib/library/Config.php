@@ -2,7 +2,7 @@
 
 class Modules_KitsuneservBridge_Config
 {
-    public const EXTENSION_VERSION = '3.1.1-r16';
+    public const EXTENSION_VERSION = '3.1.1-r17';
 
     private const SECRET_FIELDS = [
         'git_token' => 'secret_git_token',
@@ -128,8 +128,13 @@ class Modules_KitsuneservBridge_Config
         ];
         $path = pm_Context::getVarDir() . '/state.json';
         if (!is_file($path)) return $empty;
-        $decoded = json_decode((string) file_get_contents($path), true);
-        return is_array($decoded) ? array_replace_recursive($empty, $decoded) : $empty;
+        $decoded = json_decode((string) @file_get_contents($path), true);
+        $state = is_array($decoded) ? array_replace_recursive($empty, $decoded) : $empty;
+        $state['extensionUpdate']['current'] = self::EXTENSION_VERSION;
+        if (($state['extensionUpdate']['candidate'] ?? '') === self::EXTENSION_VERSION && in_array(($state['extensionUpdate']['status'] ?? ''), ['available', 'scheduled'], true)) {
+            $state['extensionUpdate']['status'] = 'current';
+        }
+        return $state;
     }
 
     public static function proxyDomains($values = null)

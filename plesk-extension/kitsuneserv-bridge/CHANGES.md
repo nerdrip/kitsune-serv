@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.1.1-17
+
+- Fixed the root-owned `state.json` permissions so the Plesk web UI can read operation, service-health and extension-update results written by the privileged executor.
+- Made the update check explicitly fetch and reset the managed checkout to the configured remote branch before comparing extension metadata.
+- Added separate installed/repository version cards, a visible check timestamp/error and an update button enabled only when the repository contains a newer release.
+- Normalized the installed version from the running extension so stale state can no longer report an older active release.
+
 ## 3.1.1-16
 
 - Replaced mandatory pairing codes with automatic, HMAC-signed enrollment backed by the connector secret already deployed to Kitsune Hub.
