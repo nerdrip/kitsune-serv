@@ -7049,6 +7049,25 @@ async function runWorkspaceDiagnostics() {
 
 /* ===== Built-in Terminal ===== */
 const terminalState = { tabs: [], activeId: null, instances: {}, fitAddons: {}, searchAddons: {}, kittyRenderers: {}, observers: {}, reconnecting: new Set(), recording: new Set(), splitIds: new Set(), splitVertical: false, broadcast: false, structuredBuffers: {}, structuredTimers: {} };
+let terminalImageAddonSupport;
+
+async function supportsTerminalImageAddon() {
+  if (!terminalImageAddonSupport) {
+    terminalImageAddonSupport = (async () => {
+      if (typeof WebAssembly === 'undefined' || typeof WebAssembly.instantiate !== 'function') return false;
+      try {
+        // A valid empty module checks browser support and the effective CSP before
+        // @xterm/addon-image starts its asynchronous Sixel decoder bootstrap.
+        await WebAssembly.instantiate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+        return true;
+      } catch (error) {
+        console.warn('Terminal image support is unavailable under the current CSP:', error);
+        return false;
+      }
+    })();
+  }
+  return terminalImageAddonSupport;
+}
 
 /* ANSI escape code parser for terminal colors */
 const ANSI_COLORS = {
@@ -7237,7 +7256,7 @@ async function createTerminal(connection = null) {
   const search = new SearchAddon.SearchAddon();
   term.loadAddon(fit);
   term.loadAddon(search);
-  if (typeof ImageAddon !== 'undefined') {
+  if (typeof ImageAddon !== 'undefined' && await supportsTerminalImageAddon()) {
     try {
       term.loadAddon(new ImageAddon.ImageAddon({
         enableSizeReports: true,
