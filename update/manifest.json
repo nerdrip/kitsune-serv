@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-20T15:06:42.224Z",
+  "generatedAt": "2026-08-20T15:13:05.092Z",
   "packages": [
     {
       "order": 1,
@@ -34,9 +34,9 @@
       "id": "kitsunepaint-manager",
       "name": "Kitsune Creative Suite Deployment Manager",
       "version": "2.0.5",
-      "release": "3",
-      "file": "packages/04-kitsunepaint-manager-2.0.5-r3.zip",
-      "sha256": "3db25d964e17677beb2846d07d117be5aa316fd456572e54b651d295b4c3468d"
+      "release": "4",
+      "file": "packages/04-kitsunepaint-manager-2.0.5-r4.zip",
+      "sha256": "9e0155e83ec07001f3d071dc455ed361661d62e8abf691af8493eefea68a2968"
     },
     {
       "order": 5,
