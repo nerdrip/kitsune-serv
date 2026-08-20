@@ -22,6 +22,8 @@ $isDirectApiDomain = static function ($candidate) use ($c) { $base = (string) $c
 $serviceLabel = !$configured ? 'Wymaga konfiguracji' : (!$serviceInstalled ? 'Jeszcze niewdrożona' : ($serviceActive ? ($healthOk ? 'Usługa działa' : 'Usługa bez odpowiedzi HTTP') : 'Usługa zatrzymana'));
 $extensionStatus = (string) ($extensionUpdate['status'] ?? 'never-checked');
 $extensionLabel = $extensionStatus === 'scheduled' ? 'Aktualizacja zaplanowana' : ($extensionStatus === 'available' ? 'Dostępna aktualizacja' : ($extensionStatus === 'failed' ? 'Błąd aktualizacji' : ($extensionStatus === 'not-available' ? 'Brak źródła aktualizacji' : ($extensionStatus === 'never-checked' ? 'Nie sprawdzono' : 'Wersja aktualna'))));
+$repositoryExtensionVersion = (string) ($extensionUpdate['candidate'] ?? '');
+$extensionCanUpdate = $extensionStatus === 'available' && $repositoryExtensionVersion !== '' && $repositoryExtensionVersion !== $this->extensionVersion;
 $shortCommit = static function ($value) { return $value ? substr((string) $value, 0, 10) : '—'; };
 ?>
 <div class="ks-shell" data-deployment-mode="<?php echo $e($c['deployment_mode']); ?>" data-url-mode="<?php echo $e($c['url_mode']); ?>" data-proxy-mode="<?php echo $e($c['proxy_mode']); ?>">
@@ -135,11 +137,16 @@ $shortCommit = static function ($value) { return $value ? substr((string) $value
         </article>
         <article class="ks-card ks-operation-card ks-span-2">
           <div class="ks-card-head"><div><span class="ks-kicker">AKTUALIZACJA WTYCZKI</span><h2>Plesk Bridge z tego samego repozytorium</h2></div><span class="ks-icon">↻</span></div>
-          <p class="ks-muted">Bridge porównuje własną wersję z <code>plesk-extension/kitsuneserv-bridge/meta.xml</code> na gałęzi <code><?php echo $e($c['repository_branch']); ?></code>. Po zwykłej synchronizacji nowsza wersja jest instalowana automatycznie poza bieżącym zadaniem Pleska.</p>
+          <p class="ks-muted">„Sprawdź” pobiera najnowszy stan gałęzi <code><?php echo $e($c['repository_branch']); ?></code> (<code>git fetch</code> + aktualizacja zarządzanego checkoutu), a następnie odczytuje <code>plesk-extension/kitsuneserv-bridge/meta.xml</code>.</p>
           <div class="ks-service-banner <?php echo in_array($extensionStatus, ['current', 'scheduled'], true) ? 'is-running' : ''; ?>"><span></span><div><strong><?php echo $e($extensionLabel); ?></strong><small>Zainstalowano <?php echo $e($this->extensionVersion); ?><?php if (!empty($extensionUpdate['checkedAt'])): ?> · sprawdzono <?php echo $e($extensionUpdate['checkedAt']); ?><?php endif; ?></small></div></div>
+          <div class="ks-update-versions">
+            <div><span>Wersja zainstalowana</span><strong><?php echo $e($this->extensionVersion); ?></strong><small>Aktywna w tym panelu Plesk</small></div>
+            <div class="<?php echo $extensionCanUpdate ? 'has-update' : ''; ?>"><span>Wersja w repozytorium</span><strong><?php echo $e($repositoryExtensionVersion !== '' ? $repositoryExtensionVersion : 'Nie sprawdzono'); ?></strong><small><?php echo $repositoryExtensionVersion !== '' ? $e($c['repository_branch'] . ' · ' . $shortCommit($repository['localCommit'] ?? '')) : 'Kliknij „Pobierz repozytorium i sprawdź”'; ?></small></div>
+          </div>
+          <?php if (!empty($extensionUpdate['error'])): ?><div class="ks-alert is-warning"><span>!</span><p><?php echo $e($extensionUpdate['error']); ?></p></div><?php endif; ?>
           <form method="post" action="<?php echo $e($url('operation')); ?>" class="ks-operation-form">
-            <button class="ks-button" name="operation" value="extension-check">Sprawdź aktualizację Bridge</button>
-            <button class="ks-button is-primary" name="operation" value="extension-update" data-ks-confirm="Pobrać repozytorium i zaplanować aktualizację wtyczki Plesk Bridge?">Pobierz i zaktualizuj Bridge</button>
+            <button class="ks-button" name="operation" value="extension-check">Pobierz repozytorium i sprawdź</button>
+            <button class="ks-button is-primary<?php echo $extensionCanUpdate ? '' : ' is-disabled'; ?>" name="operation" value="extension-update" <?php echo $extensionCanUpdate ? '' : 'disabled aria-disabled="true"'; ?> data-ks-confirm="Pobrać aktualny stan repozytorium i zainstalować wersję <?php echo $e($repositoryExtensionVersion); ?> wtyczki Plesk Bridge?"><?php echo $extensionCanUpdate ? 'Zaktualizuj do ' . $e($repositoryExtensionVersion) : ($extensionStatus === 'scheduled' ? 'Aktualizacja już zaplanowana' : 'Brak nowszej wersji'); ?></button>
           </form>
         </article>
       </div>

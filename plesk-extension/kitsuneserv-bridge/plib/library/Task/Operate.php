@@ -11,7 +11,7 @@ class Modules_KitsuneservBridge_Task_Operate extends pm_LongTask_Task
             $config = json_decode((string) @file_get_contents($runtimeConfig), true);
             if (!is_array($config)) $config = [];
             $this->updateProgress(5);
-            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r16', ['--config', $runtimeConfig], pm_ApiCli::RESULT_FULL);
+            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r17', ['--config', $runtimeConfig], pm_ApiCli::RESULT_FULL);
             if ((int) ($result['code'] ?? 1) !== 0) {
                 $detail = trim((string) ($result['stderr'] ?? $result['stdout'] ?? 'Operation failed.'));
                 throw new RuntimeException($detail !== '' ? $detail : 'Operation failed.');

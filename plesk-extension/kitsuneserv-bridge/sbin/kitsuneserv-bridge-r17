@@ -1,7 +1,7 @@
 #!/usr/bin/env php
 <?php
 
-const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.1.1-r16';
+const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.1.1-r17';
 
 final class KitsuneServBridgeManager
 {
@@ -821,7 +821,8 @@ final class KitsuneServBridgeManager
     {
         $this->state['updatedAt'] = gmdate('c');
         $json = json_encode($this->state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        $this->writeAtomicFile($this->statePath, $json . "\n", 0640);
+        // The privileged executor runs as root, while the extension UI reads this redacted file as the Plesk web user.
+        $this->writeAtomicFile($this->statePath, $json . "\n", 0644);
     }
 
     private function redact($value)
@@ -840,7 +841,7 @@ final class KitsuneServBridgeManager
 
 function kitsuneConfigPath(array $arguments)
 {
-    if (count($arguments) !== 3 || $arguments[1] !== '--config') throw new RuntimeException('Usage: kitsuneserv-bridge-r16 --config /secure/operation.json');
+    if (count($arguments) !== 3 || $arguments[1] !== '--config') throw new RuntimeException('Usage: kitsuneserv-bridge-r17 --config /secure/operation.json');
     return (string) $arguments[2];
 }
 
