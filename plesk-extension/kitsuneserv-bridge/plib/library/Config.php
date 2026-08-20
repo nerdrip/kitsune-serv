@@ -2,7 +2,7 @@
 
 class Modules_KitsuneservBridge_Config
 {
-    public const EXTENSION_VERSION = '3.1.0-r12';
+    public const EXTENSION_VERSION = '3.1.1-r13';
 
     private const SECRET_FIELDS = [
         'git_token' => 'secret_git_token',
@@ -21,6 +21,7 @@ class Modules_KitsuneservBridge_Config
             'url_mode' => 'automatic',
             'proxy_mode' => 'managed',
             'panel_domain' => '',
+            'api_domains' => '',
             'hub_url' => '',
             'repository_url' => 'https://github.com/nerdrip/kitsune-serv.git',
             'repository_branch' => 'main',
@@ -131,9 +132,22 @@ class Modules_KitsuneservBridge_Config
         return is_array($decoded) ? array_replace_recursive($empty, $decoded) : $empty;
     }
 
+    public static function proxyDomains($values = null)
+    {
+        $values = $values === null ? self::values() : $values;
+        $domains = [(string) ($values['panel_domain'] ?? '')];
+        foreach (preg_split('/\s*,\s*/', (string) ($values['api_domains'] ?? ''), -1, PREG_SPLIT_NO_EMPTY) as $domain) $domains[] = $domain;
+        $valid = [];
+        foreach ($domains as $domain) {
+            $domain = strtolower(trim((string) $domain));
+            if (preg_match('/^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])$/', $domain)) $valid[$domain] = $domain;
+        }
+        return array_values($valid);
+    }
+
     public static function createRuntimeConfig($action)
     {
-        $allowed = ['status', 'check', 'sync', 'deploy', 'sync-deploy', 'start', 'stop', 'restart', 'proxy'];
+        $allowed = ['status', 'check', 'sync', 'deploy', 'sync-deploy', 'start', 'stop', 'restart', 'proxy', 'extension-check', 'extension-update'];
         if (!in_array($action, $allowed, true)) throw new InvalidArgumentException('Unsupported operation.');
         $varDir = rtrim((string) pm_Context::getVarDir(), '/\\');
         if (!is_dir($varDir) && !mkdir($varDir, 0700, true) && !is_dir($varDir)) {
@@ -149,9 +163,13 @@ class Modules_KitsuneservBridge_Config
         $config['requested_at'] = gmdate('c');
 
         if ($config['proxy_mode'] === 'managed' && in_array($action, ['deploy', 'sync-deploy', 'proxy'], true)) {
-            $domain = self::hostedDomain($config['panel_domain']);
-            $config['vhost_system_path'] = (string) $domain->getVhostSystemPath();
-            $config['domain_name'] = strtolower((string) $domain->getName());
+            $verified = [];
+            foreach (self::proxyDomains($config) as $domainName) {
+                $domain = self::hostedDomain($domainName);
+                $verified[] = strtolower((string) $domain->getName());
+            }
+            if (!$verified) throw new RuntimeException('Wybierz co najmniej jedną aktywną domenę publikacji.');
+            $config['proxy_domains'] = implode(',', $verified);
         }
 
         $path = $realVarDir . '/operation-' . bin2hex(random_bytes(12)) . '.json';

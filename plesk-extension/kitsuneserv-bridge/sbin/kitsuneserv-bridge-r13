@@ -1,7 +1,7 @@
 #!/usr/bin/env php
 <?php
 
-const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.1.0-r12';
+const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.1.1-r13';
 
 final class KitsuneServBridgeManager
 {
@@ -40,7 +40,7 @@ final class KitsuneServBridgeManager
     public function execute()
     {
         $action = (string) ($this->config['action'] ?? '');
-        if (!in_array($action, ['status', 'check', 'sync', 'deploy', 'sync-deploy', 'start', 'stop', 'restart', 'proxy'], true)) {
+        if (!in_array($action, ['status', 'check', 'sync', 'deploy', 'sync-deploy', 'start', 'stop', 'restart', 'proxy', 'extension-check', 'extension-update'], true)) {
             throw new RuntimeException('Unsupported operation.');
         }
         if (($this->config['deployment_mode'] ?? 'managed') !== 'managed' && $action !== 'status') {
@@ -89,6 +89,18 @@ final class KitsuneServBridgeManager
                     break;
                 case 'proxy':
                     $this->configureProxy();
+                    $this->refreshState();
+                    break;
+                case 'extension-check':
+                    $this->checkPrerequisites();
+                    $this->synchronizeRepository();
+                    $this->scheduleExtensionUpdate(false);
+                    $this->refreshState();
+                    break;
+                case 'extension-update':
+                    $this->checkPrerequisites();
+                    $this->synchronizeRepository();
+                    $this->scheduleExtensionUpdate(true);
                     $this->refreshState();
                     break;
             }
@@ -327,68 +339,21 @@ final class KitsuneServBridgeManager
     private function configureProxy()
     {
         if (($this->config['proxy_mode'] ?? 'managed') !== 'managed') throw new RuntimeException('Automatic proxy management is disabled.');
-        $domain = $this->validatedDomain((string) ($this->config['domain_name'] ?? $this->config['panel_domain'] ?? ''));
-        $vhost = $this->validateVhostPath((string) ($this->config['vhost_system_path'] ?? ''));
-        $confDir = $vhost . '/conf';
-        $this->ensureDirectory($confDir, 0750);
-        $path = $confDir . '/vhost_nginx.conf';
-        $original = is_file($path) ? (string) file_get_contents($path) : '';
-        $storedProxyState = (array) ($this->state['proxy'] ?? []);
-        $next = $this->managedProxyContents($original, $this->validatedPort());
-        $backup = $path . '.kitsuneserv-backup';
-        if ($original !== '') $this->writeAtomicFile($backup, $original, 0640);
+        $domains = preg_split('/\s*,\s*/', (string) ($this->config['proxy_domains'] ?? $this->config['panel_domain'] ?? ''), -1, PREG_SPLIT_NO_EMPTY);
+        $domains = array_values(array_unique(array_map([$this, 'validatedDomain'], $domains)));
+        if (!$domains) throw new RuntimeException('No Plesk publication domain is configured.');
         $httpdmng = $this->productRoot . '/admin/sbin/httpdmng';
-        $this->state['proxy'] = array_replace($storedProxyState, [
-            'domain' => $domain,
-            'path' => $path,
-            'strategy' => 'server-rewrite',
-            'transition' => true,
-        ]);
-        $this->saveState();
-        try {
-            $this->writeAtomicFile($path, $next, 0640);
+        foreach ($domains as $domain) {
             $this->run([$httpdmng, '--reconfigure-domain', $domain]);
-        } catch (Throwable $exception) {
-            if ($original === '') @unlink($path); else $this->writeAtomicFile($path, $original, 0640);
-            $rollback = $this->run([$httpdmng, '--reconfigure-domain', $domain], null, [], false);
-            $this->state['proxy']['transition'] = false;
-            $rollbackError = $rollback['code'] === 0 ? '' : ' Przywrócenie ustawień Pleska także nie powiodło się: ' . trim((string) ($rollback['stderr'] ?: $rollback['stdout']));
-            throw new RuntimeException($exception->getMessage() . $rollbackError, 0, $exception);
         }
-        $this->state['proxy'] = ['mode' => 'managed', 'strategy' => 'server-rewrite', 'domain' => $domain, 'configuredAt' => gmdate('c'), 'path' => $path, 'transition' => false];
-        $this->log('Skonfigurowano zarządzany reverse proxy dla ' . $domain . ' bez zmiany Plesk nginx Proxy Mode.');
-    }
-
-    private function managedProxyContents($contents, $port)
-    {
-        $begin = '# BEGIN KITSUNESERV BRIDGE MANAGED';
-        $end = '# END KITSUNESERV BRIDGE MANAGED';
-        $pattern = '/\n?' . preg_quote($begin, '/') . '.*?' . preg_quote($end, '/') . '\n?/s';
-        $base = trim((string) preg_replace($pattern, "\n", $contents));
-        if (strpos($base, '__kitsuneserv_bridge_internal__') !== false) {
-            throw new RuntimeException('The selected domain already uses the reserved KitsuneServ internal nginx route.');
-        }
-        $block = $begin . "\n"
-            . "# Preserve Plesk/ACME routes while routing every other request before location selection.\n"
-            . "rewrite ^/(?!\\.well-known(?:/|$)|__kitsuneserv_bridge_internal__$).* /__kitsuneserv_bridge_internal__ last;\n\n"
-            . "location = /__kitsuneserv_bridge_internal__ {\n"
-            . "    internal;\n"
-            . '    proxy_pass http://127.0.0.1:' . $port . "\$request_uri;\n"
-            . "    proxy_http_version 1.1;\n"
-            . "    proxy_set_header Host \$host;\n"
-            . "    proxy_set_header X-Real-IP \$remote_addr;\n"
-            . "    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;\n"
-            . "    proxy_set_header X-Forwarded-Proto \$scheme;\n"
-            . "    proxy_set_header Upgrade \$http_upgrade;\n"
-            . "    proxy_set_header Connection \"upgrade\";\n"
-            . "    proxy_read_timeout 300s;\n    proxy_send_timeout 300s;\n    proxy_buffering off;\n    client_max_body_size 64m;\n}\n"
-            . $end . "\n";
-        return rtrim($base) . ($base !== '' ? "\n\n" : '') . $block;
+        $this->state['proxy'] = ['mode' => 'managed', 'strategy' => 'plesk-webserver-hook', 'domain' => $domains[0], 'domains' => $domains, 'configuredAt' => gmdate('c'), 'path' => 'pm_Hook_WebServer', 'transition' => false];
+        $this->log('Przebudowano konfigurację WWW przez hook Pleska dla: ' . implode(', ', $domains) . '.');
     }
 
     private function refreshState()
     {
         try { $this->refreshRepository(false); } catch (Throwable $exception) { $this->state['repository']['error'] = $this->redact($exception->getMessage()); }
+        try { $this->resolveNodeRuntime(); unset($this->state['runtime']['error']); } catch (Throwable $exception) { $this->state['runtime']['error'] = $this->redact($exception->getMessage()); }
         $unit = '/etc/systemd/system/kitsuneserv-hub.service';
         $active = $this->run(['systemctl', 'is-active', 'kitsuneserv-hub.service'], null, [], false);
         $enabled = $this->run(['systemctl', 'is-enabled', 'kitsuneserv-hub.service'], null, [], false);
@@ -408,7 +373,7 @@ final class KitsuneServBridgeManager
         ];
     }
 
-    private function scheduleExtensionUpdate()
+    private function scheduleExtensionUpdate($install = true)
     {
         $source = $this->config['repository_path'] . '/plesk-extension/kitsuneserv-bridge';
         $metaPath = $source . '/meta.xml';
@@ -428,6 +393,11 @@ final class KitsuneServBridgeManager
         $newer = version_compare($candidateVersion, $currentMatch[1], '>') || ($candidateVersion === $currentMatch[1] && $candidateRelease > (int) $currentMatch[2]);
         if (!$newer) {
             $this->state['extensionUpdate'] = ['status' => 'current', 'current' => KITSUNESERV_BRIDGE_EXECUTOR_RELEASE, 'candidate' => $candidate, 'checkedAt' => gmdate('c')];
+            return;
+        }
+        if (!$install) {
+            $this->state['extensionUpdate'] = ['status' => 'available', 'current' => KITSUNESERV_BRIDGE_EXECUTOR_RELEASE, 'candidate' => $candidate, 'checkedAt' => gmdate('c')];
+            $this->log('Dostępna jest aktualizacja Plesk Bridge do ' . $candidate . '.');
             return;
         }
         if (!class_exists('ZipArchive')) throw new RuntimeException('PHP ZipArchive is required for automatic Plesk extension updates.');
@@ -473,8 +443,8 @@ final class KitsuneServBridgeManager
 
     private function extensionInstallerCommand($archive)
     {
-        if (is_executable('/usr/local/psa/bin/extension')) return ['/usr/local/psa/bin/extension', '--install', $archive];
-        if (is_executable('/usr/sbin/plesk')) return ['/usr/sbin/plesk', 'bin', 'extension', '--install', $archive];
+        if (is_executable('/usr/local/psa/bin/extension')) return ['/usr/local/psa/bin/extension', '--upgrade', $archive];
+        if (is_executable('/usr/sbin/plesk')) return ['/usr/sbin/plesk', 'bin', 'extension', '--upgrade', $archive];
         throw new RuntimeException('Plesk extension CLI was not found.');
     }
 
@@ -674,13 +644,6 @@ final class KitsuneServBridgeManager
         }
     }
 
-    private function validateVhostPath($value)
-    {
-        $value = rtrim(str_replace('\\', '/', trim($value)), '/');
-        if (!preg_match('#^/var/www/vhosts/system/[A-Za-z0-9.-]+$#', $value) || in_array('..', explode('/', $value), true)) throw new RuntimeException('Unsafe Plesk vhost path.');
-        return $value;
-    }
-
     private function systemdValue($value)
     {
         if (preg_match('/[\r\n\0]/', $value)) throw new RuntimeException('Environment values cannot contain line breaks.');
@@ -798,7 +761,7 @@ final class KitsuneServBridgeManager
 
 function kitsuneConfigPath(array $arguments)
 {
-    if (count($arguments) !== 3 || $arguments[1] !== '--config') throw new RuntimeException('Usage: kitsuneserv-bridge-r12 --config /secure/operation.json');
+    if (count($arguments) !== 3 || $arguments[1] !== '--config') throw new RuntimeException('Usage: kitsuneserv-bridge-r13 --config /secure/operation.json');
     return (string) $arguments[2];
 }
 

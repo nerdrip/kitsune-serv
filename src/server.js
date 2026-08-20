@@ -572,6 +572,7 @@ window.kitsuneAPI = {
   },
   terminal: {
     create: (connection = null) => window.kitsuneAPI._call('terminal/create', { connection }),
+    attach: async (id) => { if (window.__kitsuneEventsReady) await window.__kitsuneEventsReady; return window.kitsuneAPI._call('terminal/attach', { id }); },
     write: (id, data) => window.kitsuneAPI._call('terminal/write', { id, data }),
     kill: (id) => window.kitsuneAPI._call('terminal/kill', { id }),
     resize: (id, cols, rows) => window.kitsuneAPI._call('terminal/resize', { id, cols, rows }),
@@ -587,6 +588,12 @@ window.kitsuneAPI = {
   },
   storage: {
     list: () => window.kitsuneAPI._call('storage/list'), save: (input, secrets) => window.kitsuneAPI._call('storage/save', { input, secrets }), remove: id => window.kitsuneAPI._call('storage/remove', { id }), test: input => window.kitsuneAPI._call('storage/test', { input }), listFiles: (input, directory) => window.kitsuneAPI._call('storage/listFiles', { input, directory }), transfer: (input, direction, localPath, remotePath) => window.kitsuneAPI._call('storage/transfer', { input, direction, localPath, remotePath }), transferRecursive: (input, direction, localPath, remotePath, transferId) => window.kitsuneAPI._call('storage/transferRecursive', { input, direction, localPath, remotePath, transferId }), mutate: (input, operation, target, destination) => window.kitsuneAPI._call('storage/mutate', { input, operation, target, destination }), read: (input, remotePath) => window.kitsuneAPI._call('storage/read', { input, remotePath }), write: (input, remotePath, content) => window.kitsuneAPI._call('storage/write', { input, remotePath, content })
+  },
+  incident: {
+    list: () => window.kitsuneAPI._call('incident/list'), start: input => window.kitsuneAPI._call('incident/start', { input }), update: (id, patch) => window.kitsuneAPI._call('incident/update', { id, patch }), collect: (id, input) => window.kitsuneAPI._call('incident/collect', { id, input }), capsule: id => window.kitsuneAPI._call('incident/capsule', { id }), suggestRunbook: id => window.kitsuneAPI._call('incident/suggestRunbook', { id })
+  },
+  resilience: {
+    capabilities: () => window.kitsuneAPI._call('resilience/capabilities'), createSshCa: (name, passphrase) => window.kitsuneAPI._call('resilience/sshCaCreate', { name, passphrase }), signSshKey: (caId, publicKeyPath, identity, principals, validity) => window.kitsuneAPI._call('resilience/sshSign', { caId, publicKeyPath, identity, principals, validity }), installSshCa: (input, caId) => window.kitsuneAPI._call('resilience/sshCaInstall', { input, caId }), openMosh: input => window.kitsuneAPI._call('resilience/mosh', { input }), ports: input => window.kitsuneAPI._call('resilience/ports', { input }), databaseTunnel: (input, options) => window.kitsuneAPI._call('resilience/databaseTunnel', { input, options }), cron: (input, action, options) => window.kitsuneAPI._call('resilience/cron', { input, action, options }), timer: (input, action, options) => window.kitsuneAPI._call('resilience/timer', { input, action, options }), firewall: (input, action, rule, execute) => window.kitsuneAPI._call('resilience/firewall', { input, action, rule, execute }), certificateRenew: (input, provider, domain) => window.kitsuneAPI._call('resilience/certificateRenew', { input, provider, domain }), cachePut: file => window.kitsuneAPI._call('resilience/cachePut', { file }), cacheRestore: (hash, target) => window.kitsuneAPI._call('resilience/cacheRestore', { hash, target }), transferLimited: (input, direction, local, remote, rate) => window.kitsuneAPI._call('resilience/transferLimited', { input, direction, local, remote, rate }), backup: (source, name) => window.kitsuneAPI._call('resilience/backup', { source, name }), backupRestore: (id, target) => window.kitsuneAPI._call('resilience/backupRestore', { id, target }), offlineVault: input => window.kitsuneAPI._call('resilience/offlineVault', { input }), breakGlassCreate: input => window.kitsuneAPI._call('resilience/breakGlassCreate', { input }), breakGlassConsume: (id, code, authentication) => window.kitsuneAPI._call('resilience/breakGlassConsume', { id, code, authentication })
   },
   advanced: {
     graph: () => window.kitsuneAPI._call('advanced/graph'), commands: () => window.kitsuneAPI._call('advanced/commands'), configuration: () => window.kitsuneAPI._call('advanced/configuration'), workspaces: () => window.kitsuneAPI._call('advanced/workspaces'), workspaceSave: input => window.kitsuneAPI._call('advanced/workspaceSave', { input }), search: (query, options) => window.kitsuneAPI._call('advanced/search', { query, options }), secretScan: (content, label) => window.kitsuneAPI._call('advanced/secretScan', { content, label }), preflight: (input, options) => window.kitsuneAPI._call('advanced/preflight', { input, options }), captureInfrastructure: input => window.kitsuneAPI._call('advanced/capture', { input }), diffInfrastructure: (left, right) => window.kitsuneAPI._call('advanced/diff', { left, right }), drift: input => window.kitsuneAPI._call('advanced/drift', { input }), blastRadius: input => window.kitsuneAPI._call('advanced/blastRadius', { input }), digitalTwin: (capture, operation) => window.kitsuneAPI._call('advanced/digitalTwin', { capture, operation }), correlateLogs: sources => window.kitsuneAPI._call('advanced/logs', { sources }), anomaly: samples => window.kitsuneAPI._call('advanced/anomaly', { samples }), explain: value => window.kitsuneAPI._call('advanced/explain', { value }), dns: hostname => window.kitsuneAPI._call('advanced/dns', { hostname }), certificate: (hostname, port) => window.kitsuneAPI._call('advanced/certificate', { hostname, port })
@@ -926,6 +933,10 @@ window.kitsuneAPI._selectServerDirectory = function(initialPath) {
 // SSE for real-time events (terminal, service exit, download progress)
 (function() {
   const evtSource = new EventSource('/api/events');
+  window.__kitsuneEventsReady = new Promise(resolve => {
+    const timeout = setTimeout(() => resolve(false), 5000);
+    evtSource.onopen = function() { clearTimeout(timeout); resolve(true); };
+  });
   evtSource.onmessage = function(e) {
     try {
       const msg = JSON.parse(e.data);
@@ -976,10 +987,35 @@ try { nodePty = require('node-pty'); } catch {}
 const terminals = new Map();
 let terminalIdCounter = 0;
 
+function terminalOutput(terminal, data) {
+  const text = String(data || '');
+  if (!terminal.attached) terminal.backlog = `${terminal.backlog || ''}${text}`.slice(-262144);
+  else broadcastSSE('terminal:data', { id: terminal.id, data: text }, terminal.sessionId);
+}
+
+function terminalExited(terminal, code) {
+  if (terminal.closed) return;
+  terminal.closed = true;
+  try { terminal.release?.(); } catch {}
+  terminal.exitCode = Number(code) || 0;
+  if (terminal.attached) {
+    terminals.delete(terminal.id);
+    broadcastSSE('terminal:exit', { id: terminal.id, code: terminal.exitCode }, terminal.sessionId);
+  }
+}
+
+function closeTerminalProcess(terminal) {
+  try {
+    if (terminal.remote) terminal.process.end();
+    else terminal.process.kill();
+  } catch {}
+  try { terminal.release?.(); } catch {}
+}
+
 function terminateSessionResources(sessionId) {
   for (const [id, terminal] of terminals) {
     if (terminal.sessionId !== sessionId) continue;
-    try { terminal.process.kill(); } catch {}
+    closeTerminalProcess(terminal);
     terminals.delete(id);
   }
   for (const [res, clientSessionId] of sseClients) {
@@ -1064,6 +1100,8 @@ function endpointPermission(endpoint, body = {}) {
   if (endpoint.startsWith('lab/')) return /\/(list|get|recipes|preview|health)$/.test(endpoint) ? 'labs.read' : (/\/(start|stop|provision)$/.test(endpoint) ? 'labs.operate' : 'labs.sync');
   if (endpoint.startsWith('apiFlow/')) return /\/(list|get|catalog|validate|status|logs)$/.test(endpoint) ? 'api-flows.read' : 'api-flows.*';
   if (endpoint.startsWith('service/') || endpoint.startsWith('terminal/') || endpoint.startsWith('command/')) return 'nodes.operate';
+  if (endpoint.startsWith('incident/')) return ['incident/list', 'incident/suggestRunbook'].includes(endpoint) ? 'nodes.read' : 'nodes.operate';
+  if (endpoint.startsWith('resilience/')) return ['resilience/capabilities', 'resilience/ports'].includes(endpoint) ? 'nodes.read' : 'nodes.operate';
 if (/^(remote|files|storage|advanced|fabric|enterprise|nextgen|opsWorkspace|terminalFilePro|terminalFileVision|terminalFileRuntime|terminalFileDeep)\//.test(endpoint)) return /\/(list|summary|agents|graph|commands|configuration|workspaces|evaluate|forecast|diff|blastRadius|digitalTwin|logs|anomaly|explain|dns|certificate|policyEvaluate|serviceMap|gitOpsPlan|dbDiff|dbErd|dbMask|copilot|replaySimulate|agentProbe|agentBootstrap|sloEvaluate|capacityForecast|airgapVerify|failoverPlan|relayRoute|relayBootstrap|shellParse|deltaSignature|deltaPlan|snapshotBrowse|ransomwareScan|networkTwin|blackBoxExport|dnaCompare|connectivityHeal|intentPlan|simulatorRun|resume|timeline|undoPlan|connectionDoctor|smartTransfer|environmentDiff|memorySearch|autocomplete|movie|palettePlan|secretless|notebook|pasteAnalyze|translate|sidecar|checkpointRestore|resultMatrix|outputActions|recordingStudio|hugeFile|indexSearch|provenance|duplicates|heatmap|causality|pipelinePlan|dropZoneInspect)$/.test(endpoint) ? 'nodes.read' : 'nodes.operate';
   return '';
 }
@@ -1081,6 +1119,8 @@ const parityHandlers = {
   'remote/list': () => remoteAccessManager.list(), 'remote/save': body => remoteAccessManager.save(body.input, body.secrets), 'remote/remove': body => remoteAccessManager.remove(body.id), 'remote/duplicate': body => remoteAccessManager.duplicate(body.id), 'remote/resetHostKey': body => remoteAccessManager.resetHostKey(body.id), 'remote/test': async body => { try { const { client } = await remoteAccessManager.connect(body.input); client.end(); return { success: true }; } catch (error) { return { success: false, error: error.message }; } }, 'remote/diagnose': body => remoteAccessManager.diagnose(body.input), 'remote/inspect': body => remoteOperationsManager.inspect(body.input, body.kind), 'remote/docker': body => remoteOperationsManager.docker(body.input, body.action, body.target), 'remote/systemd': body => remoteOperationsManager.systemd(body.input, body.action, body.unit), 'remote/signal': body => remoteOperationsManager.signal(body.input, body.pid, body.signal), 'remote/archive': body => remoteOperationsManager.archive(body.input, body.action, body.source, body.destination), 'remote/wake': body => remoteOperationsManager.wake(body.mac, body.address, body.port), 'remote/deploy': body => remoteOperationsManager.deploy(body.connection, body.options),
   'files/localList': body => remoteAccessManager.localList(body.directory), 'files/localMutate': body => remoteAccessManager.localMutate(body.operation, body.target, body.destination), 'files/remoteList': body => remoteAccessManager.remoteList(body.connection, body.directory), 'files/transfer': body => remoteAccessManager.transfer(body.connection, body.direction, body.localPath, body.remotePath), 'files/transferResumable': body => remoteAccessManager.transferResumable(body.connection, body.direction, body.localPath, body.remotePath), 'files/transferRecursive': body => remoteAccessManager.transferRecursive(body.connection, body.direction, body.localPath, body.remotePath), 'files/remoteMutate': body => remoteAccessManager.mutate(body.connection, body.operation, body.target, body.destination), 'files/readLocal': body => remoteAccessManager.readLocal(body.target), 'files/writeLocal': body => remoteAccessManager.writeLocal(body.target, body.content), 'files/readRemote': body => remoteAccessManager.readRemote(body.connection, body.target), 'files/writeRemote': body => remoteAccessManager.writeRemote(body.connection, body.target, body.content), 'files/searchLocal': body => remoteAccessManager.searchLocal(body.directory, body.query), 'files/searchRemote': body => remoteAccessManager.searchRemote(body.connection, body.directory, body.query), 'files/diff': async body => { const remoteFile = await remoteAccessManager.readRemote(body.connection, body.remotePath); return remoteAccessManager.diffText(body.localPath, remoteFile.content); }, 'files/syncPreview': body => remoteAccessManager.syncPreview(body.connection, body.localPath, body.remotePath, body.options), 'files/syncApply': body => remoteAccessManager.syncApply(body.connection, body.preview, body.direction, body.selected),
   'storage/list': () => cloudStorageManager.list(), 'storage/save': body => cloudStorageManager.save(body.input, body.secrets), 'storage/remove': body => cloudStorageManager.remove(body.id), 'storage/test': body => cloudStorageManager.test(body.input), 'storage/listFiles': body => cloudStorageManager.listFiles(body.input, body.directory), 'storage/transfer': body => cloudStorageManager.transferLocal(body.input, body.direction, body.localPath, body.remotePath), 'storage/transferRecursive': body => cloudStorageManager.transferRecursive(body.input, body.direction, body.localPath, body.remotePath), 'storage/mutate': body => cloudStorageManager.mutate(body.input, body.operation, body.target, body.destination), 'storage/read': body => cloudStorageManager.read(body.input, body.remotePath), 'storage/write': body => cloudStorageManager.write(body.input, body.remotePath, body.content),
+  'incident/list': () => incidentManager.list(), 'incident/start': body => incidentManager.start(body.input), 'incident/update': body => incidentManager.update(body.id, body.patch), 'incident/collect': body => incidentManager.collect(body.id, body.input), 'incident/capsule': body => incidentManager.capsule(body.id), 'incident/suggestRunbook': body => incidentManager.suggestRunbook(body.id),
+  'resilience/capabilities': () => resilienceManager.capabilities(), 'resilience/sshCaCreate': body => resilienceManager.createSshCa(body.name, body.passphrase), 'resilience/sshSign': body => resilienceManager.signSshKey(body.caId, body.publicKeyPath, body.identity, body.principals, body.validity), 'resilience/sshCaInstall': body => resilienceManager.installSshCa(body.input, body.caId), 'resilience/mosh': body => resilienceManager.openMosh(body.input), 'resilience/ports': body => resilienceManager.portInspect(body.input), 'resilience/databaseTunnel': body => resilienceManager.databaseTunnel(body.input, body.options), 'resilience/cron': body => resilienceManager.cron(body.input, body.action, body.options), 'resilience/timer': body => resilienceManager.systemdTimer(body.input, body.action, body.options), 'resilience/firewall': async body => { const plan = await resilienceManager.firewall(body.input, body.action, body.rule); if (body.action === 'status' || !body.execute) return body.action === 'status' ? plan : { success: true, preview: plan.preview }; return plan.execute(); }, 'resilience/certificateRenew': body => resilienceManager.certificateRenew(body.input, body.provider, body.domain), 'resilience/cachePut': body => resilienceManager.cachePut(body.file), 'resilience/cacheRestore': body => resilienceManager.cacheRestore(body.hash, body.target), 'resilience/transferLimited': body => resilienceManager.transferLimited(body.input, body.direction, body.local, body.remote, body.rate), 'resilience/backup': body => resilienceManager.deduplicatedBackup(body.source, body.name), 'resilience/backupRestore': body => resilienceManager.restoreDeduplicated(body.id, body.target), 'resilience/offlineVault': body => resilienceManager.offlineVaultCreate(body.input), 'resilience/breakGlassCreate': body => resilienceManager.breakGlassCreate(body.input), 'resilience/breakGlassConsume': body => { const authentication = body.authentication || {}; const verified = identityManager.authenticate(authentication.username, authentication.password, authentication.secondFactor); if (!verified.success) throw new Error(verified.error); return resilienceManager.breakGlassConsume(body.id, body.code, true); },
   'advanced/graph': () => advancedOpsManager.graph(), 'advanced/commands': () => advancedOpsManager.commandCatalog(), 'advanced/configuration': () => advancedOpsManager.configuration(), 'advanced/workspaces': () => advancedOpsManager.listSmartWorkspaces(), 'advanced/workspaceSave': body => advancedOpsManager.saveSmartWorkspace(body.input), 'advanced/search': body => advancedOpsManager.globalSearch(body.query, body.options), 'advanced/secretScan': body => advancedOpsManager.secretScan(body.content, body.label), 'advanced/preflight': body => advancedOpsManager.preflight(body.input, body.options), 'advanced/capture': body => advancedOpsManager.captureInfrastructure(body.input), 'advanced/diff': body => advancedOpsManager.diffInfrastructure(body.left, body.right), 'advanced/drift': body => advancedOpsManager.checkDrift(body.input), 'advanced/blastRadius': body => advancedOpsManager.blastRadius(body.input), 'advanced/digitalTwin': body => advancedOpsManager.digitalTwin(body.capture, body.operation), 'advanced/logs': body => advancedOpsManager.logCorrelate(body.sources), 'advanced/anomaly': body => advancedOpsManager.anomaly(body.samples), 'advanced/explain': body => advancedOpsManager.explainError(body.value), 'advanced/dns': body => advancedOpsManager.dnsInspect(body.hostname), 'advanced/certificate': body => advancedOpsManager.certificateInspect(body.hostname, body.port),
   'fabric/summary': () => operationsFabricManager.summary(), 'fabric/policySave': body => operationsFabricManager.savePolicy(body.input), 'fabric/policyEvaluate': body => operationsFabricManager.evaluatePolicy(body.context), 'fabric/serviceMap': body => operationsFabricManager.serviceMap(body.input), 'fabric/gitOpsPlan': body => operationsFabricManager.gitOpsPlan(body.observed, body.desired), 'fabric/syntheticSave': body => operationsFabricManager.saveSynthetic(body.input), 'fabric/syntheticRun': body => operationsFabricManager.runSynthetic(body.id), 'fabric/canarySave': body => operationsFabricManager.saveCanary(body.input), 'fabric/canaryAdvance': body => operationsFabricManager.advanceCanary(body.id, body.metrics), 'fabric/dbDiff': body => operationsFabricManager.databaseSchemaDiff(body.left, body.right), 'fabric/dbErd': body => operationsFabricManager.databaseErd(body.schema), 'fabric/dbMask': body => operationsFabricManager.maskRows(body.rows, body.rules), 'fabric/copilot': body => operationsFabricManager.localCopilot(body.context), 'fabric/replaySimulate': body => operationsFabricManager.simulateReplay(body.id, body.action),
   'enterprise/configuration': () => enterpriseOpsManager.configuration(),
@@ -1388,6 +1428,7 @@ async function handleAPI(endpoint, body, context = {}) {
       await recoveryPromise;
       return {
         name: 'KitsuneServ', version: packageInfo.version, dataRoot: appRoot, platform: process.platform, mode: 'server', safeMode: SAFE_MODE,
+        capabilities: { hostTerminal: true, remoteShell: true, hostFiles: true, remoteFiles: true, nativeLaunch: false, nativeDesktop: false },
         migration: configManager.getMigrationInfo(), recovery: projectManager.getRecoveryReport()
       };
     }
@@ -1623,6 +1664,26 @@ async function handleAPI(endpoint, body, context = {}) {
     // Terminal
     case 'terminal/create': {
       const id = ++terminalIdCounter;
+      if (body?.connection?.host || body?.connection?.id) {
+        let lease;
+        try {
+          const resolved = remoteAccessManager.resolve(body.connection);
+          if (!['ssh', 'sftp'].includes(resolved.type)) return { success: false, error: 'Web terminal supports SSH and SFTP profiles. Native desktop protocols are available only in the desktop application.' };
+          lease = await remoteAccessManager.lease(body.connection, 'web-terminal');
+          const stream = await new Promise((resolve, reject) => lease.client.shell({ term: 'xterm-256color', cols: 120, rows: 32 }, (error, value) => error ? reject(error) : resolve(value)));
+          const terminal = { process: stream, id, remote: true, pty: true, sessionId: context.sessionId, remoteSessionId: lease.session.id, release: lease.release, attached: false, backlog: '', closed: false };
+          terminals.set(id, terminal);
+          stream.on('data', data => terminalOutput(terminal, data.toString()));
+          stream.stderr?.on('data', data => terminalOutput(terminal, data.toString()));
+          stream.once('close', code => terminalExited(terminal, code));
+          stream.once('error', error => { terminalOutput(terminal, `\r\n[KitsuneServ] ${error.message}\r\n`); terminalExited(terminal, 1); });
+          if (lease.session.tmuxSession) stream.write(`tmux new-session -A -s ${lease.session.tmuxSession}\r`);
+          return { id, name: lease.session.name, remote: true, pty: true, sessionId: lease.session.id, protocol: 'ssh' };
+        } catch (error) {
+          try { lease?.release?.(); } catch {}
+          return { success: false, error: error.message };
+        }
+      }
       const profiles = localShellProfiles();
       const localProfile = String(body?.connection?.localProfile || '').trim();
       const profile = profiles.find(item => item.id === localProfile) || profiles.find(item => item.id === 'shell') || profiles[0];
@@ -1637,15 +1698,16 @@ async function handleAPI(endpoint, body, context = {}) {
       } catch (error) {
         return { success: false, error: error.message };
       }
-      terminals.set(id, { process: child, id, pty: Boolean(nodePty), sessionId: context.sessionId });
+      const terminal = { process: child, id, pty: Boolean(nodePty), remote: false, sessionId: context.sessionId, attached: false, backlog: '', closed: false };
+      terminals.set(id, terminal);
       if (nodePty) {
-        child.onData(data => broadcastSSE('terminal:data', { id, data }, context.sessionId));
-        child.onExit(({ exitCode }) => { terminals.delete(id); broadcastSSE('terminal:exit', { id, code: exitCode }, context.sessionId); });
+        child.onData(data => terminalOutput(terminal, data));
+        child.onExit(({ exitCode }) => terminalExited(terminal, exitCode));
       } else {
-        child.stdout.on('data', data => broadcastSSE('terminal:data', { id, data: data.toString() }, context.sessionId));
-        child.stderr.on('data', data => broadcastSSE('terminal:data', { id, data: data.toString() }, context.sessionId));
-        child.on('error', error => { terminals.delete(id); broadcastSSE('terminal:data', { id, data: `[KitsuneServ] ${error.message}\n` }, context.sessionId); broadcastSSE('terminal:exit', { id, code: 1 }, context.sessionId); });
-        child.on('exit', code => { terminals.delete(id); broadcastSSE('terminal:exit', { id, code }, context.sessionId); });
+        child.stdout.on('data', data => terminalOutput(terminal, data.toString()));
+        child.stderr.on('data', data => terminalOutput(terminal, data.toString()));
+        child.on('error', error => { terminalOutput(terminal, `[KitsuneServ] ${error.message}\n`); terminalExited(terminal, 1); });
+        child.on('exit', code => terminalExited(terminal, code));
       }
       return { id, name: profile.name, profileId: profile.id, pty: Boolean(nodePty) };
     }
@@ -1741,13 +1803,22 @@ async function handleAPI(endpoint, body, context = {}) {
     case 'domain/certificateStatus': return domainManager.certificateStatus(body.domain);
     case 'domain/installCertificateAuthority': return domainManager.installCertificateAuthority();
     case 'domain/issueCertificate': return domainManager.issueCertificate(body.domain);
+    case 'terminal/attach': {
+      const term = terminals.get(body.id);
+      if (!term || term.sessionId !== context.sessionId) return { success: false, error: 'Terminal not found' };
+      const data = term.backlog || '';
+      term.backlog = '';
+      term.attached = true;
+      if (term.closed) terminals.delete(term.id);
+      return { success: true, data, exited: term.exitCode !== undefined, code: term.exitCode };
+    }
     case 'terminal/write': {
       const term = terminals.get(body.id);
       if (!term || term.sessionId !== context.sessionId) return { success: false, error: 'Terminal not found' };
       if (typeof body.data !== 'string' || Buffer.byteLength(body.data) > 65536) {
         return { success: false, error: 'Invalid terminal input' };
       }
-      if (term.pty) term.process.write(body.data);
+      if (term.remote || term.pty) term.process.write(body.data);
       else {
         if (!term.process.stdin.writable) return { success: false, error: 'Terminal input is closed' };
         term.process.stdin.write(body.data);
@@ -1757,13 +1828,16 @@ async function handleAPI(endpoint, body, context = {}) {
     case 'terminal/kill': {
       const term = terminals.get(body.id);
       if (!term || term.sessionId !== context.sessionId) return { success: false };
-      try { term.process.kill(); } catch {}
+      closeTerminalProcess(term);
       terminals.delete(body.id);
       return { success: true };
     }
     case 'terminal/resize': {
       const term = terminals.get(body.id); if (!term || term.sessionId !== context.sessionId) return { success: false };
-      if (term.pty) try { term.process.resize(Math.max(2, Math.min(500, Number(body.cols) || 120)), Math.max(2, Math.min(200, Number(body.rows) || 32))); } catch {}
+      const cols = Math.max(2, Math.min(500, Number(body.cols) || 120));
+      const rows = Math.max(2, Math.min(200, Number(body.rows) || 32));
+      if (term.remote) try { term.process.setWindow(rows, cols, 0, 0); } catch {}
+      else if (term.pty) try { term.process.resize(cols, rows); } catch {}
       return { success: true };
     }
 
@@ -2277,7 +2351,7 @@ async function shutdown(exitCode = 0) {
   try { await serviceManager.stopAll(); } catch (err) { console.warn('[KitsuneServ] Service shutdown warning:', err.message); }
   try { projectManager.markCleanShutdown(); } catch {}
   for (const term of terminals.values()) {
-    try { term.process.kill(); } catch {}
+    closeTerminalProcess(term);
   }
   for (const res of sseClients.keys()) {
     try { res.end(); } catch {}

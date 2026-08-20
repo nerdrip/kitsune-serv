@@ -11,8 +11,17 @@ $deployment = (array) ($state['deployment'] ?? []);
 $proxy = (array) ($state['proxy'] ?? []);
 $extensionUpdate = (array) ($state['extensionUpdate'] ?? []);
 $serviceActive = !empty($service['active']);
+$serviceInstalled = !empty($service['installed']);
 $healthOk = ($service['health'] ?? null) === true;
 $paired = (bool) $this->paired;
+$repositoryReady = !empty($repository['localCommit']);
+$deploymentReady = !empty($deployment['version']);
+$configured = !empty($c['panel_domain']) && !empty($c['hub_url']);
+$selectedApiDomains = array_values(array_filter(preg_split('/\s*,\s*/', (string) ($c['api_domains'] ?? ''), -1, PREG_SPLIT_NO_EMPTY)));
+$isDirectApiDomain = static function ($candidate) use ($c) { $base = (string) $c['panel_domain']; return $base !== '' && substr((string) $candidate, -(strlen($base) + 1)) === '.' . $base && substr_count((string) $candidate, '.') === substr_count($base, '.') + 1; };
+$serviceLabel = !$configured ? 'Wymaga konfiguracji' : (!$serviceInstalled ? 'Jeszcze niewdrożona' : ($serviceActive ? ($healthOk ? 'Usługa działa' : 'Usługa bez odpowiedzi HTTP') : 'Usługa zatrzymana'));
+$extensionStatus = (string) ($extensionUpdate['status'] ?? 'never-checked');
+$extensionLabel = $extensionStatus === 'scheduled' ? 'Aktualizacja zaplanowana' : ($extensionStatus === 'available' ? 'Dostępna aktualizacja' : ($extensionStatus === 'failed' ? 'Błąd aktualizacji' : ($extensionStatus === 'never-checked' ? 'Nie sprawdzono' : 'Wersja aktualna')));
 $shortCommit = static function ($value) { return $value ? substr((string) $value, 0, 10) : '—'; };
 ?>
 <div class="ks-shell" data-deployment-mode="<?php echo $e($c['deployment_mode']); ?>" data-url-mode="<?php echo $e($c['url_mode']); ?>" data-proxy-mode="<?php echo $e($c['proxy_mode']); ?>">
@@ -26,20 +35,20 @@ $shortCommit = static function ($value) { return $value ? substr((string) $value
       </div>
     </div>
     <div class="ks-hero-status">
-      <span class="ks-pill <?php echo $serviceActive ? 'is-good' : 'is-muted'; ?>"><i></i><?php echo $serviceActive ? 'Usługa działa' : 'Usługa zatrzymana'; ?></span>
+      <span class="ks-pill <?php echo $healthOk ? 'is-good' : 'is-warning'; ?>"><i></i><?php echo $e($serviceLabel); ?></span>
       <span class="ks-pill <?php echo $paired ? 'is-good' : 'is-warning'; ?>"><i></i><?php echo $paired ? 'Węzeł sparowany' : 'Brak parowania'; ?></span>
       <span class="ks-version">v<?php echo $e($this->extensionVersion); ?></span>
     </div>
   </header>
 
   <nav class="ks-tabs" aria-label="Sekcje KitsuneServ Bridge">
-    <button type="button" class="is-active" data-ks-tab="overview">Przegląd</button>
+    <button type="button" class="is-active" data-ks-tab="overview">Start</button>
     <?php if ($this->isAdmin): ?>
       <button type="button" data-ks-tab="deployment">Wdrożenie</button>
-      <button type="button" data-ks-tab="configuration">Konfiguracja</button>
-      <button type="button" data-ks-tab="access">Dostęp i SSO</button>
-      <button type="button" data-ks-tab="manual">Instrukcja ręczna</button>
-      <button type="button" data-ks-tab="logs">Logi</button>
+      <button type="button" data-ks-tab="configuration">Domeny i ustawienia</button>
+      <button type="button" data-ks-tab="access">Połączenie z Hubem</button>
+      <button type="button" data-ks-tab="manual">Konfiguracja ręczna</button>
+      <button type="button" data-ks-tab="logs">Diagnostyka</button>
     <?php endif; ?>
   </nav>
 
@@ -56,12 +65,21 @@ $shortCommit = static function ($value) { return $value ? substr((string) $value
       <?php endif; ?>
 
       <div class="ks-metrics">
-        <article><span>Publikacja</span><strong><?php echo $e($c['panel_domain'] ?: 'Nie wybrano'); ?></strong><small><?php echo $e($c['hub_url'] ?: 'Brak adresu Hub'); ?></small></article>
-        <article><span>Wersja wdrożona</span><strong><?php echo $e($deployment['version'] ?? '—'); ?></strong><small>commit <?php echo $e($shortCommit($deployment['commit'] ?? null)); ?></small></article>
-        <article><span>Repozytorium</span><strong><?php echo !empty($repository['updateAvailable']) ? 'Aktualizacja dostępna' : 'Stan lokalny'; ?></strong><small><?php echo $e($c['repository_branch']); ?> · <?php echo $e($shortCommit($repository['localCommit'] ?? null)); ?></small></article>
-        <article><span>Zdrowie usługi</span><strong class="<?php echo $healthOk ? 'ks-good-text' : ''; ?>"><?php echo $healthOk ? 'HTTP odpowiada' : ($serviceActive ? 'Brak odpowiedzi' : 'Nie działa'); ?></strong><small>PID <?php echo $e(($service['pid'] ?? 0) ?: '—'); ?> · port <?php echo $e($c['hub_port']); ?></small></article>
-        <article><span>Plesk Bridge</span><strong><?php echo $e(($extensionUpdate['status'] ?? '') === 'scheduled' ? 'Aktualizacja zaplanowana' : (($extensionUpdate['status'] ?? '') === 'failed' ? 'Błąd aktualizacji' : 'Aktualny')); ?></strong><small><?php echo $e($extensionUpdate['current'] ?? $this->extensionVersion); ?><?php if (!empty($extensionUpdate['candidate']) && $extensionUpdate['candidate'] !== ($extensionUpdate['current'] ?? '')): ?> → <?php echo $e($extensionUpdate['candidate']); ?><?php endif; ?></small></article>
+        <article><span>Domeny publiczne</span><strong><?php echo $e($c['panel_domain'] ?: 'Nie skonfigurowano'); ?></strong><small><?php echo count($selectedApiDomains); ?> dodatkowych domen API/Test Lab</small></article>
+        <article><span>Aplikacja KitsuneServ</span><strong><?php echo $e($deploymentReady ? 'v' . $deployment['version'] : 'Nie wdrożono'); ?></strong><small><?php echo $repositoryReady ? $e($c['repository_branch'] . ' · ' . $shortCommit($repository['localCommit'])) : 'Repozytorium nie jest jeszcze zsynchronizowane'; ?></small></article>
+        <article><span>Stan usługi</span><strong class="<?php echo $healthOk ? 'ks-good-text' : ''; ?>"><?php echo $e($serviceLabel); ?></strong><small><?php echo $serviceInstalled ? 'PID ' . $e(($service['pid'] ?? 0) ?: '—') . ' · port ' . $e($c['hub_port']) : 'Najpierw wykonaj pierwsze wdrożenie'; ?></small></article>
+        <article><span>Wtyczka Plesk</span><strong><?php echo $e($extensionLabel); ?></strong><small><?php echo $e($extensionUpdate['current'] ?? $this->extensionVersion); ?><?php if (!empty($extensionUpdate['candidate']) && $extensionUpdate['candidate'] !== ($extensionUpdate['current'] ?? '')): ?> → <?php echo $e($extensionUpdate['candidate']); ?><?php endif; ?></small></article>
       </div>
+
+      <article class="ks-card ks-setup-card">
+        <div class="ks-card-head"><div><span class="ks-kicker">URUCHOMIENIE KROK PO KROKU</span><h2><?php echo $healthOk ? 'Węzeł jest gotowy' : 'Co należy zrobić dalej'; ?></h2></div><span class="ks-icon">✓</span></div>
+        <ol class="ks-setup-steps">
+          <li class="<?php echo $configured ? 'is-done' : 'is-current'; ?>"><span><?php echo $configured ? '✓' : '1'; ?></span><div><strong>Domeny i ustawienia</strong><small><?php echo $configured ? 'Zapisano domenę Hub i sposób publikacji.' : 'Wybierz domenę Hub oraz opcjonalne domeny API/Test Lab.'; ?></small></div></li>
+          <li class="<?php echo $repositoryReady ? 'is-done' : ($configured ? 'is-current' : ''); ?>"><span><?php echo $repositoryReady ? '✓' : '2'; ?></span><div><strong>Synchronizacja kodu</strong><small><?php echo $repositoryReady ? 'Repozytorium jest dostępne lokalnie.' : 'W zakładce Wdrożenie wybierz „Pobierz kod”.'; ?></small></div></li>
+          <li class="<?php echo $deploymentReady ? 'is-done' : ($repositoryReady ? 'is-current' : ''); ?>"><span><?php echo $deploymentReady ? '✓' : '3'; ?></span><div><strong>Pierwsze wdrożenie</strong><small><?php echo $deploymentReady ? 'Aktywne wydanie: v' . $e($deployment['version']) . '.' : 'Wdróż zsynchronizowany kod i utwórz usługę systemd.'; ?></small></div></li>
+          <li class="<?php echo $healthOk ? 'is-done' : ($deploymentReady ? 'is-current' : ''); ?>"><span><?php echo $healthOk ? '✓' : '4'; ?></span><div><strong>Kontrola działania</strong><small><?php echo $healthOk ? 'HTTP odpowiada przez lokalny port Huba.' : 'Uruchom usługę i sprawdź diagnostykę.'; ?></small></div></li>
+        </ol>
+      </article>
 
       <div class="ks-grid ks-grid-2">
         <article class="ks-card">
@@ -69,7 +87,8 @@ $shortCommit = static function ($value) { return $value ? substr((string) $value
           <dl class="ks-summary">
             <div><dt>Aplikacja</dt><dd><?php echo $c['deployment_mode'] === 'managed' ? 'Zarządzana przez Plesk Bridge' : 'Istniejący zewnętrzny Hub'; ?></dd></div>
             <div><dt>Adres publiczny</dt><dd><?php echo $c['url_mode'] === 'automatic' ? 'Automatycznie z domeny' : 'Wpisany ręcznie'; ?></dd></div>
-            <div><dt>Reverse proxy</dt><dd><?php echo $c['proxy_mode'] === 'managed' ? 'Automatyczny blok nginx' : 'Konfiguracja ręczna'; ?></dd></div>
+            <div><dt>Reverse proxy</dt><dd><?php echo $c['proxy_mode'] === 'managed' ? 'Standardowy hook Pleska' : 'Konfiguracja ręczna'; ?></dd></div>
+            <div><dt>Domeny API</dt><dd><?php echo $selectedApiDomains ? $e(implode(', ', $selectedApiDomains)) : 'Nie wybrano'; ?></dd></div>
             <div><dt>Uwierzytelnianie</dt><dd><?php echo $c['auth_mode'] === 'hybrid' ? 'Plesk + konta niezależne' : ($c['auth_mode'] === 'plesk' ? 'Tylko Plesk' : 'Tylko konta niezależne'); ?></dd></div>
             <div><dt>Runtime Node.js</dt><dd><?php echo $e(($runtime['nodeVersion'] ?? '') ? 'v' . $runtime['nodeVersion'] . ' · ' . ($runtime['node'] ?? '') : 'Automatyczny — jeszcze niewykryty'); ?></dd></div>
           </dl>
@@ -102,15 +121,24 @@ $shortCommit = static function ($value) { return $value ? substr((string) $value
           <div class="ks-state-table"><div><span>Lokalny commit</span><code><?php echo $e($repository['localCommit'] ?? '—'); ?></code></div><div><span>Zdalny commit</span><code><?php echo $e($repository['remoteCommit'] ?? '—'); ?></code></div><div><span>Wdrożono</span><strong><?php echo $e($deployment['deployedAt'] ?? '—'); ?></strong></div></div>
         </article>
         <article class="ks-card ks-operation-card">
-          <div class="ks-card-head"><div><span class="ks-kicker">SYSTEMD I NGINX</span><h2>Sterowanie usługą</h2></div><span class="ks-icon">◉</span></div>
-          <div class="ks-service-banner <?php echo $serviceActive ? 'is-running' : ''; ?>"><span></span><div><strong><?php echo $serviceActive ? 'kitsuneserv-hub.service działa' : 'kitsuneserv-hub.service nie działa'; ?></strong><small><?php echo !empty($service['enabled']) ? 'Autostart włączony' : 'Autostart wyłączony'; ?> · health <?php echo $healthOk ? 'OK' : 'brak'; ?></small></div></div>
+          <div class="ks-card-head"><div><span class="ks-kicker">SYSTEMD I SERWER WWW</span><h2>Usługa i publikacja</h2></div><span class="ks-icon">◉</span></div>
+          <div class="ks-service-banner <?php echo $serviceActive ? 'is-running' : ''; ?>"><span></span><div><strong><?php echo $e($serviceLabel); ?></strong><small><?php echo $serviceInstalled ? (!empty($service['enabled']) ? 'Autostart włączony' : 'Autostart wyłączony') . ' · HTTP ' . ($healthOk ? 'odpowiada' : 'nie odpowiada') : 'Jednostka systemd powstanie przy pierwszym wdrożeniu'; ?></small></div></div>
           <form method="post" action="<?php echo $e($url('operation')); ?>" class="ks-operation-form">
             <button class="ks-button is-success" name="operation" value="start">Uruchom</button>
             <button class="ks-button" name="operation" value="restart" data-ks-confirm="Zrestartować usługę KitsuneServ Hub?">Restart</button>
             <button class="ks-button is-danger" name="operation" value="stop" data-ks-confirm="Zatrzymać KitsuneServ Hub? Panel przestanie odpowiadać.">Zatrzymaj</button>
-            <button class="ks-button" name="operation" value="proxy">Zastosuj reverse proxy</button>
+            <button class="ks-button" name="operation" value="proxy">Przebuduj domeny WWW</button>
           </form>
-          <div class="ks-state-table"><div><span>Plik proxy</span><code><?php echo $e($proxy['path'] ?? '—'); ?></code></div><div><span>Domena proxy</span><strong><?php echo $e($proxy['domain'] ?? '—'); ?></strong></div><div><span>Ostatnia operacja</span><strong><?php echo $e($state['lastOperation'] ?? '—'); ?></strong></div></div>
+          <div class="ks-state-table"><div><span>Integracja WWW</span><code><?php echo $e($proxy['strategy'] ?? 'pm_Hook_WebServer'); ?></code></div><div><span>Domeny</span><strong><?php echo $e(!empty($proxy['domains']) ? implode(', ', (array) $proxy['domains']) : ($c['panel_domain'] ?: '—')); ?></strong></div><div><span>Ostatnia operacja</span><strong><?php echo $e($state['lastOperation'] ?? '—'); ?></strong></div></div>
+        </article>
+        <article class="ks-card ks-operation-card ks-span-2">
+          <div class="ks-card-head"><div><span class="ks-kicker">AKTUALIZACJA WTYCZKI</span><h2>Plesk Bridge z tego samego repozytorium</h2></div><span class="ks-icon">↻</span></div>
+          <p class="ks-muted">Bridge porównuje własną wersję z <code>plesk-extension/kitsuneserv-bridge/meta.xml</code> na gałęzi <code><?php echo $e($c['repository_branch']); ?></code>. Po zwykłej synchronizacji nowsza wersja jest instalowana automatycznie poza bieżącym zadaniem Pleska.</p>
+          <div class="ks-service-banner <?php echo in_array($extensionStatus, ['current', 'scheduled'], true) ? 'is-running' : ''; ?>"><span></span><div><strong><?php echo $e($extensionLabel); ?></strong><small>Zainstalowano <?php echo $e($this->extensionVersion); ?><?php if (!empty($extensionUpdate['checkedAt'])): ?> · sprawdzono <?php echo $e($extensionUpdate['checkedAt']); ?><?php endif; ?></small></div></div>
+          <form method="post" action="<?php echo $e($url('operation')); ?>" class="ks-operation-form">
+            <button class="ks-button" name="operation" value="extension-check">Sprawdź aktualizację Bridge</button>
+            <button class="ks-button is-primary" name="operation" value="extension-update" data-ks-confirm="Pobrać repozytorium i zaplanować aktualizację wtyczki Plesk Bridge?">Pobierz i zaktualizuj Bridge</button>
+          </form>
         </article>
       </div>
     </section>
@@ -125,7 +153,8 @@ $shortCommit = static function ($value) { return $value ? substr((string) $value
             <label class="ks-field"><span>Domena panelu z Pleska</span><select name="panel_domain" id="ks-panel-domain" required><option value="">— wybierz aktywną domenę —</option><?php foreach ($this->domains as $domain => $label): ?><option value="<?php echo $e($domain); ?>" <?php echo $c['panel_domain'] === $domain ? 'selected' : ''; ?>><?php echo $e($label); ?></option><?php endforeach; ?></select><small>Lista zawiera wyłącznie aktywne domeny i subdomeny z hostingiem WWW.</small></label>
             <label class="ks-field"><span>Tworzenie publicznego adresu</span><select name="url_mode" id="ks-url-mode"><option value="automatic" <?php echo $c['url_mode'] === 'automatic' ? 'selected' : ''; ?>>Automatycznie — https://wybrana-domena</option><option value="manual" <?php echo $c['url_mode'] === 'manual' ? 'selected' : ''; ?>>Ręcznie — własny adres istniejącego Hub</option></select></label>
             <label class="ks-field"><span>Publiczny adres Kitsune Hub</span><input type="url" name="hub_url" id="ks-hub-url" value="<?php echo $e($c['hub_url']); ?>" placeholder="https://hub.example.com" required><small id="ks-hub-url-help">Bez końcowego ukośnika i dodatkowej ścieżki.</small></label>
-            <label class="ks-field"><span>Konfiguracja reverse proxy</span><select name="proxy_mode" id="ks-proxy-mode"><option value="managed" <?php echo $c['proxy_mode'] === 'managed' ? 'selected' : ''; ?>>Automatyczna — zarządzany vhost_nginx.conf</option><option value="manual" <?php echo $c['proxy_mode'] === 'manual' ? 'selected' : ''; ?>>Ręczna — pokaż gotowy blok nginx</option></select><small>Automatyczna konfiguracja współistnieje z Plesk Proxy Mode, wykonuje reconfigure-domain i przy błędzie przywraca poprzedni plik.</small></label>
+            <fieldset class="ks-field ks-domain-picker ks-span-2"><legend>Domeny publikacji API i Test Lab</legend><small>Zaznacz utworzone w Plesku bezpośrednie subdomeny domeny Hub, np. <code>api.<?php echo $e($c['panel_domain'] ?: 'hub.example.com'); ?></code>. Bridge doda do nich proxy, a KitsuneServ wybierze API na podstawie nagłówka Host.</small><div><?php $apiDomainCount = 0; foreach ($this->domains as $domain => $label): if (!$isDirectApiDomain($domain)) continue; $apiDomainCount++; ?><label><input type="checkbox" name="api_domains[]" value="<?php echo $e($domain); ?>" <?php echo in_array($domain, $selectedApiDomains, true) ? 'checked' : ''; ?>><span><?php echo $e($label); ?></span></label><?php endforeach; ?><?php if (!$apiDomainCount): ?><p class="ks-domain-empty">Najpierw utwórz w Plesku subdomenę bezpośrednio pod domeną Hub.</p><?php endif; ?></div></fieldset>
+            <label class="ks-field"><span>Konfiguracja reverse proxy</span><select name="proxy_mode" id="ks-proxy-mode"><option value="managed" <?php echo $c['proxy_mode'] === 'managed' ? 'selected' : ''; ?>>Automatyczna — standardowy hook serwera WWW Pleska</option><option value="manual" <?php echo $c['proxy_mode'] === 'manual' ? 'selected' : ''; ?>>Ręczna — pokaż gotowy blok nginx</option></select><small>Plesk sam wstrzykuje dyrektywy podczas przebudowy domeny; Bridge nie nadpisuje plików vhost.</small></label>
             <label class="ks-field"><span>Tryb uwierzytelniania</span><select name="auth_mode"><option value="hybrid" <?php echo $c['auth_mode'] === 'hybrid' ? 'selected' : ''; ?>>Hybrydowy — hasło Pleska najpierw, potem konto lokalne</option><option value="plesk" <?php echo $c['auth_mode'] === 'plesk' ? 'selected' : ''; ?>>Tylko konta Pleska</option><option value="independent" <?php echo $c['auth_mode'] === 'independent' ? 'selected' : ''; ?>>Tylko konta lokalne Huba</option></select><small>Przy tej samej nazwie użytkownika zachowywany jest lokalny profil, role i MFA. Gdy logowanie przez Pleska jest aktywne, jego hasło ma pierwszeństwo.</small></label>
           </div>
         </article>
@@ -165,8 +194,7 @@ $shortCommit = static function ($value) { return $value ? substr((string) $value
               <label class="ks-field"><span>Główny klucz szyfrowania</span><input type="password" name="secret_key" autocomplete="new-password" placeholder="<?php echo $secrets['secret_key'] ? 'Zapisany — puste pole zachowa' : 'Minimum 32 znaki'; ?>"><small>Używany przez magazyn sekretów KitsuneServ.</small><em class="ks-clear"><input type="checkbox" name="clear_secret_key" value="1"> wyczyść klucz</em></label>
               <label class="ks-field"><span>Token API serwera</span><input type="password" name="api_token" autocomplete="new-password" placeholder="<?php echo $secrets['api_token'] ? 'Zapisany — puste pole zachowa' : 'Opcjonalny, minimum 24 znaki'; ?>"><em class="ks-clear"><input type="checkbox" name="clear_api_token" value="1"> wyczyść token</em></label>
               <label class="ks-field ks-span-2"><span>Dozwolone adresy IP / CIDR</span><input name="allowed_ips" value="<?php echo $e($c['allowed_ips']); ?>" placeholder="203.0.113.10, 2001:db8::/64"><small>Puste pole nie ogranicza dostępu na poziomie aplikacji. Plesk/nginx nadal kontroluje ruch publiczny.</small></label>
-              <label class="ks-field ks-span-2"><span>Adres podpisanego manifestu aktualizacji</span><input type="url" name="update_manifest_url" value="<?php echo $e($c['update_manifest_url']); ?>" placeholder="https://releases.example.com/kitsuneserv/latest.json"></label>
-              <label class="ks-field ks-span-2"><span>Klucz publiczny aktualizacji</span><textarea name="update_public_key" rows="5" placeholder="-----BEGIN PUBLIC KEY-----"><?php echo $e($c['update_public_key']); ?></textarea><small>Instalowane są wyłącznie paczki zgodne z manifestem i podpisem.</small></label>
+              <details class="ks-advanced-settings ks-span-2"><summary>Zaawansowany kanał aktualizacji aplikacji KitsuneServ</summary><div class="ks-form-grid"><label class="ks-field ks-span-2"><span>Adres podpisanego manifestu aktualizacji aplikacji</span><input type="url" name="update_manifest_url" value="<?php echo $e($c['update_manifest_url']); ?>" placeholder="https://releases.example.com/kitsuneserv/latest.json"><small>To kanał aplikacji desktopowej/serwerowej, niezależny od aktualizacji wtyczki Plesk powyżej.</small></label><label class="ks-field ks-span-2"><span>Klucz publiczny aktualizacji aplikacji</span><textarea name="update_public_key" rows="5" placeholder="-----BEGIN PUBLIC KEY-----"><?php echo $e($c['update_public_key']); ?></textarea><small>Instalowane są wyłącznie paczki zgodne z manifestem i podpisem.</small></label></div></details>
               <label class="ks-toggle"><input type="checkbox" name="auto_provision" value="1" <?php echo $c['auto_provision'] === '1' ? 'checked' : ''; ?>><span></span><div><strong>Automatycznie łącz lub twórz konta Pleska</strong><small>Ta sama nazwa łączy tożsamość z istniejącym profilem Huba bez zmiany jego ról, MFA ani lokalnego hasła.</small></div></label>
               <label class="ks-toggle"><input type="checkbox" name="safe_mode" value="1" <?php echo $c['safe_mode'] === 'true' ? 'checked' : ''; ?>><span></span><div><strong>Tryb bezpieczny</strong><small>Wyłącza automatyzacje i część integracji systemowych.</small></div></label>
               <label class="ks-toggle"><input type="checkbox" name="disable_system_integration" value="1" <?php echo $c['disable_system_integration'] === 'true' ? 'checked' : ''; ?>><span></span><div><strong>Wyłącz integrację systemową aplikacji</strong><small>Ogranicza operacje systemowe wykonywane wewnątrz KitsuneServ.</small></div></label>

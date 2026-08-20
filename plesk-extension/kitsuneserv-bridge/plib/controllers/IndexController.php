@@ -36,6 +36,7 @@ class IndexController extends pm_Controller_Action
         $this->requireAdmin();
         if (!$this->getRequest()->isPost()) throw new pm_Exception('POST is required.');
         try {
+            $previous = Modules_KitsuneservBridge_Config::values();
             $values = $this->validatedConfiguration((array) $this->getRequest()->getPost());
             Modules_KitsuneservBridge_Config::save($values);
             $clear = [];
@@ -44,9 +45,13 @@ class IndexController extends pm_Controller_Action
             }
             Modules_KitsuneservBridge_Config::clearSecrets($clear);
             $generated = Modules_KitsuneservBridge_Config::ensureSsoConfiguration($this->currentPleskOrigin());
+            $webServerError = null;
+            try { $this->refreshWebServerDomains($previous, Modules_KitsuneservBridge_Config::values()); }
+            catch (Throwable $exception) { $webServerError = $exception->getMessage(); }
             $message = 'Konfiguracja KitsuneServ Bridge została zapisana.';
             if (array_filter($generated)) $message .= ' Brakujące ustawienia Plesk SSO zostały wygenerowane automatycznie.';
             $this->_status->addMessage('info', $message);
+            if ($webServerError) $this->_status->addMessage('warning', 'Ustawienia zapisano, ale Plesk nie przebudował jednej z domen WWW: ' . $webServerError . ' Użyj „Przebuduj domeny WWW” po usunięciu problemu.');
         } catch (Throwable $exception) {
             $this->_status->addMessage('error', 'Nie zapisano konfiguracji: ' . $exception->getMessage());
         }
@@ -58,7 +63,7 @@ class IndexController extends pm_Controller_Action
         $this->requireAdmin();
         if (!$this->getRequest()->isPost()) throw new pm_Exception('POST is required.');
         $action = trim((string) $this->getRequest()->getPost('operation'));
-        $allowed = ['check', 'sync', 'deploy', 'sync-deploy', 'start', 'stop', 'restart', 'proxy'];
+        $allowed = ['check', 'sync', 'deploy', 'sync-deploy', 'start', 'stop', 'restart', 'proxy', 'extension-check', 'extension-update'];
         try {
             if (!in_array($action, $allowed, true)) throw new RuntimeException('Wybierz prawidłową operację.');
             Modules_KitsuneservBridge_Config::ensureSsoConfiguration($this->currentPleskOrigin());
@@ -115,6 +120,8 @@ class IndexController extends pm_Controller_Action
                 'bridgeVersion' => Modules_KitsuneservBridge_Config::EXTENSION_VERSION,
                 'hostname' => gethostname(),
                 'domains' => $this->domainNames(),
+                'hubDomain' => pm_Settings::get('panel_domain', ''),
+                'apiDomains' => array_values(array_diff(Modules_KitsuneservBridge_Config::proxyDomains(), [pm_Settings::get('panel_domain', '')])),
                 'authMode' => pm_Settings::get('auth_mode', 'hybrid'),
                 'deploymentMode' => pm_Settings::get('deployment_mode', 'managed'),
             ];
@@ -161,6 +168,7 @@ class IndexController extends pm_Controller_Action
         $current = Modules_KitsuneservBridge_Config::values();
         $values = [];
         foreach (array_keys(Modules_KitsuneservBridge_Config::defaults()) as $key) {
+            if ($key === 'api_domains') continue;
             if (array_key_exists($key, $post)) $values[$key] = trim((string) $post[$key]);
         }
         foreach (['git_token', 'git_ssh_private_key', 'bootstrap_password', 'secret_key', 'api_token', 'shared_secret'] as $secret) {
@@ -180,6 +188,19 @@ class IndexController extends pm_Controller_Action
         if (!$domains) throw new RuntimeException('Plesk nie zwrócił żadnej aktywnej domeny z hostingiem WWW. Dodaj domenę lub subdomenę przed zapisaniem konfiguracji.');
         if (!array_key_exists($domain, $domains)) throw new RuntimeException('Wybierz aktywną domenę bezpośrednio z listy Pleska.');
         $values['panel_domain'] = $domain;
+        $rawApiDomains = $post['api_domains'] ?? [];
+        if (is_string($rawApiDomains)) $rawApiDomains = preg_split('/\s*,\s*/', $rawApiDomains, -1, PREG_SPLIT_NO_EMPTY);
+        $apiDomains = [];
+        foreach ((array) $rawApiDomains as $apiDomain) {
+            $apiDomain = strtolower(trim((string) $apiDomain));
+            if ($apiDomain === '' || $apiDomain === $domain) continue;
+            if (!isset($domains[$apiDomain])) throw new RuntimeException('Domena API musi być aktywną domeną lub subdomeną z hostingu Pleska: ' . $apiDomain);
+            if (substr($apiDomain, -(strlen($domain) + 1)) !== '.' . $domain || substr_count($apiDomain, '.') !== substr_count($domain, '.') + 1) {
+                throw new RuntimeException('Domena API musi być bezpośrednią subdomeną domeny Hub, np. api.' . $domain . '.');
+            }
+            $apiDomains[$apiDomain] = $apiDomain;
+        }
+        $values['api_domains'] = implode(',', array_values($apiDomains));
 
         if (($values['url_mode'] ?? '') === 'automatic') $values['hub_url'] = 'https://' . $domain;
         $values['hub_url'] = rtrim((string) ($values['hub_url'] ?? ''), '/');
@@ -256,6 +277,7 @@ class IndexController extends pm_Controller_Action
         if ($config['update_manifest_url'] !== '' && $config['update_public_key'] === '') $warnings[] = ['critical', 'Skonfigurowano kanał aktualizacji bez klucza publicznego do weryfikacji podpisu.'];
         if ($statusError) $warnings[] = ['warning', 'Nie udało się odświeżyć stanu usługi: ' . $statusError];
         if (($state['extensionUpdate']['status'] ?? '') === 'failed') $warnings[] = ['warning', 'Automatyczna aktualizacja Plesk Bridge nie powiodła się: ' . ($state['extensionUpdate']['error'] ?? 'sprawdź log operacji.')];
+        if (($state['extensionUpdate']['status'] ?? '') === 'available') $warnings[] = ['info', 'Dostępna jest aktualizacja Plesk Bridge do ' . ($state['extensionUpdate']['candidate'] ?? 'nowszej wersji') . '. Otwórz zakładkę Wdrożenie, aby ją zainstalować.'];
         if (!empty($state['lastError'])) $warnings[] = ['critical', 'Ostatnia operacja zakończyła się błędem: ' . $state['lastError']];
         return $warnings;
     }
@@ -265,7 +287,7 @@ class IndexController extends pm_Controller_Action
         $runtime = null;
         try {
             $runtime = Modules_KitsuneservBridge_Config::createRuntimeConfig('status');
-            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r12', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
+            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r13', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
             if ((int) ($result['code'] ?? 1) !== 0) {
                 $detail = trim((string) ($result['stderr'] ?? $result['stdout'] ?? ''));
                 return mb_substr($detail !== '' ? $detail : 'Narzędzie statusu zakończyło się błędem.', -2000);
@@ -327,6 +349,16 @@ class IndexController extends pm_Controller_Action
             . "    proxy_read_timeout 300s;\n    proxy_send_timeout 300s;\n    proxy_buffering off;\n    client_max_body_size 64m;\n}";
     }
 
+    private function refreshWebServerDomains(array $previous, array $current)
+    {
+        $names = array_unique(array_merge(Modules_KitsuneservBridge_Config::proxyDomains($previous), Modules_KitsuneservBridge_Config::proxyDomains($current)));
+        $manager = new pm_WebServer();
+        foreach ($names as $name) {
+            try { $manager->updateDomainConfiguration(pm_Domain::getByName($name)); }
+            catch (Throwable $exception) { throw new RuntimeException('Nie udało się przebudować konfiguracji WWW domeny ' . $name . ': ' . $exception->getMessage(), 0, $exception); }
+        }
+    }
+
     private function secretStatus()
     {
         $result = [];
@@ -364,7 +396,7 @@ class IndexController extends pm_Controller_Action
 
     private function operationLabel($action)
     {
-        return ['check' => 'sprawdź', 'sync' => 'pobierz kod', 'deploy' => 'wdrożenie', 'sync-deploy' => 'pobierz i wdróż', 'start' => 'uruchom', 'stop' => 'zatrzymaj', 'restart' => 'restart', 'proxy' => 'skonfiguruj proxy'][$action] ?? $action;
+        return ['check' => 'sprawdź', 'sync' => 'pobierz kod', 'deploy' => 'wdrożenie', 'sync-deploy' => 'pobierz i wdróż', 'start' => 'uruchom', 'stop' => 'zatrzymaj', 'restart' => 'restart', 'proxy' => 'skonfiguruj proxy', 'extension-check' => 'sprawdź aktualizację Bridge', 'extension-update' => 'zaktualizuj Bridge'][$action] ?? $action;
     }
 
     private function currentPleskOrigin()
