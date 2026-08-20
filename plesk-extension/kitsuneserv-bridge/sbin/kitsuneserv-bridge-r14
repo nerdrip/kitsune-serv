@@ -1,7 +1,7 @@
 #!/usr/bin/env php
 <?php
 
-const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.1.1-r13';
+const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.1.1-r14';
 
 final class KitsuneServBridgeManager
 {
@@ -343,11 +343,64 @@ final class KitsuneServBridgeManager
         $domains = array_values(array_unique(array_map([$this, 'validatedDomain'], $domains)));
         if (!$domains) throw new RuntimeException('No Plesk publication domain is configured.');
         $httpdmng = $this->productRoot . '/admin/sbin/httpdmng';
+        $legacyMigrations = [];
         foreach ($domains as $domain) {
+            $migration = $this->removeLegacyProxyBlock($domain);
+            if ($migration !== null) $legacyMigrations[] = $migration;
             $this->run([$httpdmng, '--reconfigure-domain', $domain]);
         }
-        $this->state['proxy'] = ['mode' => 'managed', 'strategy' => 'plesk-webserver-hook', 'domain' => $domains[0], 'domains' => $domains, 'configuredAt' => gmdate('c'), 'path' => 'pm_Hook_WebServer', 'transition' => false];
+        $this->state['proxy'] = ['mode' => 'managed', 'strategy' => 'plesk-webserver-hook', 'domain' => $domains[0], 'domains' => $domains, 'configuredAt' => gmdate('c'), 'path' => 'pm_Hook_WebServer', 'transition' => false, 'legacyMigrations' => $legacyMigrations];
         $this->log('Przebudowano konfigurację WWW przez hook Pleska dla: ' . implode(', ', $domains) . '.');
+    }
+
+    private function removeLegacyProxyBlock($domain)
+    {
+        $vhostPaths = (array) ($this->config['proxy_vhost_paths'] ?? []);
+        if (!isset($vhostPaths[$domain])) throw new RuntimeException('Plesk did not provide a verified vhost path for ' . $domain . '.');
+        $vhost = $this->validatedPleskVhostPath($vhostPaths[$domain], $domain);
+        $path = $vhost . '/conf/vhost_nginx.conf';
+        if (!file_exists($path)) return null;
+        if (!is_file($path) || is_link($path)) throw new RuntimeException('Unsafe Plesk nginx configuration path for ' . $domain . '.');
+
+        $original = file_get_contents($path);
+        if ($original === false) throw new RuntimeException('Cannot read the Plesk nginx configuration for ' . $domain . '.');
+        $begin = '# BEGIN KITSUNESERV BRIDGE MANAGED';
+        $end = '# END KITSUNESERV BRIDGE MANAGED';
+        $beginCount = substr_count($original, $begin);
+        $endCount = substr_count($original, $end);
+        if ($beginCount === 0 && $endCount === 0) {
+            if (strpos($original, '__kitsuneserv_bridge_internal__') !== false) {
+                throw new RuntimeException('The nginx configuration for ' . $domain . ' contains an unmarked conflict with the reserved KitsuneServ route. Remove it manually before rebuilding the domain.');
+            }
+            return null;
+        }
+        if ($beginCount !== $endCount) throw new RuntimeException('The legacy KitsuneServ nginx block for ' . $domain . ' is incomplete. Restore or remove that marked block manually.');
+
+        $pattern = '/\n?' . preg_quote($begin, '/') . '.*?' . preg_quote($end, '/') . '\n?/s';
+        $next = preg_replace($pattern, "\n", $original, -1, $removed);
+        if (!is_string($next) || $removed !== $beginCount) throw new RuntimeException('Could not safely migrate the legacy KitsuneServ nginx block for ' . $domain . '.');
+        if (strpos($next, '__kitsuneserv_bridge_internal__') !== false) {
+            throw new RuntimeException('The nginx configuration for ' . $domain . ' also contains an unmarked conflict with the reserved KitsuneServ route. Remove it manually before rebuilding the domain.');
+        }
+
+        $backup = $path . '.kitsuneserv-legacy-backup';
+        if (!file_exists($backup)) $this->writeAtomicFile($backup, $original, 0640);
+        $mode = fileperms($path);
+        $mode = $mode === false ? 0640 : ($mode & 0777);
+        if ($mode === 0) $mode = 0640;
+        $cleaned = trim($next) === '' ? '' : rtrim($next) . "\n";
+        $this->writeAtomicFile($path, $cleaned, $mode);
+        $this->log('Usunięto stary zarządzany blok nginx dla ' . $domain . '; kopia: ' . $backup . '.');
+        return ['domain' => $domain, 'removedBlocks' => $removed, 'backup' => $backup];
+    }
+
+    private function validatedPleskVhostPath($value, $domain)
+    {
+        $value = rtrim(str_replace('\\', '/', trim((string) $value)), '/');
+        $expected = '/var/www/vhosts/system/' . $domain;
+        if ($value !== $expected || strpos($value, '..') !== false) throw new RuntimeException('Plesk returned an unsafe vhost path for ' . $domain . '.');
+        $this->assertNoSymlinkComponents($value, 'Plesk vhost path');
+        return $value;
     }
 
     private function refreshState()
@@ -761,7 +814,7 @@ final class KitsuneServBridgeManager
 
 function kitsuneConfigPath(array $arguments)
 {
-    if (count($arguments) !== 3 || $arguments[1] !== '--config') throw new RuntimeException('Usage: kitsuneserv-bridge-r13 --config /secure/operation.json');
+    if (count($arguments) !== 3 || $arguments[1] !== '--config') throw new RuntimeException('Usage: kitsuneserv-bridge-r14 --config /secure/operation.json');
     return (string) $arguments[2];
 }
 

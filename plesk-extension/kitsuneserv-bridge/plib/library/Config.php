@@ -2,7 +2,7 @@
 
 class Modules_KitsuneservBridge_Config
 {
-    public const EXTENSION_VERSION = '3.1.1-r13';
+    public const EXTENSION_VERSION = '3.1.1-r14';
 
     private const SECRET_FIELDS = [
         'git_token' => 'secret_git_token',
@@ -164,12 +164,16 @@ class Modules_KitsuneservBridge_Config
 
         if ($config['proxy_mode'] === 'managed' && in_array($action, ['deploy', 'sync-deploy', 'proxy'], true)) {
             $verified = [];
+            $vhostPaths = [];
             foreach (self::proxyDomains($config) as $domainName) {
                 $domain = self::hostedDomain($domainName);
-                $verified[] = strtolower((string) $domain->getName());
+                $verifiedName = strtolower((string) $domain->getName());
+                $verified[] = $verifiedName;
+                $vhostPaths[$verifiedName] = (string) $domain->getVhostSystemPath();
             }
             if (!$verified) throw new RuntimeException('Wybierz co najmniej jedną aktywną domenę publikacji.');
             $config['proxy_domains'] = implode(',', $verified);
+            $config['proxy_vhost_paths'] = $vhostPaths;
         }
 
         $path = $realVarDir . '/operation-' . bin2hex(random_bytes(12)) . '.json';

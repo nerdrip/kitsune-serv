@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.1.1-14
+
+- Automatically migrates the legacy managed nginx block before Plesk rebuilds a domain, preventing duplicate internal locations while preserving unrelated vhost directives and a one-time backup.
+- Fixed API/Test Lab subdomain selection with an accessible, Plesk-independent checkbox control.
+- Added a header shortcut that opens the configured KitsuneServ server panel in a new tab.
+
 ## 3.1.1-13
 
 - Added explicit Hub/API domain selection with one Plesk-managed reverse-proxy hook for Hub, Test Lab and API Flow hostnames.
