@@ -1,7 +1,7 @@
 #!/usr/bin/env php
 <?php
 
-const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.1.1-r14';
+const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.1.1-r15';
 
 final class KitsuneServBridgeManager
 {
@@ -46,10 +46,15 @@ final class KitsuneServBridgeManager
         if (($this->config['deployment_mode'] ?? 'managed') !== 'managed' && $action !== 'status') {
             throw new RuntimeException('Repository operations are disabled in external Hub mode.');
         }
-        $this->acquireLock($action === 'status' ? 2 : 15, $action === 'status' ? 'status.lock' : 'operation.lock');
-        $this->log('Executor KitsuneServ Bridge ' . KITSUNESERV_BRIDGE_EXECUTOR_RELEASE . '.');
-        $this->state['lastOperation'] = $action;
-        $this->state['lastError'] = null;
+        $isStatus = $action === 'status';
+        $this->acquireLock($isStatus ? 2 : 15, 'operation.lock');
+        $this->state = $this->readState();
+        $this->normalizeExtensionUpdateState();
+        if (!$isStatus) {
+            $this->log('Executor KitsuneServ Bridge ' . KITSUNESERV_BRIDGE_EXECUTOR_RELEASE . '.');
+            $this->state['lastOperation'] = $action;
+            $this->state['lastError'] = null;
+        }
         try {
             switch ($action) {
                 case 'status':
@@ -92,13 +97,13 @@ final class KitsuneServBridgeManager
                     $this->refreshState();
                     break;
                 case 'extension-check':
-                    $this->checkPrerequisites();
+                    $this->checkRepositoryPrerequisites();
                     $this->synchronizeRepository();
                     $this->scheduleExtensionUpdate(false);
                     $this->refreshState();
                     break;
                 case 'extension-update':
-                    $this->checkPrerequisites();
+                    $this->checkRepositoryPrerequisites();
                     $this->synchronizeRepository();
                     $this->scheduleExtensionUpdate(true);
                     $this->refreshState();
@@ -113,12 +118,16 @@ final class KitsuneServBridgeManager
                     $this->log('OSTRZEŻENIE: automatyczna aktualizacja Plesk Bridge nie została zaplanowana: ' . $message);
                 }
             }
-            $this->state['lastSuccess'] = gmdate('c');
-            $this->log('Operacja zakończona: ' . $action . '.');
+            if (!$isStatus) {
+                $this->state['lastSuccess'] = gmdate('c');
+                $this->log('Operacja zakończona: ' . $action . '.');
+            }
         } catch (Throwable $exception) {
-            $this->state['lastError'] = $this->redact($exception->getMessage());
-            $this->log('BŁĄD: ' . $exception->getMessage());
-            $this->saveState();
+            if (!$isStatus) {
+                $this->state['lastError'] = $this->redact($exception->getMessage());
+                $this->log('BŁĄD: ' . $exception->getMessage());
+                $this->saveState();
+            }
             throw $exception;
         }
         $this->saveState();
@@ -126,13 +135,18 @@ final class KitsuneServBridgeManager
 
     private function checkPrerequisites()
     {
-        $this->validatedRepositoryUrl();
-        $this->validatedBranch();
+        $this->checkRepositoryPrerequisites();
         [$node, $npm, $nodeVersion] = $this->resolveNodeRuntime();
         $this->run([$npm, '--version']);
-        $this->run(['git', '--version']);
         $this->run(['systemctl', '--version']);
         $this->log('Node.js ' . $nodeVersion . ' (' . $node . '), npm (' . $npm . '), Git i systemd są dostępne.');
+    }
+
+    private function checkRepositoryPrerequisites()
+    {
+        $this->validatedRepositoryUrl();
+        $this->validatedBranch();
+        $this->run(['git', '--version']);
     }
 
     private function synchronizeRepository()
@@ -775,7 +789,7 @@ final class KitsuneServBridgeManager
 
     private function acquireLock($seconds, $name)
     {
-        if (!in_array($name, ['operation.lock', 'status.lock'], true)) throw new RuntimeException('Invalid lock name.');
+        if ($name !== 'operation.lock') throw new RuntimeException('Invalid lock name.');
         $this->lockHandle = fopen($this->varDir . '/' . $name, 'c');
         if (!is_resource($this->lockHandle)) throw new RuntimeException('Cannot open operation lock.');
         $until = microtime(true) + $seconds;
@@ -789,6 +803,18 @@ final class KitsuneServBridgeManager
         if (!is_file($this->statePath)) return $empty;
         $decoded = json_decode((string) file_get_contents($this->statePath), true);
         return is_array($decoded) ? array_replace_recursive($empty, $decoded) : $empty;
+    }
+
+    private function normalizeExtensionUpdateState()
+    {
+        $update = (array) ($this->state['extensionUpdate'] ?? []);
+        if (($update['status'] ?? '') !== 'scheduled' || ($update['candidate'] ?? '') !== KITSUNESERV_BRIDGE_EXECUTOR_RELEASE) return;
+        $this->state['extensionUpdate'] = [
+            'status' => 'current',
+            'current' => KITSUNESERV_BRIDGE_EXECUTOR_RELEASE,
+            'candidate' => KITSUNESERV_BRIDGE_EXECUTOR_RELEASE,
+            'checkedAt' => gmdate('c'),
+        ];
     }
 
     private function saveState()
@@ -814,7 +840,7 @@ final class KitsuneServBridgeManager
 
 function kitsuneConfigPath(array $arguments)
 {
-    if (count($arguments) !== 3 || $arguments[1] !== '--config') throw new RuntimeException('Usage: kitsuneserv-bridge-r14 --config /secure/operation.json');
+    if (count($arguments) !== 3 || $arguments[1] !== '--config') throw new RuntimeException('Usage: kitsuneserv-bridge-r15 --config /secure/operation.json');
     return (string) $arguments[2];
 }
 

@@ -74,10 +74,15 @@ class IndexController extends pm_Controller_Action
                 throw new RuntimeException('Ustaw hasło pierwszego administratora przed wdrożeniem.');
             }
             $runtime = Modules_KitsuneservBridge_Config::createRuntimeConfig($action);
-            $task = new Modules_KitsuneservBridge_Task_Operate();
-            $task->setParam('runtimeConfig', $runtime);
-            (new pm_LongTask_Manager())->start($task);
-            $this->_status->addMessage('info', 'Operacja „' . $this->operationLabel($action) . '” została dodana do kolejki Pleska.');
+            if (in_array($action, ['extension-check', 'extension-update'], true)) {
+                $this->runImmediateOperation($runtime);
+                $this->_status->addMessage('info', 'Operacja „' . $this->operationLabel($action) . '” została zakończona. Wynik jest widoczny poniżej.');
+            } else {
+                $task = new Modules_KitsuneservBridge_Task_Operate();
+                $task->setParam('runtimeConfig', $runtime);
+                (new pm_LongTask_Manager())->start($task);
+                $this->_status->addMessage('info', 'Operacja „' . $this->operationLabel($action) . '” została dodana do kolejki Pleska.');
+            }
         } catch (Throwable $exception) {
             $this->_status->addMessage('error', 'Nie uruchomiono operacji: ' . $exception->getMessage());
         }
@@ -287,7 +292,7 @@ class IndexController extends pm_Controller_Action
         $runtime = null;
         try {
             $runtime = Modules_KitsuneservBridge_Config::createRuntimeConfig('status');
-            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r14', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
+            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r15', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
             if ((int) ($result['code'] ?? 1) !== 0) {
                 $detail = trim((string) ($result['stderr'] ?? $result['stdout'] ?? ''));
                 return mb_substr($detail !== '' ? $detail : 'Narzędzie statusu zakończyło się błędem.', -2000);
@@ -295,6 +300,19 @@ class IndexController extends pm_Controller_Action
             return null;
         } catch (Throwable $exception) {
             return mb_substr($exception->getMessage(), -2000);
+        } finally {
+            if ($runtime && is_file($runtime)) @unlink($runtime);
+        }
+    }
+
+    private function runImmediateOperation($runtime)
+    {
+        try {
+            $result = pm_ApiCli::callSbin('kitsuneserv-bridge-r15', ['--config', $runtime], pm_ApiCli::RESULT_FULL);
+            if ((int) ($result['code'] ?? 1) !== 0) {
+                $detail = trim((string) ($result['stderr'] ?? $result['stdout'] ?? ''));
+                throw new RuntimeException($detail !== '' ? $detail : 'Operacja zakończyła się błędem.');
+            }
         } finally {
             if ($runtime && is_file($runtime)) @unlink($runtime);
         }

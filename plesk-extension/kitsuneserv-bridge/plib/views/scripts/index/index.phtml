@@ -21,7 +21,7 @@ $selectedApiDomains = array_values(array_filter(preg_split('/\s*,\s*/', (string)
 $isDirectApiDomain = static function ($candidate) use ($c) { $base = (string) $c['panel_domain']; return $base !== '' && substr((string) $candidate, -(strlen($base) + 1)) === '.' . $base && substr_count((string) $candidate, '.') === substr_count($base, '.') + 1; };
 $serviceLabel = !$configured ? 'Wymaga konfiguracji' : (!$serviceInstalled ? 'Jeszcze niewdrożona' : ($serviceActive ? ($healthOk ? 'Usługa działa' : 'Usługa bez odpowiedzi HTTP') : 'Usługa zatrzymana'));
 $extensionStatus = (string) ($extensionUpdate['status'] ?? 'never-checked');
-$extensionLabel = $extensionStatus === 'scheduled' ? 'Aktualizacja zaplanowana' : ($extensionStatus === 'available' ? 'Dostępna aktualizacja' : ($extensionStatus === 'failed' ? 'Błąd aktualizacji' : ($extensionStatus === 'never-checked' ? 'Nie sprawdzono' : 'Wersja aktualna')));
+$extensionLabel = $extensionStatus === 'scheduled' ? 'Aktualizacja zaplanowana' : ($extensionStatus === 'available' ? 'Dostępna aktualizacja' : ($extensionStatus === 'failed' ? 'Błąd aktualizacji' : ($extensionStatus === 'not-available' ? 'Brak źródła aktualizacji' : ($extensionStatus === 'never-checked' ? 'Nie sprawdzono' : 'Wersja aktualna'))));
 $shortCommit = static function ($value) { return $value ? substr((string) $value, 0, 10) : '—'; };
 ?>
 <div class="ks-shell" data-deployment-mode="<?php echo $e($c['deployment_mode']); ?>" data-url-mode="<?php echo $e($c['url_mode']); ?>" data-proxy-mode="<?php echo $e($c['proxy_mode']); ?>">
