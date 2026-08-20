@@ -1,13 +1,13 @@
 d5eb104919a1a7988900fa81645825a7e4f2f20e39f106ebc389cc9e8d5ce13a  packages/01-kitsuneartifactory-manager-1.0.0-r3.zip
 8bafb333104613562d5d2e395f0eb6651e34e1d53d361c30e94faaa99bd96053  packages/02-kitsuneirc-manager-1.3.4-r3.zip
-183cd1480dacf9f08224c0e4b3a46fc515199ac6a75bb39c57f63c749c2037d6  packages/03-kitsunecolab-manager-1.5.11-r3.zip
+f5493db34c5f63d51032cd4ae93121ff6ace0041120ce38f2d40d94233716392  packages/03-kitsunecolab-manager-1.5.11-r3.zip
 3db25d964e17677beb2846d07d117be5aa316fd456572e54b651d295b4c3468d  packages/04-kitsunepaint-manager-2.0.5-r3.zip
 ab457d9280128a6b6482d0e3c1b588be8861af11a7ccf7ceb399047eb5d6d318  packages/05-kitsunepnc-manager-1.8.9-r4.zip
 ee77e4cb8d2b436d27c11e5bae11f9db2b53836914137c359312f928b44429ec  packages/06-kitsunetab-manager-0.4.0-r3.zip
 86659f930ad51005be2eed786b4fe44cd31e268bca858b1ecf377768a7c6334e  packages/07-kitsunetest-manager-1.4.13-r3.zip
 ba61f3265626a419d6e9797d8abd1f1188a6e3b0eafcbdd2a8a714f16008ea3b  packages/08-nailit-manager-1.0.28-r3.zip
-84eb310918fd5807b75ad34795c6a5fbf443609de3abbb6821202f6c42c4c9ca  packages/09-kitsune-git-1.3.0-r3.zip
+38ec30cbdffa23f5729413be21a1d7ab064563150a81ae87dac9acd8892659ec  packages/09-kitsune-git-1.4.0-r1.zip
 fc7b541a41a138daeb74bb0b1980b76a2544c537b350fe5629edfafd00a00550  packages/10-wpkit-parse-manager-1.1.1-r3.zip
 37844ecd835774ee9aa4118aa400000ee4cbd3005f799c8e34cf17a8649cd37e  packages/11-nerd-apps-runtime-manager-2.2.0-r3.zip
-4e105d8ceb8e74b9638928f2fea5be53c2141f52cf00ee15a7549849b4f2c7cc  packages/12-ultimate-tool-0.1.1-r83.zip
-a22b225fe5f98618bdf551368e75c9a4a20fec79bb507463c12f63e25183fb31  packages/99-kitsuneserv-bridge-3.1.2-r22.zip
+fc06b2348dc4c2738c66c5fd5e29f7cacde3029681e37a21afd0b837fcf67604  packages/12-ultimate-tool-0.1.1-r84.zip
+129fdee5315b4a3c2be6acac7f7511c39cdf44cc93162c7a1391dc56463c1ef4  packages/99-kitsuneserv-bridge-3.1.3-r1.zip

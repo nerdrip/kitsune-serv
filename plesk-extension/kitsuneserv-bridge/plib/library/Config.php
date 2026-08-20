@@ -2,7 +2,7 @@
 
 class Modules_KitsuneservBridge_Config
 {
-    public const EXTENSION_VERSION = '3.1.2-r22';
+    public const EXTENSION_VERSION = '3.1.3-r1';
 
     private const SECRET_FIELDS = [
         'git_token' => 'secret_git_token',

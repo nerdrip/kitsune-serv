@@ -318,7 +318,7 @@ Supports custom Git repositories as well.
 - Synchronize projects, Test Labs and API Flow definitions in both directions with revisions, hashes, history, explicit conflicts and rollback; secret values never enter synchronized manifests
 - Connect the desktop to a remote Hub over HTTPS, optionally pin its SHA-256 certificate fingerprint, and retry synchronization idempotently
 - Keep local-server settings and outgoing remote-Hub connections in separate UI views with explicit role descriptions and independent status
-- Install `artifacts/plesk/kitsuneserv-bridge-3.1.2-r18.zip` in Plesk, select the Hub domain and a direct base API subdomain such as `api.panel.example.com`. Bridge treats it as a namespace: starting an API Flow named `Orders` publishes `orders.api.panel.example.com`, adds wildcard nginx routing and attempts to create the wildcard DNS CNAME. A wildcard TLS certificate for the base API domain is still required. Managed synchronizations detect and schedule newer Bridge releases from the same verified checkout automatically; the Deployment tab explicitly fetches the configured branch and shows installed versus repository releases before enabling an upgrade. Automatic signed SSO enrollment does not require copying a pairing code.
+- Install `artifacts/plesk/kitsuneserv-bridge-3.1.3-r1.zip` in Plesk, select the Hub domain and a direct base API subdomain such as `api.panel.example.com`. Bridge treats it as a namespace: starting an API Flow named `Orders` publishes `orders.api.panel.example.com`, adds wildcard nginx routing and attempts to create the wildcard DNS CNAME. A wildcard TLS certificate for the base API domain is still required. Managed synchronizations detect and schedule newer Bridge releases from the same verified checkout automatically; the Deployment tab explicitly fetches the configured branch and shows installed versus repository releases before enabling an upgrade. Automatic signed SSO enrollment does not require copying a pairing code.
 - Choose managed deployment from a configurable Git repository or connect an existing external Hub; public URL and nginx reverse proxy can be automatic or manual
 - Configure branch and isolated source/release/data paths, HTTPS token or strict SSH deploy key, automatic Plesk Node.js/npm discovery (or manual paths), systemd service user, port, bootstrap account, API/update keys and Plesk connector secrets
 - Let Bridge generate the connector ID, encrypted shared secret and Plesk URL on save/deploy; start and restart refresh authentication settings without a full redeployment
@@ -340,7 +340,7 @@ Supports custom Git repositories as well.
 
 ### Install on Windows (recommended)
 
-Run `artifacts\windows\KitsuneServ-3.1.2-x64-setup.exe`, choose the destination and launch KitsuneServ from the Start menu. The installer preserves application data during uninstall. The portable EXE is useful for testing or carrying the UI without a traditional installation.
+Run `artifacts\windows\KitsuneServ-3.1.3-x64-setup.exe`, choose the destination and launch KitsuneServ from the Start menu. The installer preserves application data during uninstall. The portable EXE is useful for testing or carrying the UI without a traditional installation.
 
 Mutable data is stored in `%APPDATA%\KitsuneServ` instead of `Program Files`. Set `KITSUNE_DATA_DIR` before launching to place downloaded runtimes, projects and databases on another drive.
 
@@ -466,7 +466,7 @@ The generated administrator password is stored in the encrypted local vault and 
 
 The **General → External Integrations** panel stores public settings in `config/integrations.json` and credentials only in the secret vault. Each adapter must be enabled and pass its own connection/tool test before Monitoring marks it ready. HTTP is accepted only for loopback development endpoints; remote endpoints require HTTPS.
 
-Version 3.1.2 includes configuration, secret handling, readiness tests and environment projection for these providers. Operations that require an external account, legal approval, paid certificate or repository ownership remain inactive until those credentials are supplied. OAuth/OIDC entries remain configurable adapters; Kitsune Hub device enrollment and Plesk SSO are built-in. Package-manager submissions also remain explicit user-controlled publishing actions.
+Version 3.1.3 includes configuration, secret handling, readiness tests and environment projection for these providers. Operations that require an external account, legal approval, paid certificate or repository ownership remain inactive until those credentials are supplied. OAuth/OIDC entries remain configurable adapters; Kitsune Hub device enrollment and Plesk SSO are built-in. Package-manager submissions also remain explicit user-controlled publishing actions.
 
 ---
 

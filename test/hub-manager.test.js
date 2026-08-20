@@ -93,7 +93,7 @@ test('managed Plesk connector enrolls automatically with a replay-protected sign
   const connector = hub.saveConnector({ id: 'plesk-managed', baseUrl: 'https://plesk.example.test', authMode: 'hybrid' }, secret);
   const request = {
     connectorId: connector.id, timestamp: 1_800_000_000_000, nonce: crypto.randomBytes(16).toString('hex'),
-    device: { name: 'Plesk production', platform: 'Linux', version: '3.1.2-r22', capabilities: ['plesk-sso', 'inventory'] }
+    device: { name: 'Plesk production', platform: 'Linux', version: '3.1.3-r1', capabilities: ['plesk-sso', 'inventory'] }
   };
   const signature = crypto.createHmac('sha256', secret).update(stable(request)).digest('base64url');
   const enrolled = hub.enrollPleskConnector(request, signature);
@@ -245,4 +245,19 @@ test('two-way remote sync is idempotent and preserves divergent edits as conflic
   assert.ok(conflict.conflicts >= 1);
   assert.equal(localFixture.hub.getObject('project:shop').data.branch, 'desktop');
   assert.equal(remoteFixture.hub.getObject('project:shop').data.branch, 'server');
+
+  const comparison = await localFixture.hub.compareRemote(remote.id, { kinds: ['project'] });
+  assert.equal(comparison.entries.length, 1);
+  assert.equal(comparison.entries[0].state, 'diverged');
+  assert.deepEqual(comparison.entries[0].safeActions, []);
+  assert.ok(comparison.entries[0].changedPaths.includes('/branch'));
+
+  const resolved = await localFixture.hub.applyRemotePlan(remote.id, [{
+    id: 'project:shop', action: 'overwrite-server',
+    expectedLocalHash: comparison.entries[0].local.contentHash,
+    expectedServerHash: comparison.entries[0].server.contentHash
+  }], { kinds: ['project'], apply: false }, { userId: localFixture.owner.id });
+  assert.equal(resolved.success, true);
+  assert.equal(remoteFixture.hub.getObject('project:shop').data.branch, 'desktop');
+  assert.equal((await localFixture.hub.compareRemote(remote.id, { kinds: ['project'] })).entries[0].state, 'same');
 });
