@@ -12,6 +12,7 @@ const AUTH_MODES = new Set(['independent', 'plesk', 'hybrid']);
 const SECRET_KEY = /(password|secret|token|private.?key|authorization|cookie|database_url)/i;
 const DOMAIN_PATTERN = /^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])$/;
 const SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const MISSING = Symbol('missing');
 
 function clone(value) { return value == null ? value : structuredClone(value); }
 function hash(value) { return crypto.createHash('sha256').update(String(value), 'utf8').digest('hex'); }
@@ -360,6 +361,43 @@ class HubManager {
     }; walk(left, right, base); return changes.slice(0, 1000);
   }
 
+  mergeValues(base, local, server) {
+    const conflicts = [];
+    const equal = (left, right) => left === MISSING || right === MISSING ? left === right : stable(left) === stable(right);
+    const plainObject = value => value !== MISSING && value !== null && typeof value === 'object' && !Array.isArray(value);
+    const visible = value => value === MISSING ? undefined : clone(value);
+    const walk = (ancestor, localValue, serverValue, pointer) => {
+      if (equal(localValue, serverValue)) return localValue === MISSING ? MISSING : clone(localValue);
+      if (equal(localValue, ancestor)) return serverValue === MISSING ? MISSING : clone(serverValue);
+      if (equal(serverValue, ancestor)) return localValue === MISSING ? MISSING : clone(localValue);
+      const mergeObjects = plainObject(localValue) && plainObject(serverValue) && (plainObject(ancestor) || ancestor === MISSING);
+      if (!mergeObjects) {
+        conflicts.push({ path: pointer || '/', base: visible(ancestor), local: visible(localValue), server: visible(serverValue) });
+        return localValue === MISSING ? MISSING : clone(localValue);
+      }
+      const result = {}; const baseObject = ancestor === MISSING ? {} : ancestor;
+      for (const key of new Set([...Object.keys(baseObject), ...Object.keys(localValue), ...Object.keys(serverValue)])) {
+        const child = walk(
+          Object.hasOwn(baseObject, key) ? baseObject[key] : MISSING,
+          Object.hasOwn(localValue, key) ? localValue[key] : MISSING,
+          Object.hasOwn(serverValue, key) ? serverValue[key] : MISSING,
+          `${pointer}/${String(key).replace(/~/g, '~0').replace(/\//g, '~1')}`
+        );
+        if (child !== MISSING) result[key] = child;
+      }
+      return result;
+    };
+    const value = walk(base, local, server, '');
+    return { success: conflicts.length === 0, value: value === MISSING ? null : value, conflicts: conflicts.slice(0, 1000) };
+  }
+
+  _syncBase(objectId, known) {
+    if (!known?.contentHash) return null;
+    const object = this._read().objects.find(item => item.id === objectId); if (!object) return null;
+    const versions = [...(object.history || []), object]; const match = versions.find(item => item.contentHash === known.contentHash && item.data != null);
+    return match ? { contentHash: match.contentHash, revision: match.revision || 0, updatedAt: match.updatedAt || null, data: clone(match.data) } : null;
+  }
+
   async publishLocal(options = {}, principal = null) {
     const results = []; const nodeId = String(options.nodeId || 'local'); const snapshot = this.localResources(options);
     for (const resource of snapshot.resources) results.push(this._publishLocalResource(resource, nodeId, principal));
@@ -580,19 +618,25 @@ class HubManager {
     const server = new Map(remoteObjects.filter(item => !options.kinds || options.kinds.includes(item.kind)).map(item => [item.id, item]));
     const entries = [];
     for (const id of [...new Set([...local.keys(), ...server.keys()])].sort()) {
-      const localItem = local.get(id) || null; const serverItem = server.get(id) || null; const known = remote.syncState?.[id] || null; let state;
+      const localItem = local.get(id) || null; const serverItem = server.get(id) || null; const known = remote.syncState?.[id] || null; const base = this._syncBase(id, known); let state; let merge = null; let conflictReason = '';
       if (localItem?.contentHash === serverItem?.contentHash) state = 'same';
       else if (!serverItem) state = 'local-only';
       else if (!localItem) state = 'remote-only';
-      else if (!known) state = 'diverged';
+      else if (!known) { state = 'diverged'; conflictReason = 'no-common-base'; }
       else {
         const localChanged = localItem.contentHash !== known.contentHash; const serverChanged = serverItem.contentHash !== known.contentHash;
-        state = localChanged && !serverChanged ? 'local-ahead' : serverChanged && !localChanged ? 'remote-ahead' : 'diverged';
+        if (localChanged && !serverChanged) state = 'local-ahead';
+        else if (serverChanged && !localChanged) state = 'remote-ahead';
+        else if (!base) { state = 'diverged'; conflictReason = 'base-unavailable'; }
+        else {
+          merge = this.mergeValues(base.data, localItem.data, serverItem.data);
+          state = merge.success ? 'mergeable' : 'diverged'; conflictReason = merge.success ? '' : 'overlapping-changes';
+        }
       }
-      const safeActions = state === 'local-only' || state === 'local-ahead' ? ['upload'] : state === 'remote-only' || state === 'remote-ahead' ? ['download'] : [];
+      const safeActions = state === 'local-only' || state === 'local-ahead' ? ['upload'] : state === 'remote-only' || state === 'remote-ahead' ? ['download'] : state === 'mergeable' ? ['merge'] : [];
       entries.push({
         id, kind: localItem?.kind || serverItem?.kind, resourceId: localItem?.resourceId || serverItem?.resourceId,
-        name: localItem?.name || serverItem?.name || id, state, local: localItem, server: serverItem, known,
+        name: localItem?.name || serverItem?.name || id, state, local: localItem, server: serverItem, known, base, merge, conflictReason,
         safeActions, recommendedAction: safeActions[0] || 'skip',
         diff: localItem && serverItem ? this.diffValues(localItem.data, serverItem.data) : []
       });
@@ -602,7 +646,7 @@ class HubManager {
 
   async compareRemote(remoteId, options = {}) {
     const comparison = await this._remoteComparison(remoteId, options); const summary = {};
-    for (const state of ['same', 'local-only', 'remote-only', 'local-ahead', 'remote-ahead', 'diverged']) summary[state] = comparison.entries.filter(item => item.state === state).length;
+    for (const state of ['same', 'local-only', 'remote-only', 'local-ahead', 'remote-ahead', 'mergeable', 'diverged']) summary[state] = comparison.entries.filter(item => item.state === state).length;
     return {
       remote: { id: comparison.remote.id, name: comparison.remote.name, url: comparison.remote.url, status: comparison.remote.status, lastCheckedAt: comparison.remote.lastCheckedAt },
       summary, errors: comparison.errors,
@@ -611,7 +655,10 @@ class HubManager {
         local: item.local ? { exists: true, contentHash: item.local.contentHash, updatedAt: item.local.updatedAt } : { exists: false },
         server: item.server ? { exists: true, contentHash: item.server.contentHash, revision: item.server.revision, updatedAt: item.server.updatedAt } : { exists: false },
         known: item.known ? { contentHash: item.known.contentHash, remoteRevision: item.known.remoteRevision, syncedAt: item.known.syncedAt } : null,
-        safeActions: item.safeActions, recommendedAction: item.recommendedAction, changedPaths: item.diff.map(change => change.path).slice(0, 30), changedPathCount: item.diff.length
+        base: item.base ? { exists: true, contentHash: item.base.contentHash, revision: item.base.revision, updatedAt: item.base.updatedAt } : { exists: false },
+        safeActions: item.safeActions, recommendedAction: item.recommendedAction, conflictReason: item.conflictReason,
+        conflictPaths: (item.merge?.conflicts || []).map(change => change.path).slice(0, 30), conflictPathCount: item.merge?.conflicts?.length || 0,
+        changedPaths: item.diff.map(change => change.path).slice(0, 30), changedPathCount: item.diff.length
       }))
     };
   }
@@ -621,32 +668,52 @@ class HubManager {
     const comparison = await this._remoteComparison(remoteId, options); const byId = new Map(comparison.entries.map(item => [item.id, item])); const results = [];
     for (const selection of selections) {
       const id = String(selection.id || ''); const action = String(selection.action || 'skip'); if (action === 'skip') continue;
-      if (!['upload', 'download', 'overwrite-server', 'overwrite-local'].includes(action)) { results.push({ id, action, success: false, error: 'Unsupported synchronization action' }); continue; }
+      if (!['upload', 'download', 'merge', 'overwrite-server', 'overwrite-local'].includes(action)) { results.push({ id, action, success: false, error: 'Unsupported synchronization action' }); continue; }
       const entry = byId.get(id); if (!entry) { results.push({ id, action, success: false, stale: true, error: 'Resource changed after the preview; compare again' }); continue; }
       const expectedLocal = selection.expectedLocalHash || ''; const expectedServer = selection.expectedServerHash || '';
       const existenceChanged = (typeof selection.expectedLocalExists === 'boolean' && selection.expectedLocalExists !== Boolean(entry.local)) || (typeof selection.expectedServerExists === 'boolean' && selection.expectedServerExists !== Boolean(entry.server));
       if (existenceChanged || (expectedLocal && expectedLocal !== entry.local?.contentHash) || (expectedServer && expectedServer !== entry.server?.contentHash)) { results.push({ id, action, success: false, stale: true, error: 'Resource changed after the preview; compare again' }); continue; }
       const safe = entry.safeActions.includes(action); if (!safe && !['overwrite-server', 'overwrite-local'].includes(action)) { results.push({ id, action, success: false, error: 'The selected direction is not safe for the current state' }); continue; }
+      const effects = { localVersionSaved: false, localApplied: false, serverUpdated: false };
       try {
         if (action === 'upload' || action === 'overwrite-server') {
           if (!entry.local) throw new Error('The resource does not exist locally');
-          const localPublished = this._publishLocalResource(entry.local, options.nodeId || 'desktop-local', principal); if (!localPublished.success) throw new Error('Could not save the local revision');
+          const localPublished = this._publishLocalResource(entry.local, options.nodeId || 'desktop-local', principal); if (!localPublished.success) throw new Error('Could not save the local revision'); effects.localVersionSaved = true;
           const sent = await this.callRemote(remoteId, 'hub/sync/publish', { input: { kind: entry.local.kind, resourceId: entry.local.resourceId, name: entry.local.name, data: entry.local.data, baseRevision: entry.server?.revision || 0, sourceNodeId: options.nodeId || 'desktop-local', force: action === 'overwrite-server' } });
-          if (!sent.success) { results.push({ id, action, ...sent }); continue; }
+          if (!sent.success) { results.push({ id, action, ...sent, partial: effects.localVersionSaved, effects }); continue; }
+          effects.serverUpdated = true;
           this._recordRemoteSync(remoteId, id, sent.object?.revision || entry.server?.revision || 0, entry.local.contentHash);
-          results.push({ id, action, success: true, revision: sent.object?.revision || 0 });
-        } else {
+          results.push({ id, action, success: true, direction: 'local-to-server', revision: sent.object?.revision || 0, effects });
+        } else if (action === 'download' || action === 'overwrite-local') {
           if (!entry.server) throw new Error('The resource does not exist on the server');
           if (entry.local) this._publishLocalResource(entry.local, options.nodeId || 'desktop-local', principal);
           const published = this.publish({ kind: entry.server.kind, resourceId: entry.server.resourceId, name: entry.server.name, data: entry.server.data, baseRevision: this._revision(entry.server.kind, entry.server.resourceId), sourceNodeId: `remote:${remoteId}`, force: action === 'overwrite-local' }, principal);
           if (!published.success) { results.push({ id, action, ...published }); continue; }
-          const applied = options.apply === false ? null : await this.applyObject(id, options.applyOptions?.[id] || options.applyOptions || {});
+          effects.localVersionSaved = true; const applied = options.apply === false ? null : await this.applyObject(id, options.applyOptions?.[id] || options.applyOptions || {}); effects.localApplied = options.apply !== false;
           this._recordRemoteSync(remoteId, id, entry.server.revision, entry.server.contentHash);
-          results.push({ id, action, success: true, revision: entry.server.revision, applied: Boolean(applied) });
+          results.push({ id, action, success: true, direction: 'server-to-local', revision: entry.server.revision, applied: Boolean(applied), effects });
+        } else {
+          if (!entry.local || !entry.server || !entry.merge?.success) throw new Error('The resource cannot be merged automatically; compare it again and resolve the conflict');
+          this._publishLocalResource(entry.local, options.nodeId || 'desktop-local', principal); effects.localVersionSaved = true;
+          const normalized = this._normalizeObject({ kind: entry.kind, resourceId: entry.resourceId, data: entry.merge.value });
+          const sent = await this.callRemote(remoteId, 'hub/sync/publish', { input: { kind: entry.kind, resourceId: entry.resourceId, name: entry.name, data: normalized.data, baseRevision: entry.server.revision, sourceNodeId: `merge:${options.nodeId || 'desktop-local'}` } });
+          if (!sent.success) { results.push({ id, action, ...sent, partial: effects.localVersionSaved, effects }); continue; }
+          effects.serverUpdated = true;
+          const published = this.publish({ kind: entry.kind, resourceId: entry.resourceId, name: entry.name, data: normalized.data, baseRevision: this._revision(entry.kind, entry.resourceId), sourceNodeId: `merge:remote:${remoteId}` }, principal);
+          if (!published.success) { results.push({ id, action, ...published, partial: true, effects, error: 'Merged version reached the server but could not be saved locally' }); continue; }
+          effects.localVersionSaved = true; const applied = options.apply === false ? null : await this.applyObject(id, options.applyOptions?.[id] || options.applyOptions || {}); effects.localApplied = options.apply !== false;
+          this._recordRemoteSync(remoteId, id, sent.object?.revision || entry.server.revision, normalized.contentHash);
+          results.push({ id, action, success: true, direction: 'both', revision: sent.object?.revision || entry.server.revision, applied: Boolean(applied), effects });
         }
-      } catch (error) { results.push({ id, action, success: false, error: error.message }); }
+      } catch (error) { results.push({ id, action, success: false, partial: Object.values(effects).some(Boolean), effects, error: error.message }); }
     }
-    return { success: results.every(item => item.success), count: results.filter(item => item.success).length, failed: results.filter(item => !item.success).length, results };
+    const completed = results.filter(item => item.success); const summary = {
+      uploaded: completed.filter(item => ['upload', 'overwrite-server'].includes(item.action)).length,
+      downloaded: completed.filter(item => ['download', 'overwrite-local'].includes(item.action)).length,
+      merged: completed.filter(item => item.action === 'merge').length,
+      overwritten: completed.filter(item => item.action.startsWith('overwrite')).length
+    };
+    return { success: results.every(item => item.success), count: completed.length, failed: results.filter(item => !item.success).length, summary, results };
   }
 
   async pushToRemote(remoteId, options = {}, principal = null) {
@@ -680,8 +747,11 @@ class HubManager {
   }
 
   async syncRemote(remoteId, options = {}, principal = null) {
-    const pulled = await this.pullFromRemote(remoteId, options, principal); const pushed = await this.pushToRemote(remoteId, options, principal);
-    return { success: pulled.success && pushed.success, pulled, pushed, conflicts: pulled.conflicts + pushed.conflicts };
+    const comparison = await this._remoteComparison(remoteId, options); const selections = comparison.entries.filter(item => item.recommendedAction !== 'skip').map(item => ({
+      id: item.id, action: item.recommendedAction, expectedLocalExists: Boolean(item.local), expectedServerExists: Boolean(item.server), expectedLocalHash: item.local?.contentHash || '', expectedServerHash: item.server?.contentHash || ''
+    }));
+    const applied = await this.applyRemotePlan(remoteId, selections, { ...options, apply: options.apply === true }, principal); const conflicts = comparison.entries.filter(item => item.state === 'diverged').length;
+    return { success: applied.success && conflicts === 0, count: applied.count, conflicts, applied, results: applied.results };
   }
 
   reconcile() {
