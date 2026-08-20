@@ -48,6 +48,7 @@ $shortCommit = static function ($value) { return $value ? substr((string) $value
     <button type="button" class="is-active" data-ks-tab="overview">Start</button>
     <?php if ($this->isAdmin): ?>
       <button type="button" data-ks-tab="deployment">Wdrożenie</button>
+      <button type="button" data-ks-tab="plesk">Plesk Management</button>
       <button type="button" data-ks-tab="configuration">Domeny i ustawienia</button>
       <button type="button" data-ks-tab="access">Połączenie z Hubem</button>
       <button type="button" data-ks-tab="manual">Konfiguracja ręczna</button>
@@ -110,6 +111,36 @@ $shortCommit = static function ($value) { return $value ? substr((string) $value
     </section>
 
     <?php if ($this->isAdmin): ?>
+    <section class="ks-tab-panel" data-ks-panel="plesk">
+      <div class="ks-section-title"><div><span class="ks-kicker">JEDNO MIEJSCE ZARZĄDZANIA</span><h2>Kitsune Plesk Management</h2><p>Zainstalowane managery pozostają niezależne funkcjonalnie, ale ich konfiguracja, wersje i ręczne aktualizacje są dostępne z tego jednego ekranu. Gdy Hub jest aktywny, osobne wpisy rozszerzeń znikają z lewego menu Pleska.</p></div><a class="ks-button" href="<?php echo $e($this->modulesListUrl); ?>">Wszystkie rozszerzenia Pleska</a></div>
+
+      <div class="ks-suite-summary">
+        <article><span>Wykryte rozszerzenia Suite</span><strong><?php echo count((array) $this->suiteExtensions); ?></strong><small>Wykrywanie korzysta z metadanych zainstalowanych rozszerzeń.</small></article>
+        <article><span>Centralny wpis menu</span><strong>Kitsune Hub</strong><small>Pozostałe managery otwierasz z listy poniżej.</small></article>
+        <article><span>Instalacja paczek</span><strong>ZIP Pleska</strong><small>Identyfikator i meta.xml są sprawdzane przed instalacją.</small></article>
+      </div>
+
+      <div class="ks-suite-grid">
+        <?php foreach ((array) $this->suiteExtensions as $extension): ?>
+          <article class="ks-card ks-suite-extension<?php echo $extension['isHub'] ? ' is-hub' : ''; ?>">
+            <div class="ks-card-head"><div><span class="ks-kicker"><?php echo $extension['isHub'] ? 'CENTRALNY HUB' : 'MANAGER PRODUKTU'; ?></span><h2><?php echo $e($extension['name']); ?></h2></div><span class="ks-pill <?php echo $extension['active'] ? 'is-good' : 'is-warning'; ?>"><i></i><?php echo $extension['active'] ? 'Aktywne' : 'Wyłączone'; ?></span></div>
+            <dl class="ks-suite-meta"><div><dt>Identyfikator</dt><dd><code><?php echo $e($extension['id']); ?></code></dd></div><div><dt>Wersja</dt><dd><?php echo $e($extension['version']); ?>-r<?php echo $e($extension['release']); ?></dd></div><div><dt>Menu</dt><dd><?php echo $extension['isHub'] ? 'Zawsze widoczne' : 'Dostępne tutaj'; ?></dd></div></dl>
+            <div class="ks-operation-form"><a class="ks-button<?php echo $extension['active'] ? ' is-primary' : ' is-disabled'; ?>" href="<?php echo $e($extension['active'] ? $extension['url'] : $this->modulesListUrl); ?>"><?php echo $extension['active'] ? ($extension['isHub'] ? 'Konfiguracja Hub' : 'Otwórz konfigurację') : 'Włącz w Plesku'; ?></a></div>
+          </article>
+        <?php endforeach; ?>
+        <?php if (!$this->suiteExtensions): ?><article class="ks-card ks-span-2"><div class="ks-alert is-warning"><span>!</span><p>Plesk nie zwrócił metadanych rozszerzeń Suite. Odśwież stronę albo sprawdź listę zainstalowanych rozszerzeń.</p></div></article><?php endif; ?>
+      </div>
+
+      <article class="ks-card ks-suite-upload">
+        <div class="ks-card-head"><div><span class="ks-kicker">RĘCZNA AKTUALIZACJA</span><h2>Wgraj jedną paczkę rozszerzenia</h2></div><span class="ks-icon">⇧</span></div>
+        <p class="ks-muted">Wybierz ZIP przygotowany dla Kitsune Plesk Suite. Hub sprawdzi obecność <code>meta.xml</code>, identyfikator, wersję i rozmiar, a następnie przekaże paczkę do instalatora Pleska. Aktualizacja samego Huba pozostaje w zakładce Wdrożenie.</p>
+        <form method="post" enctype="multipart/form-data" action="<?php echo $e($url('extension-upload')); ?>" class="ks-suite-upload-form">
+          <label class="ks-file-field"><span>Paczka ZIP rozszerzenia</span><input type="file" name="extension_package" accept=".zip,application/zip" required><small>Maksymalny rozmiar: 128 MB. Instaluj wyłącznie paczki z zaufanego folderu <code>update</code>.</small></label>
+          <button class="ks-button is-primary is-large" type="submit" data-ks-confirm="Zainstalować lub zaktualizować rozszerzenie z wybranej paczki ZIP?">Sprawdź i zainstaluj</button>
+        </form>
+      </article>
+    </section>
+
     <section class="ks-tab-panel" data-ks-panel="deployment">
       <div class="ks-section-title"><div><span class="ks-kicker">OPERACJE ZARZĄDZANE</span><h2>Repozytorium, wdrożenie i usługa</h2><p>Każda operacja działa jako zadanie długie Pleska. Aktualizacja nie nadpisuje katalogu danych i zachowuje poprzednie wdrożenie do automatycznego rollbacku.</p></div></div>
       <div class="ks-grid ks-grid-2">

@@ -167,11 +167,12 @@ class HubManager {
       const suffix = hash(resourceId).slice(0, 6); const label = `${slugify(input.slug || input.name || resourceId).slice(0, 56)}-${suffix}`;
       hostname = `${label}.${namespace}`;
     }
-    return this.saveRoute({
+    const route = this.saveRoute({
       id: existing?.id, kind: 'api-flow', resourceId, name: input.name, hostname,
       target: input.target, authPolicy: input.authPolicy || 'public', websocket: false,
       ownerNodeId: input.ownerNodeId || existing?.ownerNodeId || ''
     });
+    return this._routeView(route, this._read());
   }
 
   listTeams() { return clone(this._read().teams); }
@@ -194,7 +195,14 @@ class HubManager {
     return parsed.origin;
   }
 
-  listRoutes() { return clone(this._read().routes); }
+  _routeView(route, payload = this._read()) {
+    if (route.kind !== 'api-flow') return clone(route);
+    const namespace = this._apiNamespaces(payload).find(value => route.hostname.endsWith(`.${value}`) && route.hostname.split('.').length === value.split('.').length + 1) || '';
+    const label = namespace ? route.hostname.slice(0, -(namespace.length + 1)) : '';
+    return clone({ ...route, namespace, pathPrefix: label ? `/${label}` : '' });
+  }
+
+  listRoutes() { const payload = this._read(); return payload.routes.map(route => this._routeView(route, payload)); }
   saveRoute(input = {}) {
     const payload = this._read(); if (!payload.settings.panelDomain) throw new Error('Configure the panel domain first');
     const id = String(input.id || this._id('route')); const kind = String(input.kind || 'project');
@@ -206,11 +214,23 @@ class HubManager {
     const target = this._normalizeTarget(input.target); const index = payload.routes.findIndex(route => route.id === id);
     if (payload.routes.some((route, routeIndex) => routeIndex !== index && route.hostname === hostname)) throw new Error('Hostname is already assigned');
     const now = new Date(this.now()).toISOString(); const route = { id, kind, resourceId: String(input.resourceId || '').slice(0, 120), hostname, target, websocket: input.websocket !== false, enabled: input.enabled !== false, authPolicy: ['public', 'session', 'token'].includes(input.authPolicy) ? input.authPolicy : 'session', ownerNodeId: String(input.ownerNodeId || '').slice(0, 120), createdAt: index >= 0 ? payload.routes[index].createdAt : now, updatedAt: now };
-    if (index >= 0) payload.routes[index] = route; else payload.routes.push(route); this._write(payload, { type: 'route-saved', route }); return clone(route);
+    if (index >= 0) payload.routes[index] = route; else payload.routes.push(route); this._write(payload, { type: 'route-saved', route }); return this._routeView(route, payload);
   }
 
   removeRoute(id) { const payload = this._read(); const before = payload.routes.length; payload.routes = payload.routes.filter(route => route.id !== id); this._write(payload, { type: 'route-removed', routeId: id }); return { success: before !== payload.routes.length }; }
   resolveRoute(host) { const hostname = String(host || '').toLowerCase().replace(/:\d+$/, ''); return clone(this._read().routes.find(route => route.enabled !== false && route.hostname === hostname) || null); }
+
+  resolveApiFlowPathRoute(host, pathname) {
+    const payload = this._read();
+    const hostname = String(host || '').trim().toLowerCase().replace(/:\d+$/, '');
+    const namespace = this._apiNamespaces(payload).find(value => value === hostname);
+    if (!namespace) return null;
+    const match = String(pathname || '/').match(/^\/([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(\/.*|$)/);
+    if (!match) return null;
+    const route = payload.routes.find(item => item.enabled !== false && item.kind === 'api-flow' && item.hostname === `${match[1]}.${namespace}`);
+    if (!route) return null;
+    return { ...this._routeView(route, payload), upstreamPath: match[2] || '/' };
+  }
 
   createPairing(input = {}, principal = null) {
     const payload = this._read(); const kind = NODE_KINDS.has(input.kind) ? input.kind : 'desktop'; const code = `${crypto.randomBytes(3).toString('hex')}-${crypto.randomBytes(3).toString('hex')}`;

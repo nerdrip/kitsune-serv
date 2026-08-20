@@ -164,6 +164,24 @@ test('started API Flow project serves a real REST endpoint', async t => {
   assert.equal(manager.logs('flow-test')[0].source, 'http');
 });
 
+test('automatic API Flow port binds an available loopback port', async t => {
+  const root = temporary(t);
+  const manager = new ApiFlowManager(root, { secretStore: new SecretStore(root, { externalKey: 'server-key' }) });
+  const definition = project(9393);
+  definition.id = 'flow-auto-port';
+  definition.autoPort = true;
+  definition.port = 0;
+  const saved = manager.save(definition).project;
+  assert.equal(saved.port, 0);
+  const started = await manager.start(definition.id);
+  t.after(() => manager.stopAll());
+  assert.equal(started.running, true);
+  assert.ok(started.port >= 1024 && started.port <= 65535);
+  assert.equal(started.runtime.port, started.port);
+  const response = await fetch(`${started.url}/hello/12?allow=yes`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Auto' }) });
+  assert.equal(response.status, 201);
+});
+
 test('API Flow validator rejects cycles and duplicate routes', () => {
   const manager = new ApiFlowManager(process.cwd()); const definition = project();
   definition.endpoints[0].nodes[4].next = 'input';

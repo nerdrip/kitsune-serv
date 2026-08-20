@@ -30,11 +30,11 @@ test('Hub UI renders independent local and remote status and responsive guidance
 });
 
 test('Test Lab and API publication use domains synchronized from the Plesk bridge', () => {
-  for (const marker of ['chooseHubPublicationDomain', 'inventory?.apiDomains', 'publish-domain-overlay', 'Bazowa domena API z Plesk Bridge', 'Po uruchomieniu API jest on zapisywany także automatycznie']) assert.ok(app.includes(marker), `missing publication flow: ${marker}`);
+  for (const marker of ['chooseHubPublicationDomain', 'inventory?.apiDomains', 'publish-domain-overlay', 'Bazowa domena API z Plesk Bridge', 'Działający adres awaryjny zostanie pokazany']) assert.ok(app.includes(marker), `missing publication flow: ${marker}`);
   for (const marker of ['.publish-domain-overlay', '.publish-domain-dialog', '.publish-domain-warning']) assert.ok(styles.includes(marker), `missing publication style: ${marker}`);
 });
 
-test('API Flow explains internal web ports and exact block result placeholders', () => {
-  for (const marker of ['api-flow-listen-help', 'Port procesu (wewnętrzny)', 'rememberApiFlowPublication', 'renderApiFlowResultHelp', 'Wynik tego bloku', '{steps.${escapeHtml(node.id)}}']) assert.ok(html.includes(marker) || app.includes(marker), `missing API Flow guidance: ${marker}`);
-  for (const marker of ['.api-flow-result-help', '.api-flow-node-result']) assert.ok(styles.includes(marker), `missing API Flow result style: ${marker}`);
+test('API Flow hides web ports, exposes readable public actions and exact block result placeholders', () => {
+  for (const marker of ['api-flow-settings-dialog', 'W webie warstwa uruchomieniowa jest obsługiwana automatycznie', 'Kopiuj adres', 'Otwórz API', 'apiFlowLaunchUrl', 'route?.subdomainReady', 'autoPort: runtimeMode === \'server\'', 'rememberApiFlowPublication', 'renderApiFlowResultHelp', 'Wynik tego bloku', '{steps.${escapeHtml(node.id)}}']) assert.ok(html.includes(marker) || app.includes(marker), `missing API Flow guidance: ${marker}`);
+  for (const marker of ['.api-flow-result-help', '.api-flow-node-result', '.api-flow-dialog-backdrop', '.api-flow-inspector-scrim', '@container']) assert.ok(styles.includes(marker), `missing API Flow result style: ${marker}`);
 });

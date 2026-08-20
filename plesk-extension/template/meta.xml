@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module>
+  <id>example-manager</id>
+  <name>Example Product Manager</name>
+  <description>Managed deployment and operations for Example Product.</description>
+  <category>developer</category>
+  <version>0.1.0</version>
+  <release>1</release>
+  <vendor>Kitsune</vendor>
+  <url>https://example.invalid/example-product</url>
+  <support_url>https://example.invalid/example-product/issues</support_url>
+  <plesk_min_version>18.0.41</plesk_min_version>
+  <os>unix</os>
+</module>

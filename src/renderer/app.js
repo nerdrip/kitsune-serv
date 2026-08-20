@@ -3070,13 +3070,24 @@ function apiFlowPublicUrl(project, suffix = '') {
   const port = Number(project?.port || 9393);
   const basePath = String(project?.basePath || '/api');
   const route = apiFlowState.routes.find(item => item.kind === 'api-flow' && item.resourceId === project?.id && item.enabled !== false);
+  if (runtimeMode === 'server' && route?.subdomainReady && route?.hostname) return `https://${route.hostname}${basePath}${suffix || ''}`;
+  if (runtimeMode === 'server' && route?.namespace && route?.pathPrefix) return `https://${route.namespace}${route.pathPrefix}${basePath}${suffix || ''}`;
   if (runtimeMode === 'server' && route?.hostname) return `https://${route.hostname}${basePath}${suffix || ''}`;
   if (runtimeMode === 'server') return '';
   return `http://${host}:${port}${basePath}${suffix || ''}`;
 }
 
+function apiFlowPreferredUrl(project, suffix = '') {
+  const route = apiFlowState.routes.find(item => item.kind === 'api-flow' && item.resourceId === project?.id && item.enabled !== false);
+  return runtimeMode === 'server' && route?.hostname ? `https://${route.hostname}${String(project?.basePath || '/api')}${suffix || ''}` : apiFlowPublicUrl(project, suffix);
+}
+
 function apiFlowInternalUrl(project, suffix = '') {
   return `http://127.0.0.1:${Number(project?.port || 9393)}${String(project?.basePath || '/api')}${suffix || ''}`;
+}
+
+function apiFlowLaunchUrl(project) {
+  return apiFlowPublicUrl(project, selectedApiFlowEndpoint()?.path || '');
 }
 
 function rememberApiFlowPublication(result) {
@@ -3103,21 +3114,23 @@ function defaultApiFlowEndpoint(index = 1) {
 
 function createApiFlowDraft() {
   const endpoint = defaultApiFlowEndpoint();
-  return { id: apiFlowId('flow'), name: 'Nowe REST API', slug: '', port: 9393, host: apiFlowDefaultHost(), basePath: '/api', cors: true, endpoints: [endpoint], running: false, url: null };
+  return { id: apiFlowId('flow'), name: 'Nowe REST API', slug: '', port: runtimeMode === 'server' ? 0 : 9393, autoPort: runtimeMode === 'server', host: apiFlowDefaultHost(), basePath: '/api', cors: true, endpoints: [endpoint], running: false, url: null };
 }
 
 function initApiFlowBuilder() {
   if (!api.apiFlow || apiFlowState.initialized) return;
   apiFlowState.initialized = true;
-  const listenLabel = document.getElementById('api-flow-listen-label');
   const listenHelp = document.getElementById('api-flow-listen-help');
   if (runtimeMode === 'server') {
-    if (listenLabel) listenLabel.textContent = 'Port procesu (wewnętrzny)';
-    if (listenHelp) listenHelp.textContent = 'Publiczny HTTPS otrzymasz automatycznie z domeny API skonfigurowanej w Plesk Bridge.';
+    document.getElementById('api-flow-desktop-network')?.classList.add('hidden');
     const hostSelect = document.getElementById('api-flow-host'); if (hostSelect) { hostSelect.value = '127.0.0.1'; hostSelect.disabled = true; }
   } else if (listenHelp) listenHelp.textContent = 'Desktop udostępnia API lokalnie jako localhost:port.';
   document.getElementById('api-flow-project-select')?.addEventListener('change', event => loadApiFlowProject(event.target.value));
   document.getElementById('api-flow-new')?.addEventListener('click', newApiFlowProject);
+  document.getElementById('api-flow-settings')?.addEventListener('click', openApiFlowSettings);
+  document.getElementById('api-flow-settings-close')?.addEventListener('click', closeApiFlowSettings);
+  document.getElementById('api-flow-settings-done')?.addEventListener('click', closeApiFlowSettings);
+  document.getElementById('api-flow-settings-dialog')?.addEventListener('click', event => { if (event.target.id === 'api-flow-settings-dialog') closeApiFlowSettings(); });
   document.getElementById('api-flow-save')?.addEventListener('click', saveAndRestartApiFlow);
   document.getElementById('api-flow-toggle')?.addEventListener('click', toggleApiFlowServer);
   document.getElementById('api-flow-publish')?.addEventListener('click', publishApiFlowDomain);
@@ -3130,17 +3143,18 @@ function initApiFlowBuilder() {
   document.getElementById('api-flow-open-blocks')?.addEventListener('click', () => setApiFlowRail('blocks'));
   document.getElementById('api-flow-inspector-toggle')?.addEventListener('click', toggleApiFlowInspector);
   document.getElementById('api-flow-inspector-close')?.addEventListener('click', closeApiFlowInspector);
+  document.getElementById('api-flow-inspector-scrim')?.addEventListener('click', closeApiFlowInspector);
   document.getElementById('api-flow-validate')?.addEventListener('click', () => validateApiFlow(true));
   document.getElementById('api-flow-send-test')?.addEventListener('click', sendApiFlowTest);
   document.getElementById('api-flow-copy-test')?.addEventListener('click', () => copyApiFlowUrl(document.getElementById('api-flow-test-url')?.value));
   document.getElementById('api-flow-copy-url')?.addEventListener('click', () => {
     const project = apiFlowState.project;
-    copyApiFlowUrl(project?.running ? apiFlowPublicUrl(project) : '');
+    copyApiFlowUrl(project?.running ? apiFlowLaunchUrl(project) : '');
   });
   document.getElementById('api-flow-open-url')?.addEventListener('click', () => {
     const project = apiFlowState.project;
     if (!project?.running) return;
-    api.shell.openExternal(apiFlowPublicUrl(project));
+    api.shell.openExternal(apiFlowLaunchUrl(project));
   });
   document.getElementById('api-flow-refresh-logs')?.addEventListener('click', refreshApiFlowLogs);
   document.getElementById('api-flow-clear-logs')?.addEventListener('click', clearApiFlowLogs);
@@ -3179,17 +3193,27 @@ function setApiFlowRail(view) {
 
 function toggleApiFlowInspector() {
   const studio = document.getElementById('api-flow-mode');
-  if (window.innerWidth <= 1500) studio.classList.toggle('inspector-open');
-  else studio.classList.toggle('inspector-collapsed');
+  studio.classList.toggle('inspector-open');
   requestAnimationFrame(drawApiFlowConnections);
 }
 
 function closeApiFlowInspector() {
-  const studio = document.getElementById('api-flow-mode'); studio.classList.remove('inspector-open'); studio.classList.add('inspector-collapsed'); requestAnimationFrame(drawApiFlowConnections);
+  const studio = document.getElementById('api-flow-mode'); studio.classList.remove('inspector-open'); requestAnimationFrame(drawApiFlowConnections);
 }
 
 function openApiFlowInspector() {
-  const studio = document.getElementById('api-flow-mode'); studio.classList.remove('inspector-collapsed'); if (window.innerWidth <= 1500) studio.classList.add('inspector-open'); requestAnimationFrame(drawApiFlowConnections);
+  const studio = document.getElementById('api-flow-mode'); studio.classList.add('inspector-open'); requestAnimationFrame(drawApiFlowConnections);
+}
+
+function openApiFlowSettings() {
+  renderApiFlowToolbar();
+  document.getElementById('api-flow-settings-dialog')?.classList.remove('hidden');
+  document.getElementById('api-flow-name')?.focus();
+}
+
+function closeApiFlowSettings() {
+  document.getElementById('api-flow-settings-dialog')?.classList.add('hidden');
+  renderApiFlowToolbar();
 }
 
 async function copyApiFlowUrl(value) {
@@ -3234,7 +3258,8 @@ function markApiFlowDirty() {
 function syncApiFlowForm() {
   const project = apiFlowState.project; const endpoint = selectedApiFlowEndpoint(); if (!project) return;
   project.name = document.getElementById('api-flow-name').value;
-  project.port = Number(document.getElementById('api-flow-port').value);
+  project.autoPort = runtimeMode === 'server';
+  project.port = runtimeMode === 'server' ? 0 : Number(document.getElementById('api-flow-port').value);
   project.host = runtimeMode === 'server' ? '127.0.0.1' : document.getElementById('api-flow-host').value;
   project.basePath = document.getElementById('api-flow-base-path').value;
   project.cors = document.getElementById('api-flow-cors').checked;
@@ -3257,11 +3282,17 @@ function renderApiFlowToolbar() {
   const project = apiFlowState.project; if (!project) return;
   const select = document.getElementById('api-flow-project-select');
   select.innerHTML = '<option value="">＋ Nowy projekt API</option>' + apiFlowState.projects.map(item => `<option value="${escapeHtml(item.id)}">${item.running ? '● ' : ''}${escapeHtml(item.name)}</option>`).join(''); select.value = apiFlowState.projects.some(item => item.id === project.id) ? project.id : '';
-  document.getElementById('api-flow-name').value = project.name || ''; document.getElementById('api-flow-port').value = project.port || 9393; document.getElementById('api-flow-host').value = runtimeMode === 'server' ? '127.0.0.1' : project.host || '127.0.0.1'; document.getElementById('api-flow-base-path').value = project.basePath || '/api'; document.getElementById('api-flow-cors').checked = project.cors !== false;
+  document.getElementById('api-flow-name').value = project.name || ''; document.getElementById('api-flow-port').value = runtimeMode === 'server' ? 0 : project.port || 9393; document.getElementById('api-flow-host').value = runtimeMode === 'server' ? '127.0.0.1' : project.host || '127.0.0.1'; document.getElementById('api-flow-base-path').value = project.basePath || '/api'; document.getElementById('api-flow-cors').checked = project.cors !== false;
+  const endpoint = selectedApiFlowEndpoint();
+  document.getElementById('api-flow-project-title').textContent = project.name || 'Nowe API';
+  document.getElementById('api-flow-project-route').textContent = endpoint ? `${endpoint.method} ${project.basePath || '/api'}${endpoint.path}` : 'Dodaj pierwszy endpoint';
+  const preferred = apiFlowPreferredUrl(project, endpoint?.path || '');
+  const active = apiFlowPublicUrl(project, endpoint?.path || '');
+  document.getElementById('api-flow-publication-preview').textContent = active ? (active === preferred ? `Adres publiczny: ${active}` : `Działający adres: ${active} · preferowana subdomena: ${preferred}`) : 'Po uruchomieniu adres zostanie utworzony automatycznie z domeny zsynchronizowanej przez Plesk Bridge.';
   renderApiFlowToggle();
   document.getElementById('api-flow-delete').disabled = !apiFlowState.projects.some(item => item.id === project.id);
   const runtimeUrl = apiFlowPublicUrl(project);
-  const dirty = document.getElementById('api-flow-dirty-state'); dirty.textContent = apiFlowState.dirty ? '● Niezapisane zmiany' : project.running ? `● Działa · ${runtimeUrl || 'port wewnętrzny'}` : '✓ Zapisano'; dirty.classList.toggle('dirty', apiFlowState.dirty); dirty.classList.toggle('running', Boolean(project.running));
+  const dirty = document.getElementById('api-flow-dirty-state'); dirty.textContent = apiFlowState.dirty ? '● Niezapisane zmiany' : project.running ? `● Działa · ${runtimeUrl || 'publikacja oczekuje'}` : '✓ Zapisano'; dirty.classList.toggle('dirty', apiFlowState.dirty); dirty.classList.toggle('running', Boolean(project.running));
 }
 
 function renderApiFlowToggle() {
@@ -3284,17 +3315,17 @@ function renderApiFlowRuntime() {
   bar.dataset.state = state;
   const labels = { running: 'API działa', stopped: 'API zatrzymane', starting: apiFlowState.operation === 'testing' ? 'Przygotowuję test live…' : 'Uruchamiam API…', stopping: 'Zatrzymuję API…', error: 'Błąd runtime' };
   document.getElementById('api-flow-runtime-label').textContent = labels[state];
-  const url = apiFlowPublicUrl(project);
-  document.getElementById('api-flow-runtime-url').textContent = url ? (project.running ? url : `Docelowo: ${url}`) : `Wewnętrznie: ${apiFlowInternalUrl(project)} · czeka na domenę API z Pleska`;
+  const url = apiFlowLaunchUrl(project);
+  document.getElementById('api-flow-runtime-url').textContent = url ? (project.running ? url : `Docelowo: ${url}`) : (runtimeMode === 'server' ? 'Uruchom API, aby automatycznie utworzyć publiczny adres.' : `Lokalnie: ${apiFlowInternalUrl(project)}`);
   document.getElementById('api-flow-runtime-uptime').textContent = project.running ? formatApiFlowUptime(project.runtime?.uptimeMs || 0) : '—';
   document.getElementById('api-flow-runtime-requests').textContent = String(project.runtime?.requestCount || 0);
   document.getElementById('api-flow-runtime-errors').textContent = String(project.runtime?.errorCount || 0);
   document.getElementById('api-flow-runtime-last').textContent = project.runtime?.lastStatus ? `${project.runtime.lastStatus} · ${project.runtime.lastDurationMs}ms` : '—';
   document.getElementById('api-flow-copy-url').disabled = !project.running || !url; document.getElementById('api-flow-open-url').disabled = !project.running || !url;
   const messages = {
-    stopped: apiFlowState.dirty ? 'Masz niezapisane zmiany. Start zapisze projekt i uruchomi port.' : 'Serwer nie nasłuchuje. Klient REST może uruchomić go automatycznie.',
-    starting: 'Trwa zapis, walidacja i otwieranie portu. Przycisk zmieni się po potwierdzeniu nasłuchiwania.',
-    stopping: 'Kończę aktywne połączenia i zwalniam port.',
+    stopped: apiFlowState.dirty ? 'Masz niezapisane zmiany. Start zapisze projekt i uruchomi API.' : 'API jest zatrzymane. Klient REST może uruchomić je automatycznie.',
+    starting: runtimeMode === 'server' ? 'Trwa zapis, walidacja i przygotowanie automatycznej publikacji.' : 'Trwa zapis, walidacja i otwieranie lokalnego portu.',
+    stopping: 'Kończę aktywne połączenia i zatrzymuję API.',
     error: apiFlowState.runtimeError || 'Nie udało się zmienić stanu API.'
   };
   const runningProjects = apiFlowState.projects.filter(item => item.running);
@@ -3554,7 +3585,7 @@ async function saveAndRestartApiFlow() {
     const saved = await saveApiFlowProject(false); if (!saved) return;
     if (wasRunning) {
       const started = await api.apiFlow.start(saved.id); rememberApiFlowPublication(started); apiFlowState.project = structuredClone(await api.apiFlow.get(saved.id));
-      const publicUrl = apiFlowPublicUrl(apiFlowState.project); showToast(publicUrl ? `Zmiany zapisane, API zrestartowane: ${publicUrl}` : 'Zmiany zapisane, API działa na porcie wewnętrznym i czeka na domenę z Pleska', publicUrl ? 'success' : 'warning');
+      const publicUrl = apiFlowPublicUrl(apiFlowState.project); showToast(publicUrl ? `Zmiany zapisane, API zrestartowane: ${publicUrl}` : 'Zmiany zapisane. API działa, ale Plesk Bridge nie przekazał jeszcze domeny publikacji.', publicUrl ? 'success' : 'warning');
     }
   } catch (error) {
     apiFlowState.runtimeError = error.message;
@@ -3570,7 +3601,7 @@ async function toggleApiFlowServer() {
   try {
     if (project.running) await api.apiFlow.stop(project.id);
     else { if (apiFlowState.dirty || !apiFlowState.projects.some(item => item.id === project.id)) project = await saveApiFlowProject(true); if (!project) return; const started = await api.apiFlow.start(project.id); rememberApiFlowPublication(started); if (started?.publicationWarning) showToast(`API działa lokalnie, ale publikacja nie powiodła się: ${started.publicationWarning}`, 'warning'); }
-    const fresh = await api.apiFlow.get(project.id); apiFlowState.project = structuredClone(fresh); apiFlowState.projects = await api.apiFlow.list(); renderApiFlowBuilder(); const publicUrl = apiFlowPublicUrl(fresh); showToast(fresh.running ? (publicUrl ? `API działa: ${publicUrl}` : 'API działa na porcie wewnętrznym; skonfiguruj bazową domenę API w Plesk Bridge') : 'API zatrzymane', fresh.running && !publicUrl ? 'warning' : 'success');
+    const fresh = await api.apiFlow.get(project.id); apiFlowState.project = structuredClone(fresh); apiFlowState.projects = await api.apiFlow.list(); renderApiFlowBuilder(); const publicUrl = apiFlowPublicUrl(fresh); showToast(fresh.running ? (publicUrl ? `API działa: ${publicUrl}` : 'API działa, ale nie ma jeszcze domeny z Plesk Bridge') : 'API zatrzymane', fresh.running && !publicUrl ? 'warning' : 'success');
   } catch (error) { apiFlowState.runtimeError = error.message; showToast(error.message, 'error'); }
   finally { apiFlowState.operation = 'idle'; await refreshApiFlowRuntimeStatus(); renderApiFlowBuilder(); }
 }
@@ -3586,7 +3617,7 @@ function setApiFlowView(view) {
 
 function updateApiFlowTestUrl() {
   const project = apiFlowState.project; const endpoint = selectedApiFlowEndpoint(); if (!project || !endpoint) return;
-  document.getElementById('api-flow-test-method').textContent = endpoint.method; document.getElementById('api-flow-test-url').value = apiFlowPublicUrl(project, endpoint.path) || apiFlowInternalUrl(project, endpoint.path);
+  document.getElementById('api-flow-test-method').textContent = endpoint.method; document.getElementById('api-flow-test-url').value = apiFlowPublicUrl(project, endpoint.path) || (runtimeMode === 'server' ? 'Publiczny adres powstanie automatycznie po uruchomieniu' : apiFlowInternalUrl(project, endpoint.path));
 }
 
 function parseApiFlowTesterValue(id, fallback) {
@@ -5916,7 +5947,7 @@ async function publishApiFlowDomain() {
     const existing = apiFlowState.routes.find(item => item.kind === 'api-flow' && item.resourceId === project.id);
     const route = await api.hub.saveRoute({ id: existing?.id, name: project.name, kind: 'api-flow', resourceId: project.id, hostname: normalized, target: `http://127.0.0.1:${project.port}`, authPolicy: 'public', websocket: false });
     rememberApiFlowPublication({ publication: route });
-    showToast(`API opublikowane: https://${route.hostname}${project.basePath || '/api'}`, 'success'); await refreshApiFlowRuntimeStatus();
+    showToast(`API opublikowane: ${apiFlowPublicUrl(project, selectedApiFlowEndpoint()?.path || '')}`, 'success'); await refreshApiFlowRuntimeStatus();
   } catch (error) { showToast(`${error.message}. W Plesk Bridge zaznacz domenę API, zapisz ustawienia i zsynchronizuj węzeł.`, 'error'); }
 }
 
@@ -5937,7 +5968,7 @@ async function chooseHubPublicationDomain({ kind, name, resourceId, slug }) {
   const suggested = isApi ? `${suggestedLabel}.${selectedBase}` : configured.find(value => !occupied.has(value)) || `${label}.${base}`;
   return new Promise(resolve => {
     const overlay = document.createElement('div'); overlay.className = 'publish-domain-overlay';
-    overlay.innerHTML = `<form class="publish-domain-dialog"><header><div><span>PUBLICZNY ADRES</span><h3>Opublikuj ${escapeHtml(kind)} „${escapeHtml(name)}”</h3><p>${isApi ? 'W webie port pozostaje wewnętrzny. Plesk Bridge kieruje unikalną subdomenę bezpośrednio do tego procesu.' : 'Gateway Huba skieruje domenę do uruchomionego procesu.'}</p></div><button type="button" data-domain-cancel aria-label="Zamknij">×</button></header>${configured.length ? `<label><span>${isApi ? 'Bazowa domena API z Plesk Bridge' : 'Domena skonfigurowana w Plesk Bridge'}</span><select data-domain-select>${configured.map(value => `<option ${value === selectedBase ? 'selected' : ''}>${escapeHtml(value)}</option>`).join('')}</select><small>${isApi ? 'To wspólna przestrzeń nazw. Nie jest adresem konkretnego API.' : 'Lista pochodzi z ostatniej synchronizacji węzła Plesk.'}</small></label>` : ''}<label><span>${isApi ? 'Nazwa w adresie' : 'Pełna nazwa domeny'}</span><input data-domain-input value="${escapeHtml(isApi ? suggestedLabel : suggested)}" autocomplete="off" spellcheck="false"><small>${isApi ? `Powstanie adres <code data-domain-preview>https://${escapeHtml(suggested)}</code>. Po uruchomieniu API jest on zapisywany także automatycznie.` : `Musi to być jedna bezpośrednia subdomena <code>${escapeHtml(base)}</code>.`}</small></label><footer><button type="button" class="btn" data-domain-cancel>Anuluj</button><button type="submit" class="btn btn-primary">${isApi ? 'Użyj tego adresu' : 'Zapisz trasę'}</button></footer></form>`;
+    overlay.innerHTML = `<form class="publish-domain-dialog"><header><div><span>PUBLICZNY ADRES</span><h3>Opublikuj ${escapeHtml(kind)} „${escapeHtml(name)}”</h3><p>${isApi ? 'KitsuneServ tworzy działający adres pod bazową domeną API. Ładna subdomena jest używana automatycznie, gdy wildcard DNS jest dostępny.' : 'Gateway Huba skieruje domenę do uruchomionego procesu.'}</p></div><button type="button" data-domain-cancel aria-label="Zamknij">×</button></header>${configured.length ? `<label><span>${isApi ? 'Bazowa domena API z Plesk Bridge' : 'Domena skonfigurowana w Plesk Bridge'}</span><select data-domain-select>${configured.map(value => `<option ${value === selectedBase ? 'selected' : ''}>${escapeHtml(value)}</option>`).join('')}</select><small>${isApi ? 'To wspólna przestrzeń nazw. Nie jest adresem konkretnego API.' : 'Lista pochodzi z ostatniej synchronizacji węzła Plesk.'}</small></label>` : ''}<label><span>${isApi ? 'Nazwa w adresie' : 'Pełna nazwa domeny'}</span><input data-domain-input value="${escapeHtml(isApi ? suggestedLabel : suggested)}" autocomplete="off" spellcheck="false"><small>${isApi ? `Preferowana subdomena: <code data-domain-preview>https://${escapeHtml(suggested)}</code>. Działający adres awaryjny zostanie pokazany na ekranie API.` : `Musi to być jedna bezpośrednia subdomena <code>${escapeHtml(base)}</code>.`}</small></label><footer><button type="button" class="btn" data-domain-cancel>Anuluj</button><button type="submit" class="btn btn-primary">${isApi ? 'Użyj tej nazwy' : 'Zapisz trasę'}</button></footer></form>`;
     document.body.appendChild(overlay); const input = overlay.querySelector('[data-domain-input]'); const select = overlay.querySelector('[data-domain-select]');
     const preview = overlay.querySelector('[data-domain-preview]');
     const hostname = () => isApi ? `${input.value.trim().toLowerCase()}.${select.value}` : input.value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
