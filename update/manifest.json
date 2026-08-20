@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-20T12:47:49.864Z",
+  "generatedAt": "2026-08-20T13:03:31.655Z",
   "packages": [
     {
       "order": 1,
@@ -43,9 +43,9 @@
       "id": "kitsunepnc-manager",
       "name": "KitsunePNC Deployment Manager",
       "version": "1.8.9",
-      "release": "2",
-      "file": "packages/05-kitsunepnc-manager-1.8.9-r2.zip",
-      "sha256": "5b34b24dc8373a0a633597fa5735f0df06204774f26e643dbd2537184aa13d8d"
+      "release": "3",
+      "file": "packages/05-kitsunepnc-manager-1.8.9-r3.zip",
+      "sha256": "bf9053c866bcf454634caabb62e304794ba2bd0b3a6b487b4d45cceb1ff9c86c"
     },
     {
       "order": 6,
@@ -108,7 +108,7 @@
       "version": "0.1.1",
       "release": "82",
       "file": "packages/12-ultimate-tool-0.1.1-r82.zip",
-      "sha256": "2f11db8c91eca2756ce49327dc477ab5722c4789e6d25191fcef57764eabc04c"
+      "sha256": "5684c259a5aca391c4d5fcd3984d88bec843308ace75c65b4061989161b25d78"
     },
     {
       "order": 99,
