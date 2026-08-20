@@ -93,7 +93,7 @@ test('managed Plesk connector enrolls automatically with a replay-protected sign
   const connector = hub.saveConnector({ id: 'plesk-managed', baseUrl: 'https://plesk.example.test', authMode: 'hybrid' }, secret);
   const request = {
     connectorId: connector.id, timestamp: 1_800_000_000_000, nonce: crypto.randomBytes(16).toString('hex'),
-    device: { name: 'Plesk production', platform: 'Linux', version: '3.1.2-r21', capabilities: ['plesk-sso', 'inventory'] }
+    device: { name: 'Plesk production', platform: 'Linux', version: '3.1.2-r22', capabilities: ['plesk-sso', 'inventory'] }
   };
   const signature = crypto.createHmac('sha256', secret).update(stable(request)).digest('base64url');
   const enrolled = hub.enrollPleskConnector(request, signature);

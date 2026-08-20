@@ -136,19 +136,31 @@ function checkSuiteContract(source, id) {
   for (const relative of ['htdocs/css/kitsune-platform.css', 'htdocs/js/kitsune-platform.js']) {
     if (!fs.existsSync(path.join(source, relative))) throw new Error(`Missing shared Suite asset for ${id}: ${relative}`);
   }
-  if (id === 'kitsuneserv-bridge') return;
+  if (id === 'kitsuneserv-bridge') {
+    for (const relative of ['htdocs/images/kitsune-hub-menu.svg', 'plib/library/Suite.php']) {
+      if (!fs.existsSync(path.join(source, relative))) throw new Error(`Missing Hub Suite file for ${id}: ${relative}`);
+    }
+    return;
+  }
   const hookPath = path.join(source, 'plib/hooks/CustomButtons.php');
   const controllerPath = path.join(source, 'plib/controllers/IndexController.php');
   const viewPath = path.join(source, 'plib/views/scripts/index/index.phtml');
-  for (const required of [hookPath, controllerPath, viewPath]) {
+  const selfUpdateLibrary = path.join(source, 'plib/library/SuiteSelfUpdate.php');
+  const selfUpdateController = path.join(source, 'plib/controllers/SelfUpdateController.php');
+  const selfUpdateView = path.join(source, 'plib/views/scripts/self-update/index.phtml');
+  for (const required of [hookPath, controllerPath, viewPath, selfUpdateLibrary, selfUpdateController, selfUpdateView]) {
     if (!fs.existsSync(required)) throw new Error(`Missing Suite integration file for ${id}: ${path.relative(source, required)}`);
   }
   const hook = fs.readFileSync(hookPath, 'utf8');
   const controller = fs.readFileSync(controllerPath, 'utf8');
   const view = fs.readFileSync(viewPath, 'utf8');
+  const updater = fs.readFileSync(selfUpdateLibrary, 'utf8') + fs.readFileSync(selfUpdateController, 'utf8');
   if (!hook.includes("pm_Extension::getById('kitsuneserv-bridge')->isActive()") || !hook.includes('return [];')) throw new Error(`Extension ${id} does not yield its menu to an active Kitsune Hub.`);
   if (!controller.includes('suiteHubActive') || !controller.includes('kitsune-platform')) throw new Error(`Extension ${id} does not load the shared Suite shell.`);
   if (!view.includes('data-kitsune-suite')) throw new Error(`Extension ${id} does not mount the shared Suite header.`);
+  if (!updater.includes('update/manifest.json') || !updater.includes("hash_file('sha256'") || !updater.includes('pm_Extension::installByFile')) throw new Error(`Extension ${id} does not provide verified standalone self-update.`);
+  const icon = hook.match(/'icon'\s*=>\s*pm_Context::getBaseUrl\(\)\s*\.\s*'images\/([^']+)'/)?.[1];
+  if (!icon || !fs.existsSync(path.join(source, 'htdocs/images', icon))) throw new Error(`Extension ${id} does not provide its declared menu icon.`);
 }
 
 if (path.dirname(packagesRoot) !== outputRoot || path.dirname(outputRoot) !== root) throw new Error('Unsafe update output path.');

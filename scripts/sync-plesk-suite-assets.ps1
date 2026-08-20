@@ -8,6 +8,12 @@ $androidNerd = Join-Path (Split-Path -Parent $projects) 'Android\Nerd'
 $phpWordpressPlugins = Join-Path (Split-Path -Parent $projects) 'PHP\wordpress\wordpress-plugins'
 $sourceCss = Join-Path $workspace 'plesk-extension\kitsuneserv-bridge\htdocs\css\kitsune-platform.css'
 $sourceJs = Join-Path $workspace 'plesk-extension\kitsuneserv-bridge\htdocs\js\kitsune-platform.js'
+$template = Join-Path $workspace 'plesk-extension\template'
+$selfUpdateFiles = @(
+    'plib\library\SuiteSelfUpdate.php',
+    'plib\controllers\SelfUpdateController.php',
+    'plib\views\scripts\self-update\index.phtml'
+)
 $targets = @(
     @{ Path = Join-Path $projects 'kitsune-irc\tools\plesk-extension\kitsuneirc-manager'; Label = 'kitsune-irc\tools\plesk-extension\kitsuneirc-manager' },
     @{ Path = Join-Path $projects 'KitsuneArtifactory\tools\plesk-extension\kitsuneartifactory-manager'; Label = 'KitsuneArtifactory\tools\plesk-extension\kitsuneartifactory-manager' },
@@ -26,6 +32,9 @@ $targets = @(
 foreach ($source in @($sourceCss, $sourceJs)) {
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Missing canonical suite asset: $source" }
 }
+foreach ($relative in $selfUpdateFiles) {
+    if (-not (Test-Path -LiteralPath (Join-Path $template $relative) -PathType Leaf)) { throw "Missing canonical Suite updater file: $relative" }
+}
 
 foreach ($target in $targets) {
     $extension = $target.Path
@@ -35,10 +44,14 @@ foreach ($target in $targets) {
     New-Item -ItemType Directory -Path $cssDirectory,$jsDirectory -Force | Out-Null
     Copy-Item -LiteralPath $sourceCss -Destination (Join-Path $cssDirectory 'kitsune-platform.css') -Force
     Copy-Item -LiteralPath $sourceJs -Destination (Join-Path $jsDirectory 'kitsune-platform.js') -Force
+    foreach ($relative in $selfUpdateFiles) {
+        $destination = Join-Path $extension $relative
+        New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $template $relative) -Destination $destination -Force
+    }
     Write-Output "Synchronized suite assets: $($target.Label)"
 }
 
-$template = Join-Path $workspace 'plesk-extension\template'
 $templateCss = Join-Path $template 'htdocs\css'
 $templateJs = Join-Path $template 'htdocs\js'
 New-Item -ItemType Directory -Path $templateCss,$templateJs -Force | Out-Null

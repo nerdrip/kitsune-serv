@@ -25,11 +25,14 @@ $extensionLabel = $extensionStatus === 'scheduled' ? 'Aktualizacja zaplanowana' 
 $repositoryExtensionVersion = (string) ($extensionUpdate['candidate'] ?? '');
 $extensionCanUpdate = $extensionStatus === 'available' && $repositoryExtensionVersion !== '' && $repositoryExtensionVersion !== $this->extensionVersion;
 $shortCommit = static function ($value) { return $value ? substr((string) $value, 0, 10) : '—'; };
+$suiteCatalog = (array) ($this->suiteCatalog ?? []);
+$suiteExtensions = (array) ($this->suiteExtensions ?? []);
+$suiteAvailableCount = count(array_filter($suiteExtensions, static function ($extension) { return ($extension['updateStatus'] ?? '') === 'available'; }));
 ?>
 <div class="ks-shell" data-deployment-mode="<?php echo $e($c['deployment_mode']); ?>" data-url-mode="<?php echo $e($c['url_mode']); ?>" data-proxy-mode="<?php echo $e($c['proxy_mode']); ?>">
   <header class="ks-hero">
     <div class="ks-brand">
-      <span class="ks-logo">狐</span>
+      <span class="ks-logo"><img src="<?php echo $e(pm_Context::getBaseUrl() . 'images/kitsune-hub-menu.svg'); ?>" alt="" width="42" height="42"></span>
       <div>
         <div class="ks-eyebrow">PLESK DEPLOYMENT &amp; IDENTITY BRIDGE</div>
         <h1>KitsuneServ Bridge</h1>
@@ -112,23 +115,28 @@ $shortCommit = static function ($value) { return $value ? substr((string) $value
 
     <?php if ($this->isAdmin): ?>
     <section class="ks-tab-panel" data-ks-panel="plesk">
-      <div class="ks-section-title"><div><span class="ks-kicker">JEDNO MIEJSCE ZARZĄDZANIA</span><h2>Kitsune Plesk Management</h2><p>Zainstalowane managery pozostają niezależne funkcjonalnie, ale ich konfiguracja, wersje i ręczne aktualizacje są dostępne z tego jednego ekranu. Gdy Hub jest aktywny, osobne wpisy rozszerzeń znikają z lewego menu Pleska.</p></div><a class="ks-button" href="<?php echo $e($this->modulesListUrl); ?>">Wszystkie rozszerzenia Pleska</a></div>
+      <div class="ks-section-title"><div><span class="ks-kicker">JEDNO MIEJSCE ZARZĄDZANIA</span><h2>Kitsune Plesk Management</h2><p>Hub porównuje zainstalowane managery z paczkami z gałęzi <code>main</code>, pokazuje obie wersje i instaluje aktualizację dopiero po sprawdzeniu SHA-256 oraz <code>meta.xml</code>. Gdy Hub jest aktywny, osobne wpisy rozszerzeń znikają z lewego menu Pleska.</p></div><div class="ks-actions"><form method="post" action="<?php echo $e($url('suite-refresh')); ?>"><button class="ks-button is-primary" type="submit">↻ Sprawdź aktualizacje</button></form><a class="ks-button" href="<?php echo $e($this->modulesListUrl); ?>">Wszystkie rozszerzenia Pleska</a></div></div>
+
+      <?php if (!empty($suiteCatalog['error'])): ?><div class="ks-alert is-warning"><span>!</span><p><strong>Ostatnie sprawdzenie nie powiodło się.</strong> <?php echo $e($suiteCatalog['error']); ?></p></div><?php elseif (!empty($suiteCatalog['checkedAt'])): ?><div class="ks-alert <?php echo $suiteAvailableCount ? 'is-info' : 'is-success'; ?>"><span><?php echo $suiteAvailableCount ? '↻' : '✓'; ?></span><p>Repozytorium sprawdzono <?php echo $e($suiteCatalog['checkedAt']); ?>. <?php echo $suiteAvailableCount ? 'Dostępne aktualizacje: ' . $e($suiteAvailableCount) . '.' : 'Wszystkie zainstalowane managery są aktualne.'; ?></p></div><?php else: ?><div class="ks-alert is-info"><span>i</span><p>Aktualizacje nie były jeszcze sprawdzane. Kliknij „Sprawdź aktualizacje”, aby pobrać bieżący manifest z repozytorium.</p></div><?php endif; ?>
 
       <div class="ks-suite-summary">
-        <article><span>Wykryte rozszerzenia Suite</span><strong><?php echo count((array) $this->suiteExtensions); ?></strong><small>Wykrywanie korzysta z metadanych zainstalowanych rozszerzeń.</small></article>
-        <article><span>Centralny wpis menu</span><strong>Kitsune Hub</strong><small>Pozostałe managery otwierasz z listy poniżej.</small></article>
-        <article><span>Instalacja paczek</span><strong>ZIP Pleska</strong><small>Identyfikator i meta.xml są sprawdzane przed instalacją.</small></article>
+        <article><span>Zainstalowane rozszerzenia</span><strong><?php echo count($suiteExtensions); ?></strong><small>Każdy manager ma własną konfigurację i ikonę, ale jedno centrum aktualizacji.</small></article>
+        <article><span>Dostępne aktualizacje</span><strong class="<?php echo $suiteAvailableCount ? 'ks-warning-text' : 'ks-good-text'; ?>"><?php echo $e($suiteAvailableCount); ?></strong><small><?php echo !empty($suiteCatalog['checkedAt']) ? 'Stan po ostatnim sprawdzeniu repozytorium.' : 'Najpierw pobierz manifest z gałęzi main.'; ?></small></article>
+        <article><span>Źródło paczek</span><strong>main / update</strong><small>Manifest, suma SHA-256 i metadane paczki muszą być zgodne.</small></article>
       </div>
 
       <div class="ks-suite-grid">
-        <?php foreach ((array) $this->suiteExtensions as $extension): ?>
+        <?php foreach ($suiteExtensions as $extension): ?>
           <article class="ks-card ks-suite-extension<?php echo $extension['isHub'] ? ' is-hub' : ''; ?>">
-            <div class="ks-card-head"><div><span class="ks-kicker"><?php echo $extension['isHub'] ? 'CENTRALNY HUB' : 'MANAGER PRODUKTU'; ?></span><h2><?php echo $e($extension['name']); ?></h2></div><span class="ks-pill <?php echo $extension['active'] ? 'is-good' : 'is-warning'; ?>"><i></i><?php echo $extension['active'] ? 'Aktywne' : 'Wyłączone'; ?></span></div>
-            <dl class="ks-suite-meta"><div><dt>Identyfikator</dt><dd><code><?php echo $e($extension['id']); ?></code></dd></div><div><dt>Wersja</dt><dd><?php echo $e($extension['version']); ?>-r<?php echo $e($extension['release']); ?></dd></div><div><dt>Menu</dt><dd><?php echo $extension['isHub'] ? 'Zawsze widoczne' : 'Dostępne tutaj'; ?></dd></div></dl>
-            <div class="ks-operation-form"><a class="ks-button<?php echo $extension['active'] ? ' is-primary' : ' is-disabled'; ?>" href="<?php echo $e($extension['active'] ? $extension['url'] : $this->modulesListUrl); ?>"><?php echo $extension['active'] ? ($extension['isHub'] ? 'Konfiguracja Hub' : 'Otwórz konfigurację') : 'Włącz w Plesku'; ?></a></div>
+            <div class="ks-card-head"><div class="ks-suite-title"><img src="<?php echo $e($extension['icon']); ?>" alt="" width="42" height="42"><div><span class="ks-kicker"><?php echo $extension['isHub'] ? 'CENTRALNY HUB' : 'MANAGER PRODUKTU'; ?></span><h2><?php echo $e($extension['name']); ?></h2></div></div><span class="ks-pill <?php echo $extension['active'] ? 'is-good' : 'is-warning'; ?>"><i></i><?php echo $extension['active'] ? 'Aktywne' : 'Wyłączone'; ?></span></div>
+            <dl class="ks-suite-meta"><div><dt>Zainstalowano</dt><dd><?php echo $e($extension['version']); ?>-r<?php echo $e($extension['release']); ?></dd></div><div><dt>Repozytorium</dt><dd><?php echo $extension['availableVersion'] !== '' ? $e($extension['availableVersion']) . '-r' . $e($extension['availableRelease']) : ($extension['isHub'] ? 'Własny kanał Bridge' : 'Nie sprawdzono'); ?></dd></div><div><dt>Status</dt><dd class="is-<?php echo $e($extension['updateStatus']); ?>"><?php echo $extension['updateStatus'] === 'available' ? 'Dostępna aktualizacja' : ($extension['updateStatus'] === 'current' ? 'Wersja aktualna' : ($extension['updateStatus'] === 'hub' ? 'Aktualizacja we Wdrożeniu' : ($extension['updateStatus'] === 'missing' ? 'Brak paczki w manifeście' : 'Nie sprawdzono'))); ?></dd></div></dl>
+            <div class="ks-operation-form">
+              <a class="ks-button<?php echo $extension['active'] ? '' : ' is-disabled'; ?>" href="<?php echo $e($extension['active'] ? $extension['url'] : $this->modulesListUrl); ?>"><?php echo $extension['active'] ? ($extension['isHub'] ? 'Konfiguracja Hub' : 'Otwórz konfigurację') : 'Włącz w Plesku'; ?></a>
+              <?php if ($extension['updateStatus'] === 'available'): ?><form method="post" action="<?php echo $e($url('suite-update')); ?>"><input type="hidden" name="extension_id" value="<?php echo $e($extension['id']); ?>"><button class="ks-button is-primary" type="submit" data-ks-confirm="Pobrać, zweryfikować i zainstalować <?php echo $e($extension['name']); ?> <?php echo $e($extension['availableVersion']); ?>-r<?php echo $e($extension['availableRelease']); ?>?">Aktualizuj do <?php echo $e($extension['availableVersion']); ?>-r<?php echo $e($extension['availableRelease']); ?></button></form><?php endif; ?>
+            </div>
           </article>
         <?php endforeach; ?>
-        <?php if (!$this->suiteExtensions): ?><article class="ks-card ks-span-2"><div class="ks-alert is-warning"><span>!</span><p>Plesk nie zwrócił metadanych rozszerzeń Suite. Odśwież stronę albo sprawdź listę zainstalowanych rozszerzeń.</p></div></article><?php endif; ?>
+        <?php if (!$suiteExtensions): ?><article class="ks-card ks-span-2"><div class="ks-alert is-warning"><span>!</span><p>Plesk nie zwrócił metadanych rozszerzeń Suite. Odśwież stronę albo sprawdź listę zainstalowanych rozszerzeń.</p></div></article><?php endif; ?>
       </div>
 
       <article class="ks-card ks-suite-upload">

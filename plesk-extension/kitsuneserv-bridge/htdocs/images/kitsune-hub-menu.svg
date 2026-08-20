@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Kitsune Hub">
+  <defs><linearGradient id="hub" x1="8" y1="5" x2="57" y2="58" gradientUnits="userSpaceOnUse"><stop stop-color="#ff8a5b"/><stop offset=".55" stop-color="#ff526f"/><stop offset="1" stop-color="#6b5ce7"/></linearGradient></defs>
+  <path fill="url(#hub)" d="M8 8l15 9h18L56 8l-4 22c3 5 5 10 5 15 0 8-11 14-25 14S7 53 7 45c0-5 2-10 5-15L8 8z"/>
+  <path fill="#151a3d" d="M20 27h24a4 4 0 0 1 4 4v17H16V31a4 4 0 0 1 4-4z"/>
+  <path fill="#fff" d="M21 32h22v4H21zm0 7h22v4H21z" opacity=".95"/><circle cx="39" cy="34" r="1.7" fill="#43e6dd"/><circle cx="39" cy="41" r="1.7" fill="#43e6dd"/>
+  <path fill="#fff" d="M15 46l11 2-7 6zm34 0l-11 2 7 6z" opacity=".9"/>
+</svg>
