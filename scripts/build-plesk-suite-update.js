@@ -141,7 +141,8 @@ function checkSuiteContract(source, id) {
       if (!fs.existsSync(path.join(source, relative))) throw new Error(`Missing Hub Suite file for ${id}: ${relative}`);
     }
     const suite = fs.readFileSync(path.join(source, 'plib/library/Suite.php'), 'utf8');
-    if (!suite.includes("callSbin('kitsune-suite-self-update'") || !suite.includes("'suite-extension-' . $mode")) throw new Error('Kitsune Hub does not use repository-backed Suite updates.');
+    const runner = fs.readFileSync(path.join(source, 'sbin/kitsune-suite-self-update'), 'utf8');
+    if (!suite.includes("callSbin('kitsune-suite-self-update'") || !suite.includes("'suite-extension-' . $mode") || !runner.includes("'ssh-keyscan'") || !runner.includes('StrictHostKeyChecking=yes') || runner.includes('Repozytorium SSH wymaga zapisanego known_hosts')) throw new Error('Kitsune Hub does not use repository-backed Suite updates with automatic SSH trust persistence.');
     return;
   }
   const hookPath = path.join(source, 'plib/hooks/CustomButtons.php');
@@ -162,7 +163,7 @@ function checkSuiteContract(source, id) {
   if (!hook.includes("pm_Extension::getById('kitsuneserv-bridge')->isActive()") || !hook.includes('return [];')) throw new Error(`Extension ${id} does not yield its menu to an active Kitsune Hub.`);
   if (!controller.includes('suiteHubActive') || !controller.includes('kitsune-platform')) throw new Error(`Extension ${id} does not load the shared Suite shell.`);
   if (!view.includes('data-kitsune-suite')) throw new Error(`Extension ${id} does not mount the shared Suite header.`);
-  if (!updater.includes("callSbin('kitsune-suite-self-update'") || !updateRunner.includes("'git', 'fetch'") || !updateRunner.includes("'git', 'archive'") || !updateRunner.includes("'merge', '--ff-only'") || updateRunner.includes('update/manifest.json')) throw new Error(`Extension ${id} does not provide repository-backed standalone self-update.`);
+  if (!updater.includes("callSbin('kitsune-suite-self-update'") || !updateRunner.includes("'git', 'fetch'") || !updateRunner.includes("'git', 'archive'") || !updateRunner.includes("'merge', '--ff-only'") || !updateRunner.includes("'ssh-keyscan'") || !updateRunner.includes('StrictHostKeyChecking=yes') || updateRunner.includes('Repozytorium SSH wymaga zapisanego known_hosts') || updateRunner.includes('update/manifest.json')) throw new Error(`Extension ${id} does not provide repository-backed standalone self-update with automatic SSH trust persistence.`);
   const icon = hook.match(/'icon'\s*=>\s*pm_Context::getBaseUrl\(\)\s*\.\s*'images\/([^']+)'/)?.[1];
   if (!icon || !fs.existsSync(path.join(source, 'htdocs/images', icon))) throw new Error(`Extension ${id} does not provide its declared menu icon.`);
 }

@@ -14,6 +14,9 @@ Przed użyciem:
    `sbin/kitsune-suite-self-update`. Self-update nie korzysta z centralnego
    manifestu: synchronizuje gałąź repozytorium produktu, wykonuje wyłącznie
    fast-forward i pakuje katalog rozszerzenia z przypiętego commitu.
+   Dla repozytorium SSH runner przy pierwszym użyciu pobiera klucze hosta przez
+   `ssh-keyscan`, zapisuje je prywatnie w katalogu modułu i przy kolejnych
+   połączeniach wymusza `StrictHostKeyChecking=yes` z utrwalonym `known_hosts`.
 
 Pliki `htdocs/css/kitsune-platform.css` i `htdocs/js/kitsune-platform.js` są synchronizowane z kanonicznej wersji Bridge przez:
 
