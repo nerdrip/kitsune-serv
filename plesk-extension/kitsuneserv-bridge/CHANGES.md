@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.1.3-9
+
+- SSH repositories used by Showcase and managed deployment now discover a missing host key with `ssh-keyscan`, persist it privately and enforce the pinned key on subsequent connections.
+- Custom SSH ports are represented correctly in `known_hosts`, while strict host checking and non-interactive authentication remain mandatory.
+
 ## 3.1.3-8
 
 - Showcase resolves its bundled template through Plesk's installed `plib` directory, fixing missing-template errors after extension installation.

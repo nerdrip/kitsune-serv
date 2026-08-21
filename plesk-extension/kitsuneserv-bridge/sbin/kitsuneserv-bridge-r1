@@ -1,7 +1,7 @@
 #!/usr/bin/env php
 <?php
 
-const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.1.3-r8';
+const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.1.3-r9';
 
 final class KitsuneServBridgeManager
 {
@@ -687,11 +687,8 @@ final class KitsuneServBridgeManager
             }
             $isSsh = strpos($url, 'ssh://') === 0 || strpos($url, 'git@') === 0;
             if ($isSsh) {
-                $known = trim((string) ($this->config['git_ssh_known_hosts'] ?? ''));
-                if ($known === '') throw new RuntimeException('SSH repository requires verified known_hosts content.');
-                $knownPath = $this->varDir . '/known-hosts-' . bin2hex(random_bytes(6));
-                file_put_contents($knownPath, $known . "\n", LOCK_EX); chmod($knownPath, 0600); $temporary[] = $knownPath;
-                $ssh = 'ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=' . escapeshellarg($knownPath);
+                $knownPath = $this->ensureGitKnownHosts($url);
+                $ssh = 'ssh -o BatchMode=yes -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null -o UserKnownHostsFile=' . escapeshellarg($knownPath);
                 $key = trim((string) ($this->config['git_ssh_private_key'] ?? ''));
                 if ($key !== '') {
                     $keyPath = $this->varDir . '/git-key-' . bin2hex(random_bytes(6));
@@ -704,6 +701,59 @@ final class KitsuneServBridgeManager
         } finally {
             foreach ($temporary as $path) if (is_file($path)) @unlink($path);
         }
+    }
+
+    private function ensureGitKnownHosts($url)
+    {
+        $endpoint = $this->repositorySshEndpoint($url);
+        if ($endpoint === null) throw new RuntimeException('Invalid SSH repository endpoint.');
+        $trustFile = $this->varDir . '/git-known-hosts';
+        if (is_link($trustFile)) throw new RuntimeException('Git known_hosts file cannot be a symbolic link.');
+        $configured = trim((string) ($this->config['git_ssh_known_hosts'] ?? ''));
+        $stored = is_file($trustFile) ? trim((string) file_get_contents($trustFile)) : '';
+        $lines = preg_split('/\r?\n/', trim($configured . "\n" . $stored), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $hostToken = $endpoint['port'] === 22 ? $endpoint['host'] : '[' . $endpoint['host'] . ']:' . $endpoint['port'];
+        $hasHost = false;
+        foreach ($lines as $line) {
+            if (preg_match('/^' . preg_quote($hostToken, '/') . '[ \t]+/', trim((string) $line))) { $hasHost = true; break; }
+        }
+        if (!$hasHost) {
+            $command = ['ssh-keyscan', '-T', '15'];
+            if ($endpoint['port'] !== 22) { $command[] = '-p'; $command[] = (string) $endpoint['port']; }
+            $command[] = $endpoint['host'];
+            $scanned = preg_split('/\r?\n/', trim((string) $this->run($command)['stdout']), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            $accepted = [];
+            foreach ($scanned as $line) {
+                $line = trim((string) $line);
+                if ($line === '' || $line[0] === '#') continue;
+                if (!preg_match('/^([^ \t]+)[ \t]+(ssh-ed25519|ecdsa-sha2-nistp(?:256|384|521)|ssh-rsa)[ \t]+[A-Za-z0-9+\/]+={0,3}$/', $line, $match) || !hash_equals($hostToken, $match[1])) {
+                    throw new RuntimeException('ssh-keyscan returned an invalid repository host key.');
+                }
+                $accepted[] = $line;
+            }
+            if (!$accepted) throw new RuntimeException('ssh-keyscan did not return a repository host key.');
+            $lines = array_merge($lines, $accepted);
+            $this->log('Git: discovered and pinned the SSH host key for ' . $hostToken . '.');
+        }
+        $contents = implode("\n", array_values(array_unique(array_map('trim', $lines)))) . "\n";
+        if (strlen($contents) > 131072) throw new RuntimeException('Git known_hosts content exceeds the allowed size.');
+        $temporary = $trustFile . '.tmp-' . bin2hex(random_bytes(8));
+        if (file_put_contents($temporary, $contents, LOCK_EX) === false) throw new RuntimeException('Cannot write discovered Git known_hosts content.');
+        @chmod($temporary, 0600);
+        if (!rename($temporary, $trustFile)) { @unlink($temporary); throw new RuntimeException('Cannot persist discovered Git known_hosts content.'); }
+        @chmod($trustFile, 0600);
+        return $trustFile;
+    }
+
+    private function repositorySshEndpoint($url)
+    {
+        if (preg_match('/^git@([A-Za-z0-9.-]+):[^\s]+$/', (string) $url, $match)) return ['host' => strtolower($match[1]), 'port' => 22];
+        $parts = parse_url((string) $url);
+        if (!is_array($parts) || ($parts['scheme'] ?? '') !== 'ssh') return null;
+        $host = strtolower((string) ($parts['host'] ?? ''));
+        $port = (int) ($parts['port'] ?? 22);
+        if (!preg_match('/^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/', $host) || $port < 1 || $port > 65535) return null;
+        return ['host' => $host, 'port' => $port];
     }
 
     private function run(array $command, $cwd = null, array $extraEnvironment = [], $throw = true)
