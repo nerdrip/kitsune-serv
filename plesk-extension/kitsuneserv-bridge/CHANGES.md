@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.1.3-2
+
+- Suite management now checks every product repository, fast-forwards its private checkout when required and installs packages built from pinned commits.
+- The aggregate `update` directory remains available as the one-time migration bundle for existing installations.
+
 ## 3.1.3-1
 
 - Aligns the Plesk Bridge release with KitsuneServ 3.1.3 and its explicit Desktop-to-Hub synchronization plan.

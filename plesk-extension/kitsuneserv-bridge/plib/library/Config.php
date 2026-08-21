@@ -2,7 +2,7 @@
 
 class Modules_KitsuneservBridge_Config
 {
-    public const EXTENSION_VERSION = '3.1.3-r1';
+    public const EXTENSION_VERSION = '3.1.3-r2';
 
     private const SECRET_FIELDS = [
         'git_token' => 'secret_git_token',
@@ -150,9 +150,9 @@ class Modules_KitsuneservBridge_Config
         return array_values($valid);
     }
 
-    public static function createRuntimeConfig($action)
+    public static function createRuntimeConfig($action, array $extra = [])
     {
-        $allowed = ['status', 'check', 'sync', 'deploy', 'sync-deploy', 'start', 'stop', 'restart', 'proxy', 'extension-check', 'extension-update'];
+        $allowed = ['status', 'check', 'sync', 'deploy', 'sync-deploy', 'start', 'stop', 'restart', 'proxy', 'extension-check', 'extension-update', 'suite-extension-check', 'suite-extension-install'];
         if (!in_array($action, $allowed, true)) throw new InvalidArgumentException('Unsupported operation.');
         $varDir = rtrim((string) pm_Context::getVarDir(), '/\\');
         if (!is_dir($varDir) && !mkdir($varDir, 0700, true) && !is_dir($varDir)) {
@@ -166,6 +166,14 @@ class Modules_KitsuneservBridge_Config
         foreach (array_keys(self::SECRET_FIELDS) as $field) $config[$field] = self::secret($field);
         $config['action'] = $action;
         $config['requested_at'] = gmdate('c');
+        $config = array_merge($config, $extra);
+        if (in_array($action, ['suite-extension-check', 'suite-extension-install'], true)) {
+            $config['gitToken'] = (string) ($config['git_token'] ?? '');
+            $config['gitSshPrivateKey'] = (string) ($config['git_ssh_private_key'] ?? '');
+            $config['gitUsername'] = (string) ($config['git_username'] ?? 'x-access-token');
+            $config['gitSshKnownHosts'] = (string) ($config['git_ssh_known_hosts'] ?? '');
+            $config['schemaVersion'] = 1;
+        }
 
         if ($config['proxy_mode'] === 'managed' && in_array($action, ['deploy', 'sync-deploy', 'proxy'], true)) {
             $verified = [];
@@ -181,7 +189,8 @@ class Modules_KitsuneservBridge_Config
             $config['proxy_vhost_paths'] = $vhostPaths;
         }
 
-        $path = $realVarDir . '/operation-' . bin2hex(random_bytes(12)) . '.json';
+        $prefix = in_array($action, ['suite-extension-check', 'suite-extension-install'], true) ? 'self-update-' : 'operation-';
+        $path = $realVarDir . '/' . $prefix . bin2hex(random_bytes(12)) . '.json';
         $json = json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         $previousUmask = umask(0077);
         try {

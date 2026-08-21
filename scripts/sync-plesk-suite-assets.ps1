@@ -12,7 +12,8 @@ $template = Join-Path $workspace 'plesk-extension\template'
 $selfUpdateFiles = @(
     'plib\library\SuiteSelfUpdate.php',
     'plib\controllers\SelfUpdateController.php',
-    'plib\views\scripts\self-update\index.phtml'
+    'plib\views\scripts\self-update\index.phtml',
+    'sbin\kitsune-suite-self-update'
 )
 $targets = @(
     @{ Path = Join-Path $projects 'kitsune-irc\tools\plesk-extension\kitsuneirc-manager'; Label = 'kitsune-irc\tools\plesk-extension\kitsuneirc-manager' },

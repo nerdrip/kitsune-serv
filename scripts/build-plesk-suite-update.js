@@ -137,9 +137,11 @@ function checkSuiteContract(source, id) {
     if (!fs.existsSync(path.join(source, relative))) throw new Error(`Missing shared Suite asset for ${id}: ${relative}`);
   }
   if (id === 'kitsuneserv-bridge') {
-    for (const relative of ['htdocs/images/kitsune-hub-menu.svg', 'plib/library/Suite.php']) {
+    for (const relative of ['htdocs/images/kitsune-hub-menu.svg', 'plib/library/Suite.php', 'sbin/kitsune-suite-self-update']) {
       if (!fs.existsSync(path.join(source, relative))) throw new Error(`Missing Hub Suite file for ${id}: ${relative}`);
     }
+    const suite = fs.readFileSync(path.join(source, 'plib/library/Suite.php'), 'utf8');
+    if (!suite.includes("callSbin('kitsune-suite-self-update'") || !suite.includes("'suite-extension-' . $mode")) throw new Error('Kitsune Hub does not use repository-backed Suite updates.');
     return;
   }
   const hookPath = path.join(source, 'plib/hooks/CustomButtons.php');
@@ -148,17 +150,19 @@ function checkSuiteContract(source, id) {
   const selfUpdateLibrary = path.join(source, 'plib/library/SuiteSelfUpdate.php');
   const selfUpdateController = path.join(source, 'plib/controllers/SelfUpdateController.php');
   const selfUpdateView = path.join(source, 'plib/views/scripts/self-update/index.phtml');
-  for (const required of [hookPath, controllerPath, viewPath, selfUpdateLibrary, selfUpdateController, selfUpdateView]) {
+  const selfUpdateRunner = path.join(source, 'sbin/kitsune-suite-self-update');
+  for (const required of [hookPath, controllerPath, viewPath, selfUpdateLibrary, selfUpdateController, selfUpdateView, selfUpdateRunner]) {
     if (!fs.existsSync(required)) throw new Error(`Missing Suite integration file for ${id}: ${path.relative(source, required)}`);
   }
   const hook = fs.readFileSync(hookPath, 'utf8');
   const controller = fs.readFileSync(controllerPath, 'utf8');
   const view = fs.readFileSync(viewPath, 'utf8');
   const updater = fs.readFileSync(selfUpdateLibrary, 'utf8') + fs.readFileSync(selfUpdateController, 'utf8');
+  const updateRunner = fs.readFileSync(selfUpdateRunner, 'utf8');
   if (!hook.includes("pm_Extension::getById('kitsuneserv-bridge')->isActive()") || !hook.includes('return [];')) throw new Error(`Extension ${id} does not yield its menu to an active Kitsune Hub.`);
   if (!controller.includes('suiteHubActive') || !controller.includes('kitsune-platform')) throw new Error(`Extension ${id} does not load the shared Suite shell.`);
   if (!view.includes('data-kitsune-suite')) throw new Error(`Extension ${id} does not mount the shared Suite header.`);
-  if (!updater.includes('update/manifest.json') || !updater.includes("hash_file('sha256'") || !updater.includes('pm_Extension::installByFile')) throw new Error(`Extension ${id} does not provide verified standalone self-update.`);
+  if (!updater.includes("callSbin('kitsune-suite-self-update'") || !updateRunner.includes("'git', 'fetch'") || !updateRunner.includes("'git', 'archive'") || !updateRunner.includes("'merge', '--ff-only'") || updateRunner.includes('update/manifest.json')) throw new Error(`Extension ${id} does not provide repository-backed standalone self-update.`);
   const icon = hook.match(/'icon'\s*=>\s*pm_Context::getBaseUrl\(\)\s*\.\s*'images\/([^']+)'/)?.[1];
   if (!icon || !fs.existsSync(path.join(source, 'htdocs/images', icon))) throw new Error(`Extension ${id} does not provide its declared menu icon.`);
 }
