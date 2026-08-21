@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.1.3-8
+
+- Showcase resolves its bundled template through Plesk's installed `plib` directory, fixing missing-template errors after extension installation.
+- The bilingual Showcase received a new cinematic landing hero, live catalog statistics, faster section navigation, richer responsive styling and accessible reduced-motion behavior.
+
 ## 3.1.3-7
 
 - Showcase now validates a domain document root against its Plesk webspace home instead of the separate system-vhost directory, allowing synchronization on standard Linux Plesk layouts.

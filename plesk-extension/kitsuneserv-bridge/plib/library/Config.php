@@ -2,7 +2,7 @@
 
 class Modules_KitsuneservBridge_Config
 {
-    public const EXTENSION_VERSION = '3.1.3-r7';
+    public const EXTENSION_VERSION = '3.1.3-r8';
 
     private const SECRET_FIELDS = [
         'git_token' => 'secret_git_token',
@@ -187,7 +187,7 @@ class Modules_KitsuneservBridge_Config
             if ($documentRoot === false || !is_dir($documentRoot)) throw new RuntimeException('Nie udało się ustalić katalogu dokumentów domeny Showcase.');
             $documentRoot = rtrim(str_replace('\\', '/', $documentRoot), '/');
             if (strpos($documentRoot . '/', $home . '/') !== 0) throw new RuntimeException('Katalog dokumentów Showcase musi znajdować się wewnątrz webspace wybranej domeny.');
-            $template = realpath(dirname(__DIR__, 2) . '/resources/showcase');
+            $template = realpath(pm_Context::getPlibDir() . '/resources/showcase');
             if ($template === false || !is_file($template . '/index.php')) throw new RuntimeException('Brakuje szablonu strony Showcase w rozszerzeniu.');
             $config['showcase_document_root'] = $documentRoot;
             $config['showcase_home_path'] = $home;
