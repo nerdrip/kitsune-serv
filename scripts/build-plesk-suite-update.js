@@ -133,8 +133,28 @@ function checkSource(source) {
 }
 
 function checkSuiteContract(source, id) {
+  const entrypoint = fs.readFileSync(path.join(source, 'htdocs/index.php'), 'utf8');
+  if (!entrypoint.includes(`pm_Context::init('${id}')`) || !entrypoint.includes('new pm_Application()') || !entrypoint.includes('->run()')) throw new Error(`Extension ${id} does not start its Plesk MVC application.`);
+  const pleskPrefix = id.split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join('');
+  const configName = fs.existsSync(path.join(source, 'plib/library/Config.php')) ? 'Config' : 'PanelConfig';
+  const configSource = fs.readFileSync(path.join(source, `plib/library/${configName}.php`), 'utf8');
+  if (!configSource.includes(`class Modules_${pleskPrefix}_${configName}`)) throw new Error(`Extension ${id} does not use its Plesk SDK autoload prefix Modules_${pleskPrefix}_*.`);
   for (const relative of ['htdocs/css/kitsune-platform.css', 'htdocs/js/kitsune-platform.js']) {
     if (!fs.existsSync(path.join(source, relative))) throw new Error(`Missing shared Suite asset for ${id}: ${relative}`);
+  }
+  if (id === 'kitsuneartifactory-manager') {
+    const controller = fs.readFileSync(path.join(source, 'plib/controllers/IndexController.php'), 'utf8');
+    const runner = fs.readFileSync(path.join(source, 'sbin/kitsuneartifactory-manager'), 'utf8');
+    if (!controller.includes("addElement('select', 'publicDomain'")
+      || !controller.includes("addElement('textarea', 'gitSshPrivateKey'")
+      || !controller.includes('discoverSshKnownHosts')
+      || !configSource.includes("'gitSshPrivateKey' => 'secret_git_ssh_private_key'")
+      || !configSource.includes('GENERATED_SECRETS')
+      || !runner.includes('StrictHostKeyChecking=yes')
+      || !runner.includes('configurePleskProxy')
+      || !runner.includes("'httpdmng', '--reconfigure-domain'")) {
+      throw new Error('Kitsune Artifactory does not provide the complete managed Git, secret, domain, and Plesk proxy workflow.');
+    }
   }
   if (id === 'kitsuneserv-bridge') {
     for (const relative of ['htdocs/images/kitsune-hub-menu.svg', 'plib/library/Suite.php', 'sbin/kitsune-suite-self-update']) {

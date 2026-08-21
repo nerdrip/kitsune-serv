@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-21T05:35:39.225Z",
+  "generatedAt": "2026-08-21T06:21:17.662Z",
   "packages": [
     {
       "order": 1,
       "id": "kitsuneartifactory-manager",
       "name": "Kitsune Artifactory Manager",
       "version": "1.0.0",
-      "release": "5",
-      "file": "packages/01-kitsuneartifactory-manager-1.0.0-r5.zip",
-      "sha256": "c0003bc06f74e2df1c15095dbd3550af163b3f6333178202ab81d3d0b01bcd27"
+      "release": "8",
+      "file": "packages/01-kitsuneartifactory-manager-1.0.0-r8.zip",
+      "sha256": "7c6f0776338352c5dc85ed3c69286c0821ab4708109dd0ca5e34ffe835cd7e5a"
     },
     {
       "order": 2,
