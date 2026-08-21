@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.1.3-7
+
+- Showcase now validates a domain document root against its Plesk webspace home instead of the separate system-vhost directory, allowing synchronization on standard Linux Plesk layouts.
+
 ## 3.1.3-6
 
 - The Showcase open-repository section now ships with the four bilingual projects defined by the source site: kitsune-serv, kitsune-git, kitsune-irc and nodeuo.
