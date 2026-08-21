@@ -122,6 +122,8 @@ $i18n = [
         'last_change' => 'Ostatnia zmiana',
         'stable' => 'Stabilna',
         'snapshot' => 'Snapshot',
+        'version_unavailable' => 'Niedostępna',
+        'choose_version' => 'Wybierz kanał dokumentacji',
         'open_in_new_tab' => 'Otwórz w nowej karcie',
 
         'repos_title' => 'Repozytoria',
@@ -170,6 +172,8 @@ $i18n = [
         'last_change' => 'Last updated',
         'stable' => 'Stable',
         'snapshot' => 'Snapshot',
+        'version_unavailable' => 'Unavailable',
+        'choose_version' => 'Choose a documentation channel',
         'open_in_new_tab' => 'Open in a new tab',
 
         'repos_title' => 'Repositories',
@@ -630,10 +634,13 @@ function build_repositories(array $repositoriesConfig, string $lang): array {
 }
 
 $projects = list_dirs($baseDir);
-$hasKitsuneScript = false;
 $libraryLabels = [];
+$libraryMetadata = [];
 foreach ((array) ($siteConfig['libraries'] ?? []) as $library) {
-    if (is_array($library) && isset($library['slug'], $library['label'])) $libraryLabels[(string) $library['slug']] = (string) $library['label'];
+    if (!is_array($library) || !isset($library['slug'])) continue;
+    $slug = (string) $library['slug'];
+    if (isset($library['label'])) $libraryLabels[$slug] = (string) $library['label'];
+    $libraryMetadata[$slug] = $library;
 }
 
 // Build data for generic projects
@@ -645,17 +652,37 @@ foreach ($projects as $p) {
     $stable = is_file($stablePath . DIRECTORY_SEPARATOR . 'index.html');
     $snapshot = is_file($snapshotPath . DIRECTORY_SEPARATOR . 'index.html');
     if (!$stable && !$snapshot) continue;
+    $versions = is_array($libraryMetadata[$p]['versions'] ?? null) ? $libraryMetadata[$p]['versions'] : [];
+    $stableVersion = trim((string) ($versions['stable']['version'] ?? ''));
+    $snapshotVersion = trim((string) ($versions['snapshot']['version'] ?? ''));
+    if ($snapshotVersion !== '' && !preg_match('/-SNAPSHOT$/i', $snapshotVersion)) $snapshotVersion .= '-SNAPSHOT';
+    $tools = [];
+    if (preg_replace('/[^a-z0-9]/', '', strtolower($p)) === 'kitsunescript') {
+        foreach ([
+            ['slug' => 'playground', 'label_key' => 'ks_playground', 'description_key' => 'ks_playground_desc'],
+            ['slug' => 'layout-editor', 'label_key' => 'ks_layout', 'description_key' => 'ks_layout_desc'],
+        ] as $tool) {
+            $tool['stable_url'] = is_file($stablePath . DIRECTORY_SEPARATOR . $tool['slug'] . DIRECTORY_SEPARATOR . 'index.html')
+                ? $baseUrl . '/' . rawurlencode($p) . '/stable/' . rawurlencode($tool['slug']) . '/'
+                : null;
+            $tool['snapshot_url'] = is_file($snapshotPath . DIRECTORY_SEPARATOR . $tool['slug'] . DIRECTORY_SEPARATOR . 'index.html')
+                ? $baseUrl . '/' . rawurlencode($p) . '/snapshot/' . rawurlencode($tool['slug']) . '/'
+                : null;
+            if ($tool['stable_url'] || $tool['snapshot_url']) $tools[] = $tool;
+        }
+    }
     $mtime = max(newest_mtime_recursive($stablePath), newest_mtime_recursive($snapshotPath));
     $cards[] = [
         'folder' => $p,
         'title'  => $libraryLabels[$p] ?? prettify_name($p),
-        'url'    => $baseUrl . '/' . rawurlencode($p) . '/' . ($stable ? 'stable' : 'snapshot') . '/',
         'stable_url' => $stable ? $baseUrl . '/' . rawurlencode($p) . '/stable/' : null,
         'snapshot_url' => $snapshot ? $baseUrl . '/' . rawurlencode($p) . '/snapshot/' : null,
+        'stable_version' => $stableVersion,
+        'snapshot_version' => $snapshotVersion,
+        'tools' => $tools,
         'mtime'  => $mtime,
     ];
 }
-$kitsuneScript = null;
 
 // Sort generic cards by last updated (desc), then title
 usort($cards, function($a, $b) {
@@ -801,7 +828,7 @@ $openRepositoryCount = count($repositories);
     .top-nav a:hover{color:#fff;background:rgba(255,255,255,.06)}
     .hero{
       position:relative;isolation:isolate;overflow:hidden;margin-top:18px;padding:74px 52px 52px;
-      border:1px solid rgba(255,255,255,.09);border-radius:32px;
+      border:1px solid rgba(255,255,255,.09);border-radius:34px;
       background:linear-gradient(135deg,rgba(255,106,61,.10),rgba(15,16,34,.88) 42%,rgba(124,92,255,.14));
       box-shadow:0 30px 90px rgba(0,0,0,.5);
     }
@@ -818,7 +845,7 @@ $openRepositoryCount = count($repositories);
     .hero-btn{display:inline-flex;align-items:center;gap:10px;padding:13px 17px;border-radius:14px;text-decoration:none;color:#fff;font-size:13px;font-weight:800;border:1px solid rgba(255,255,255,.13);background:rgba(255,255,255,.06);transition:.2s ease}
     .hero-btn.primary{background:linear-gradient(135deg,#ff6a3d,#ef486f);box-shadow:0 14px 34px rgba(255,80,70,.24)}
     .hero-btn:hover{transform:translateY(-2px);border-color:rgba(255,255,255,.28)}
-    .hero-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;margin-top:48px;border:1px solid rgba(255,255,255,.09);border-radius:20px;overflow:hidden;background:rgba(255,255,255,.08)}
+    .hero-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;margin-top:48px;border:1px solid rgba(255,255,255,.09);border-radius:22px;overflow:hidden;clip-path:inset(0 round 22px);background:rgba(255,255,255,.08)}
     .stat{padding:18px 20px;background:rgba(7,7,17,.72);backdrop-filter:blur(12px)}
     .stat strong{display:block;color:#fff;font-size:26px;line-height:1}
     .stat span{display:block;margin-top:7px;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.1em}
@@ -896,8 +923,8 @@ $openRepositoryCount = count($repositories);
     }
     .card{
       grid-column: span 6;
-      padding:16px;
-      border-radius: var(--radius);
+      padding:18px;
+      border-radius:22px;
       border:1px solid rgba(255,255,255,.10);
       background: linear-gradient(180deg, var(--card), var(--card2));
       box-shadow: var(--shadow);
@@ -914,12 +941,42 @@ $openRepositoryCount = count($repositories);
       pointer-events:none;
     }
     .card > *{position:relative}
-    .card a{
-      display:flex; align-items:flex-start; justify-content:space-between; gap:12px;
-      text-decoration:none; color:inherit;
+    .card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+    .version-links{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:16px}
+    .channel-link,.channel-unavailable{
+      min-width:0;
+      display:grid;
+      grid-template-columns:minmax(0,1fr) auto;
+      grid-template-areas:"label arrow" "version arrow";
+      align-items:center;
+      gap:2px 10px;
+      padding:11px 13px;
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:15px;
+      color:var(--text);
+      text-decoration:none;
+      background:rgba(0,0,0,.20);
+      transition:transform .12s ease,border-color .12s ease,background .12s ease;
     }
-    .card .version-links{display:flex;gap:8px;margin-top:12px}
-    .card .version-links a{display:inline-flex;padding:6px 10px;border:1px solid var(--border);border-radius:999px;font-size:12px;font-weight:700}
+    .channel-link:hover{transform:translateY(-1px);border-color:rgba(255,255,255,.28);background:rgba(255,255,255,.07)}
+    .channel-link.stable{background:linear-gradient(135deg,rgba(85,255,167,.11),rgba(0,0,0,.20))}
+    .channel-link.snapshot{background:linear-gradient(135deg,rgba(124,92,255,.16),rgba(0,0,0,.20))}
+    .channel-label{grid-area:label;color:var(--muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.09em}
+    .channel-version{grid-area:version;overflow:hidden;text-overflow:ellipsis;color:#fff;font:700 12px/1.4 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;white-space:nowrap}
+    .channel-arrow{grid-area:arrow;color:#fff;font-size:14px}
+    .channel-unavailable{opacity:.55}
+    .special-tools{margin-top:14px;padding:14px;border:1px solid rgba(124,92,255,.23);border-radius:17px;background:linear-gradient(135deg,rgba(124,92,255,.12),rgba(255,106,61,.07))}
+    .special-tools-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;color:#ded9ff;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+    .special-tools-head:before{content:"✦";color:#b5a8ff;font-size:14px}
+    .tool-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+    .tool-card{min-width:0;padding:12px;border:1px solid rgba(255,255,255,.10);border-radius:14px;background:rgba(7,7,17,.38)}
+    .tool-name{margin:0;color:#fff;font-size:13px;font-weight:800}
+    .tool-desc{margin:3px 0 10px;color:var(--muted);font-size:11px}
+    .tool-actions{display:flex;gap:7px;flex-wrap:wrap}
+    .tool-actions a{display:inline-flex;align-items:center;gap:5px;padding:6px 9px;border:1px solid rgba(255,255,255,.12);border-radius:10px;color:#fff;text-decoration:none;font-size:10px;font-weight:800;transition:transform .12s ease,border-color .12s ease,background .12s ease}
+    .tool-actions a:hover{transform:translateY(-1px);border-color:rgba(255,255,255,.28);background:rgba(255,255,255,.07)}
+    .tool-actions .stable{color:#bfffdc}
+    .tool-actions .snapshot{color:#d4cdff}
     .name{font-weight:650; font-size:15px; margin:0}
     .meta{margin-top:2px;color:var(--muted);font-size:12px}
     .arrow{
@@ -1213,7 +1270,9 @@ $openRepositoryCount = count($repositories);
       }
       .top-nav{display:none}
       .hero{padding:60px 24px 30px}
-      .hero-stats{grid-template-columns:1fr}
+      .hero-stats{grid-template-columns:1fr;border-radius:18px;clip-path:inset(0 round 18px)}
+      .version-links{grid-template-columns:1fr}
+      .tool-list{grid-template-columns:1fr}
       .live-note{left:24px;right:auto;top:22px}
     }
     @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.hero:before,.hero:after,.live-note:before{animation:none}.card,.item,.hero-btn{transition:none}}
@@ -1278,33 +1337,6 @@ $openRepositoryCount = count($repositories);
     </section>
 
     <div class="grid">
-      <?php if ($kitsuneScript): ?>
-        <section class="section">
-          <h2>
-            <?= htmlspecialchars($kitsuneScript['title']) ?>
-            <span class="badge"><?= htmlspecialchars(tr($t, 'special')) ?></span>
-          </h2>
-          <p class="sub"><?= htmlspecialchars($kitsuneScript['subtitle']) ?></p>
-
-          <div class="smallgrid">
-            <?php foreach ($kitsuneScript['entries'] as $e): ?>
-              <div class="item">
-                <a
-                  href="<?= htmlspecialchars($e['url']) ?>"
-                  target="_blank"
-                  rel="noopener"
-                  title="<?= htmlspecialchars(tr($t, 'open_in_new_tab')) ?>"
-                >
-                  <p class="t"><?= htmlspecialchars($e['label']) ?></p>
-                  <p class="d"><?= htmlspecialchars($e['desc']) ?></p>
-                  <p class="u"><?= htmlspecialchars(tr($t, 'last_change')) ?>: <?= htmlspecialchars(fmt_date((int)$e['mtime'])) ?></p>
-                </a>
-              </div>
-            <?php endforeach; ?>
-          </div>
-        </section>
-      <?php endif; ?>
-		
       <section class="section" id="libraries">
         <h2><?= htmlspecialchars(tr($t, 'libraries')) ?></h2>
         <p class="sub">
@@ -1320,12 +1352,7 @@ $openRepositoryCount = count($repositories);
           <div class="cards">
             <?php foreach ($cards as $c): ?>
               <div class="card">
-                <a
-                  href="<?= htmlspecialchars($c['url']) ?>"
-                  target="_blank"
-                  rel="noopener"
-                  title="<?= htmlspecialchars(tr($t, 'open_in_new_tab')) ?>"
-                >
+                <div class="card-head">
                   <div>
                     <p class="name"><?= htmlspecialchars($c['title']) ?></p>
                     <div class="meta">
@@ -1333,16 +1360,41 @@ $openRepositoryCount = count($repositories);
                       · <?= htmlspecialchars(tr($t, 'last_change')) ?>: <?= htmlspecialchars(fmt_date((int)$c['mtime'])) ?>
                     </div>
                   </div>
-                  <div class="arrow" aria-hidden="true">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                      <path d="M8 5l8 7-8 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                  </div>
-                </a>
-                <div class="version-links">
-                  <?php if ($c['stable_url']): ?><a href="<?= htmlspecialchars($c['stable_url']) ?>" target="_blank" rel="noopener"><?= htmlspecialchars(tr($t, 'stable')) ?></a><?php endif; ?>
-                  <?php if ($c['snapshot_url']): ?><a href="<?= htmlspecialchars($c['snapshot_url']) ?>" target="_blank" rel="noopener"><?= htmlspecialchars(tr($t, 'snapshot')) ?></a><?php endif; ?>
                 </div>
+                <div class="version-links" aria-label="<?= htmlspecialchars(tr($t, 'choose_version')) ?>">
+                  <?php foreach (['stable', 'snapshot'] as $channel): ?>
+                    <?php $channelUrl = $c[$channel . '_url']; $channelVersion = $c[$channel . '_version']; ?>
+                    <?php if ($channelUrl): ?>
+                      <a class="channel-link <?= htmlspecialchars($channel) ?>" href="<?= htmlspecialchars($channelUrl) ?>" target="_blank" rel="noopener" title="<?= htmlspecialchars(tr($t, 'open_in_new_tab')) ?>">
+                        <span class="channel-label"><?= htmlspecialchars(tr($t, $channel)) ?></span>
+                        <strong class="channel-version"><?= htmlspecialchars($channelVersion !== '' ? $channelVersion : tr($t, 'version_unavailable')) ?></strong>
+                        <span class="channel-arrow" aria-hidden="true">↗</span>
+                      </a>
+                    <?php else: ?>
+                      <div class="channel-unavailable">
+                        <span class="channel-label"><?= htmlspecialchars(tr($t, $channel)) ?></span>
+                        <strong class="channel-version"><?= htmlspecialchars(tr($t, 'version_unavailable')) ?></strong>
+                      </div>
+                    <?php endif; ?>
+                  <?php endforeach; ?>
+                </div>
+                <?php if (!empty($c['tools'])): ?>
+                  <div class="special-tools">
+                    <div class="special-tools-head"><?= htmlspecialchars(tr($t, 'ks_subtitle')) ?></div>
+                    <div class="tool-list">
+                      <?php foreach ($c['tools'] as $tool): ?>
+                        <div class="tool-card">
+                          <p class="tool-name"><?= htmlspecialchars(tr($t, $tool['label_key'])) ?></p>
+                          <p class="tool-desc"><?= htmlspecialchars(tr($t, $tool['description_key'])) ?></p>
+                          <div class="tool-actions">
+                            <?php if ($tool['stable_url']): ?><a class="stable" href="<?= htmlspecialchars($tool['stable_url']) ?>" target="_blank" rel="noopener"><?= htmlspecialchars(tr($t, 'stable')) ?> ↗</a><?php endif; ?>
+                            <?php if ($tool['snapshot_url']): ?><a class="snapshot" href="<?= htmlspecialchars($tool['snapshot_url']) ?>" target="_blank" rel="noopener"><?= htmlspecialchars(tr($t, 'snapshot')) ?> ↗</a><?php endif; ?>
+                          </div>
+                        </div>
+                      <?php endforeach; ?>
+                    </div>
+                  </div>
+                <?php endif; ?>
               </div>
             <?php endforeach; ?>
           </div>
