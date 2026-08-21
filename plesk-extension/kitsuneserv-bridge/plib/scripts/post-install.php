@@ -11,6 +11,12 @@ if (is_file($varDir . '/state.json')) @chmod($varDir . '/state.json', 0644);
 foreach (Modules_KitsuneservBridge_Config::defaults() as $key => $value) {
     if (pm_Settings::get($key) === null) pm_Settings::set($key, (string) $value);
 }
+if (pm_Settings::get('showcase_open_repositories_seeded') !== '1') {
+    if (trim((string) pm_Settings::get('showcase_open_repositories', '')) === '') {
+        pm_Settings::set('showcase_open_repositories', Modules_KitsuneservBridge_Config::defaultOpenRepositories());
+    }
+    pm_Settings::set('showcase_open_repositories_seeded', '1');
+}
 foreach (['node_binary' => '/usr/bin/node', 'npm_binary' => '/usr/bin/npm'] as $key => $legacyDefault) {
     if (trim((string) pm_Settings::get($key, '')) === $legacyDefault) pm_Settings::set($key, 'auto');
 }
@@ -20,7 +26,7 @@ try {
 } catch (Throwable $exception) {
     throw new RuntimeException('Nie udało się uruchomić uprzywilejowanego executora KitsuneServ Bridge r1 przez Plesk.', 0, $exception);
 }
-if ((int) ($selfCheck['code'] ?? 1) !== 0 || trim((string) ($selfCheck['stdout'] ?? '')) !== '3.1.3-r5') {
+if ((int) ($selfCheck['code'] ?? 1) !== 0 || trim((string) ($selfCheck['stdout'] ?? '')) !== '3.1.3-r6') {
     throw new RuntimeException('Executor KitsuneServ Bridge r1 nie przeszedł kontroli wersji przez Plesk.');
 }
 

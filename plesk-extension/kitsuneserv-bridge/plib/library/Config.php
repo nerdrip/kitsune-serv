@@ -2,7 +2,7 @@
 
 class Modules_KitsuneservBridge_Config
 {
-    public const EXTENSION_VERSION = '3.1.3-r5';
+    public const EXTENSION_VERSION = '3.1.3-r6';
 
     private const SECRET_FIELDS = [
         'git_token' => 'secret_git_token',
@@ -13,6 +13,11 @@ class Modules_KitsuneservBridge_Config
         'shared_secret' => 'shared_secret',
         'device_token' => 'device_token',
     ];
+
+    public static function defaultOpenRepositories()
+    {
+        return "https://github.com/nerdrip/kitsune-serv|kitsune-serv|Przenośny, wszechstronny menedżer środowisk programistycznych dla systemów Windows i Linux. Pomyśl o nim jako o nowoczesnej, bogatej w funkcje alternatywie dla XAMPP/WAMP/MAMP z pięknym interfejsem graficznym, wbudowanym terminalem, przeglądarką baz danych, sklepem z aplikacjami i wieloma innymi funkcjami.|Portable, all-in-one development environment manager for Windows and Linux. Think of it as a modern, feature-rich alternative to XAMPP/WAMP/MAMP with a beautiful GUI, built-in terminal, database viewer, app store, and more.\nhttps://github.com/nerdrip/kitsune-git|kitsune-git|Lekki, szybki i uniwersalny klient graficzny Git — podobny do SourceTree, ale szybszy|Lightweight, fast, universal Git GUI client — like SourceTree but faster\nhttps://github.com/nerdrip/kitsune-irc|kitsune-irc|Nowoczesny serwer IRC ze zintegrowanymi usługami (NickServ, ChanServ, MemoServ, OperServ, BotServ, HostServ) i internetowym panelem administracyjnym. Łączy funkcjonalność UnrealIRCd i Anope w Node.js.|Modern IRC server with integrated services (NickServ, ChanServ, MemoServ, OperServ, BotServ, HostServ) and web administration panel. Combines UnrealIRCd + Anope functionality in Node.js.\nhttps://github.com/nerdrip/nodeuo|nodeuo|Eksperymentalny shard Ultima Online w Node.js z przeglądarkowym klientem WebGL, narzędziami do ekstrakcji assetów, panelem administracyjnym i mostkiem WebSocket/TCP. Inspirowany ClassicUO i ServUO, nastawiony na webowy klient, skryptowalny serwer i otwarty rozwój społeczności.|Experimental Ultima Online shard in Node.js with a WebGL browser client, asset extraction tools, administration panel, and WebSocket/TCP bridge. Inspired by ClassicUO and ServUO, focused on a web-native client, scriptable server, and open community development.";
+    }
 
     public static function defaults()
     {
@@ -32,7 +37,7 @@ class Modules_KitsuneservBridge_Config
             'git_ssh_known_hosts' => '',
             'showcase_domain' => '',
             'showcase_repositories' => "adictlibrary|ssh://git@git.servx.site:32785/boberski/adictlibrary.git|ADict Library\nkitsune-db|ssh://git@git.servx.site:32785/boberski/kitsune-db.git|Kitsune DB\nkitsune-net|ssh://git@git.servx.site:32785/boberski/kitsune-net.git|Kitsune NET\nkitsunescript|ssh://git@git.servx.site:32785/boberski/kitsunescript.git|KitsuneScript\nwpkit|ssh://git@git.servx.site:32785/boberski/wpkit.git|WPKit",
-            'showcase_open_repositories' => '',
+            'showcase_open_repositories' => self::defaultOpenRepositories(),
             'node_binary' => 'auto',
             'npm_binary' => 'auto',
             'service_user' => 'root',

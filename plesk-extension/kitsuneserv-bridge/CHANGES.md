@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.1.3-6
+
+- The Showcase open-repository section now ships with the four bilingual projects defined by the source site: kitsune-serv, kitsune-git, kitsune-irc and nodeuo.
+- Existing installations seed that catalog once when the setting is still empty, while later administrator edits remain untouched.
+
 ## 3.1.3-5
 
 - GitHub HTTPS repositories automatically use the shared SSH deploy key when no HTTPS token is configured, avoiding disabled interactive credential prompts during Suite checks.
