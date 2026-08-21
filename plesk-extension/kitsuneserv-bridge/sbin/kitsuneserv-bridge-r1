@@ -1,7 +1,7 @@
 #!/usr/bin/env php
 <?php
 
-const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.1.3-r9';
+const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.1.3-r10';
 
 final class KitsuneServBridgeManager
 {
@@ -492,7 +492,9 @@ final class KitsuneServBridgeManager
                         if (!is_file($docs . '/index.html')) throw new RuntimeException($library['slug'] . ':' . $branch . ' does not contain docs/index.html.');
                         $target = $stage . '/docs/' . $library['slug'] . '/' . $channel;
                         $this->copyTree($docs, $target);
-                        $libraryState['versions'][$channel] = ['branch' => $branch, 'commit' => $commit, 'version' => $this->detectShowcaseVersion($worktree)];
+                        $version = $this->detectShowcaseVersion($worktree);
+                        if ($channel === 'snapshot' && $version !== null && !preg_match('/-SNAPSHOT$/i', $version)) $version .= '-SNAPSHOT';
+                        $libraryState['versions'][$channel] = ['branch' => $branch, 'commit' => $commit, 'version' => $version];
                     } finally {
                         if (is_dir($worktree)) $this->showcaseGit($library['url'], ['git', '-C', $repoPath, 'worktree', 'remove', '--force', $worktree], false);
                     }

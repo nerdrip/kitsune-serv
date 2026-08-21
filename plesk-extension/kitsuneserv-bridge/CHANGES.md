@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.1.3-10
+
+- Showcase library cards now expose explicit stable and snapshot versions, and only their channel buttons open documentation.
+- KitsuneScript receives dedicated stable/snapshot launchers for Playground and Layout Editor.
+- Refined Showcase card, statistics and responsive corner radii.
+
 ## 3.1.3-9
 
 - SSH repositories used by Showcase and managed deployment now discover a missing host key with `ssh-keyscan`, persist it privately and enforce the pinned key on subsequent connections.
