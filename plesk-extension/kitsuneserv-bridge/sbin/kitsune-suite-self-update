@@ -41,6 +41,8 @@ final class KitsuneRepositorySelfUpdateRunner
         $url = trim((string) ($decoded['repositoryUrl'] ?? ''));
         $branch = trim((string) ($decoded['repositoryBranch'] ?? ''));
         if (!preg_match('/^(https:\/\/|ssh:\/\/|git@)[^\s\0]+$/', $url) || !preg_match('/^(?![-.])(?!.*\.\.)(?!.*@\{)[A-Za-z0-9._\/-]+$/', $branch)) throw new RuntimeException('Nieprawidłowy adres lub gałąź repozytorium.');
+        $url = $this->effectiveRepositoryUrl($url, $decoded);
+        $decoded['repositoryUrl'] = $url;
         $this->mode = $mode;
         $this->config = $decoded;
         $this->varDir = dirname($real);
@@ -202,6 +204,16 @@ final class KitsuneRepositorySelfUpdateRunner
         return $environment;
     }
 
+    private function effectiveRepositoryUrl($url, array $config)
+    {
+        if (trim((string) ($config['gitToken'] ?? '')) !== '' || trim((string) ($config['gitSshPrivateKey'] ?? '')) === '') return $url;
+        $parts = parse_url((string) $url);
+        if (!is_array($parts) || ($parts['scheme'] ?? '') !== 'https' || strtolower((string) ($parts['host'] ?? '')) !== 'github.com' || isset($parts['user']) || isset($parts['pass']) || isset($parts['query']) || isset($parts['fragment'])) return $url;
+        $path = ltrim((string) ($parts['path'] ?? ''), '/');
+        if (!preg_match('#^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?$#', $path)) throw new RuntimeException('Nieprawidłowa ścieżka repozytorium GitHub.');
+        return 'git@github.com:' . $path;
+    }
+
     private function ensureKnownHosts($url)
     {
         $endpoint = $this->repositorySshEndpoint($url);
@@ -268,7 +280,13 @@ final class KitsuneRepositorySelfUpdateRunner
         $process = proc_open($line, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $cwd, $environment);
         if (!is_resource($process)) throw new RuntimeException('Nie można uruchomić ' . $command[0] . '.');
         fclose($pipes[0]); $stdout = stream_get_contents($pipes[1]); $stderr = stream_get_contents($pipes[2]); fclose($pipes[1]); fclose($pipes[2]); $code = proc_close($process);
-        if ($code !== 0) throw new RuntimeException($command[0] . ' failed (' . $code . '): ' . mb_substr(trim($stderr !== '' ? $stderr : $stdout), -3000));
+        if ($code !== 0) {
+            $detail = trim($stderr !== '' ? $stderr : $stdout);
+            if (stripos($detail, 'could not read Username for') !== false && strpos((string) ($this->config['repositoryUrl'] ?? ''), 'https://github.com/') === 0 && trim((string) ($this->config['gitToken'] ?? '')) === '') {
+                throw new RuntimeException('Prywatne repozytorium GitHub wymaga tokenu HTTPS albo globalnego klucza SSH zapisanego w konfiguracji Bridge.');
+            }
+            throw new RuntimeException($command[0] . ' failed (' . $code . '): ' . mb_substr($detail, -3000));
+        }
         return ['stdout' => $stdout, 'stderr' => $stderr, 'code' => $code];
     }
 
