@@ -1,7 +1,7 @@
 #!/usr/bin/env php
 <?php
 
-const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.1.3-r3';
+const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.1.3-r5';
 
 final class KitsuneServBridgeManager
 {
@@ -40,10 +40,10 @@ final class KitsuneServBridgeManager
     public function execute()
     {
         $action = (string) ($this->config['action'] ?? '');
-        if (!in_array($action, ['status', 'check', 'sync', 'deploy', 'sync-deploy', 'start', 'stop', 'restart', 'proxy', 'extension-check', 'extension-update'], true)) {
+        if (!in_array($action, ['status', 'check', 'sync', 'deploy', 'sync-deploy', 'start', 'stop', 'restart', 'proxy', 'extension-check', 'extension-update', 'showcase-sync'], true)) {
             throw new RuntimeException('Unsupported operation.');
         }
-        if (($this->config['deployment_mode'] ?? 'managed') !== 'managed' && $action !== 'status') {
+        if (($this->config['deployment_mode'] ?? 'managed') !== 'managed' && !in_array($action, ['status', 'showcase-sync'], true)) {
             throw new RuntimeException('Repository operations are disabled in external Hub mode.');
         }
         $isStatus = $action === 'status';
@@ -107,6 +107,9 @@ final class KitsuneServBridgeManager
                     $this->synchronizeRepository();
                     $this->scheduleExtensionUpdate(true);
                     $this->refreshState();
+                    break;
+                case 'showcase-sync':
+                    $this->synchronizeShowcase();
                     break;
             }
             if (in_array($action, ['sync', 'deploy', 'sync-deploy'], true)) {
@@ -438,6 +441,157 @@ final class KitsuneServBridgeManager
             'health' => $health,
             'pid' => max(0, (int) trim($pidResult['stdout'])),
         ];
+    }
+
+    private function synchronizeShowcase()
+    {
+        $this->run(['git', '--version']);
+        $libraries = $this->parseShowcaseLibraries((string) ($this->config['showcase_repositories'] ?? ''));
+        if (!$libraries) throw new RuntimeException('Showcase requires at least one library repository.');
+        $documentRoot = rtrim(str_replace('\\', '/', (string) ($this->config['showcase_document_root'] ?? '')), '/');
+        $vhost = rtrim(str_replace('\\', '/', (string) ($this->config['showcase_vhost_path'] ?? '')), '/');
+        $template = realpath((string) ($this->config['showcase_template_path'] ?? ''));
+        if ($documentRoot === '' || $vhost === '' || strpos($documentRoot . '/', $vhost . '/') !== 0 || strpos($documentRoot, '..') !== false) throw new RuntimeException('Unsafe Showcase document root.');
+        if ($template === false || !is_file($template . '/index.php')) throw new RuntimeException('Showcase template is incomplete.');
+        $this->ensureDirectory($documentRoot, 0755);
+        $marker = $documentRoot . '/.kitsune-showcase';
+        if (!is_file($marker)) {
+            foreach (new FilesystemIterator($documentRoot, FilesystemIterator::SKIP_DOTS) as $item) {
+                if ($item->getFilename() !== '.well-known') throw new RuntimeException('The selected Showcase document root is not empty. Move its existing files before the first synchronization.');
+            }
+        }
+
+        $repositoryRoot = $this->varDir . '/showcase-repositories';
+        $stage = $this->varDir . '/showcase-stage-' . bin2hex(random_bytes(6));
+        $backup = $this->varDir . '/showcase-backup';
+        $this->ensureDirectory($repositoryRoot, 0700);
+        $this->ensureDirectory($stage . '/docs', 0750);
+        $metadata = [];
+        try {
+            $this->copyTree($template, $stage);
+            foreach ($libraries as $library) {
+                $repoPath = $repositoryRoot . '/' . $library['slug'];
+                if (is_link($repoPath)) throw new RuntimeException('Showcase repository cache cannot be a symbolic link: ' . $library['slug']);
+                if (!is_dir($repoPath . '/.git')) {
+                    if (file_exists($repoPath)) $this->removeTree($repoPath);
+                    $this->showcaseGit($library['url'], ['git', 'clone', '--no-checkout', '--origin', 'origin', '--', $library['url'], $repoPath]);
+                } else {
+                    $remote = trim((string) $this->showcaseGit($library['url'], ['git', '-C', $repoPath, 'remote', 'get-url', 'origin'])['stdout']);
+                    if ($remote !== $library['url']) $this->showcaseGit($library['url'], ['git', '-C', $repoPath, 'remote', 'set-url', 'origin', $library['url']]);
+                }
+                $this->showcaseGit($library['url'], ['git', '-C', $repoPath, 'fetch', '--prune', 'origin', 'main', 'develop']);
+                $libraryState = ['slug' => $library['slug'], 'label' => $library['label'], 'url' => $library['url'], 'versions' => []];
+                foreach (['main' => 'stable', 'develop' => 'snapshot'] as $branch => $channel) {
+                    $commit = trim((string) $this->showcaseGit($library['url'], ['git', '-C', $repoPath, 'rev-parse', '--verify', 'origin/' . $branch . '^{commit}'])['stdout']);
+                    if (!preg_match('/^[a-f0-9]{40}$/', $commit)) throw new RuntimeException('Invalid commit resolved for ' . $library['slug'] . ':' . $branch);
+                    $worktree = $stage . '/.worktrees/' . $library['slug'] . '-' . $channel;
+                    $this->ensureDirectory(dirname($worktree), 0700);
+                    try {
+                        $this->showcaseGit($library['url'], ['git', '-C', $repoPath, 'worktree', 'add', '--detach', $worktree, $commit]);
+                        $docs = $worktree . '/docs';
+                        if (!is_file($docs . '/index.html')) throw new RuntimeException($library['slug'] . ':' . $branch . ' does not contain docs/index.html.');
+                        $target = $stage . '/docs/' . $library['slug'] . '/' . $channel;
+                        $this->copyTree($docs, $target);
+                        $libraryState['versions'][$channel] = ['branch' => $branch, 'commit' => $commit, 'version' => $this->detectShowcaseVersion($worktree)];
+                    } finally {
+                        if (is_dir($worktree)) $this->showcaseGit($library['url'], ['git', '-C', $repoPath, 'worktree', 'remove', '--force', $worktree], false);
+                    }
+                }
+                $metadata[] = $libraryState;
+                $this->log('Showcase: prepared ' . $library['slug'] . ' (stable + snapshot).');
+            }
+            $worktrees = $stage . '/.worktrees';
+            if (is_dir($worktrees)) $this->removeTree($worktrees);
+            $siteConfig = ['generatedAt' => gmdate('c'), 'libraries' => $metadata, 'openRepositories' => $this->parseShowcaseOpenRepositories((string) ($this->config['showcase_open_repositories'] ?? ''))];
+            $json = json_encode($siteConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            if ($json === false) throw new RuntimeException('Could not encode Showcase configuration.');
+            $this->writeAtomicFile($stage . '/showcase.json', $json . "\n", 0644);
+            $this->writeAtomicFile($stage . '/.kitsune-showcase', "managed-by=kitsuneserv-bridge\n", 0644);
+            $this->deployShowcaseStage($stage, $documentRoot, $backup);
+            $this->makeWebReadable($documentRoot);
+            $this->state['showcase'] = ['domain' => (string) ($this->config['showcase_domain'] ?? ''), 'lastSync' => gmdate('c'), 'libraries' => $metadata];
+        } finally {
+            if (is_dir($stage)) $this->removeTree($stage);
+        }
+    }
+
+    private function parseShowcaseLibraries($value)
+    {
+        $result = [];
+        foreach (preg_split('/\r\n|\r|\n/', trim((string) $value), -1, PREG_SPLIT_NO_EMPTY) as $line) {
+            $parts = array_map('trim', explode('|', $line));
+            if (count($parts) < 2 || count($parts) > 3 || !preg_match('/^[a-z0-9][a-z0-9._-]{0,63}$/', $parts[0])) throw new RuntimeException('Invalid Showcase library entry.');
+            $previous = $this->config['repository_url'] ?? '';
+            $this->config['repository_url'] = $parts[1];
+            try { $url = $this->validatedRepositoryUrl(); } finally { $this->config['repository_url'] = $previous; }
+            $result[] = ['slug' => $parts[0], 'url' => $url, 'label' => $parts[2] ?? $parts[0]];
+        }
+        return $result;
+    }
+
+    private function parseShowcaseOpenRepositories($value)
+    {
+        $result = [];
+        foreach (preg_split('/\r\n|\r|\n/', trim((string) $value), -1, PREG_SPLIT_NO_EMPTY) as $line) {
+            $parts = array_map('trim', explode('|', $line));
+            if (count($parts) < 2 || count($parts) > 4 || !filter_var($parts[0], FILTER_VALIDATE_URL) || strpos($parts[0], 'https://') !== 0) throw new RuntimeException('Invalid open repository entry.');
+            $result[] = ['url' => $parts[0], 'label' => $parts[1], 'branch' => 'main', 'description' => ['pl' => $parts[2] ?? '', 'en' => $parts[3] ?? ($parts[2] ?? '')]];
+        }
+        return $result;
+    }
+
+    private function showcaseGit($url, array $command, $throw = true)
+    {
+        $previous = $this->config['repository_url'] ?? '';
+        $this->config['repository_url'] = $url;
+        try { return $this->runGit($command, $throw); }
+        finally { $this->config['repository_url'] = $previous; }
+    }
+
+    private function detectShowcaseVersion($worktree)
+    {
+        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($worktree, FilesystemIterator::SKIP_DOTS));
+        foreach ($iterator as $item) {
+            if ($iterator->getDepth() > 2 || !$item->isFile() || $item->getFilename() !== 'build.gradle') continue;
+            $contents = (string) file_get_contents($item->getPathname());
+            if (preg_match('/\bbaseVersion\s*=\s*[\'\"]([^\'\"]+)[\'\"]/', $contents, $match)) return $match[1];
+        }
+        return null;
+    }
+
+    private function deployShowcaseStage($stage, $documentRoot, $backup)
+    {
+        $managed = ['index.php', 'showcase.json', 'docs', '.kitsune-showcase'];
+        if (is_dir($backup)) $this->removeTree($backup);
+        $this->ensureDirectory($backup, 0700);
+        $moved = [];
+        try {
+            foreach ($managed as $name) {
+                if (!file_exists($documentRoot . '/' . $name) && !is_link($documentRoot . '/' . $name)) continue;
+                if (!rename($documentRoot . '/' . $name, $backup . '/' . $name)) throw new RuntimeException('Could not back up the current Showcase asset: ' . $name);
+                $moved[] = $name;
+            }
+            foreach ($managed as $name) if (file_exists($stage . '/' . $name)) $this->copyTree($stage . '/' . $name, $documentRoot . '/' . $name);
+        } catch (Throwable $exception) {
+            foreach ($managed as $name) if (file_exists($documentRoot . '/' . $name) || is_link($documentRoot . '/' . $name)) $this->removeTree($documentRoot . '/' . $name);
+            foreach ($moved as $name) if (file_exists($backup . '/' . $name) && !rename($backup . '/' . $name, $documentRoot . '/' . $name)) throw new RuntimeException('Showcase deployment failed and rollback could not restore: ' . $name, 0, $exception);
+            throw $exception;
+        }
+    }
+
+    private function makeWebReadable($path)
+    {
+        chmod($path, 0755);
+        foreach (['index.php', 'showcase.json', 'docs', '.kitsune-showcase'] as $name) {
+            $managed = $path . '/' . $name;
+            if (!file_exists($managed)) continue;
+            if (is_file($managed)) { chmod($managed, 0644); continue; }
+            foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($managed, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::SELF_FIRST) as $item) {
+                if ($item->isLink()) throw new RuntimeException('Published Showcase cannot contain symbolic links.');
+                chmod($item->getPathname(), $item->isDir() ? 0755 : 0644);
+            }
+            chmod($managed, 0755);
+        }
     }
 
     private function scheduleExtensionUpdate($install = true)
@@ -799,7 +953,7 @@ final class KitsuneServBridgeManager
 
     private function readState()
     {
-        $empty = ['updatedAt' => null, 'lastOperation' => null, 'lastSuccess' => null, 'lastError' => null, 'repository' => [], 'runtime' => [], 'deployment' => [], 'service' => [], 'proxy' => [], 'extensionUpdate' => ['status' => 'never-checked', 'current' => KITSUNESERV_BRIDGE_EXECUTOR_RELEASE, 'candidate' => null, 'checkedAt' => null], 'log' => []];
+        $empty = ['updatedAt' => null, 'lastOperation' => null, 'lastSuccess' => null, 'lastError' => null, 'repository' => [], 'runtime' => [], 'deployment' => [], 'service' => [], 'proxy' => [], 'extensionUpdate' => ['status' => 'never-checked', 'current' => KITSUNESERV_BRIDGE_EXECUTOR_RELEASE, 'candidate' => null, 'checkedAt' => null], 'showcase' => ['domain' => null, 'lastSync' => null, 'libraries' => []], 'log' => []];
         if (!is_file($this->statePath)) return $empty;
         $decoded = json_decode((string) file_get_contents($this->statePath), true);
         return is_array($decoded) ? array_replace_recursive($empty, $decoded) : $empty;

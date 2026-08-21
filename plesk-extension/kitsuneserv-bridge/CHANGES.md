@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.1.3-5
+
+- GitHub HTTPS repositories automatically use the shared SSH deploy key when no HTTPS token is configured, avoiding disabled interactive credential prompts during Suite checks.
+- Missing GitHub credentials now produce an actionable Bridge message instead of the raw `could not read Username` Git failure.
+
+## 3.1.3-4
+
+- Added the Showcase tab with a Plesk-domain picker, configurable library and open-repository lists, shared encrypted Git credentials, and an explicit synchronization action.
+- Showcase checks out `main` and `develop`, publishes unified `docs/` trees as stable and snapshot documentation, and keeps a recoverable backup of the previous managed site.
+
 ## 3.1.3-3
 
 - Suite SSH updates now discover host keys on first use, persist them privately and enforce strict verification on later connections.

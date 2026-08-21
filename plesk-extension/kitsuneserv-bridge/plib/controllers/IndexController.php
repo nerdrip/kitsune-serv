@@ -82,12 +82,12 @@ class IndexController extends pm_Controller_Action
         $this->requireAdmin();
         if (!$this->getRequest()->isPost()) throw new pm_Exception('POST is required.');
         $action = trim((string) $this->getRequest()->getPost('operation'));
-        $allowed = ['check', 'sync', 'deploy', 'sync-deploy', 'start', 'stop', 'restart', 'proxy', 'extension-check', 'extension-update'];
+        $allowed = ['check', 'sync', 'deploy', 'sync-deploy', 'start', 'stop', 'restart', 'proxy', 'extension-check', 'extension-update', 'showcase-sync'];
         try {
             if (!in_array($action, $allowed, true)) throw new RuntimeException('Wybierz prawidłową operację.');
             Modules_KitsuneservBridge_Config::ensureSsoConfiguration($this->currentPleskOrigin());
             $config = Modules_KitsuneservBridge_Config::values();
-            if ($config['deployment_mode'] !== 'managed') throw new RuntimeException('Operacje serwera są dostępne tylko w trybie wdrożenia zarządzanego.');
+            if ($action !== 'showcase-sync' && $config['deployment_mode'] !== 'managed') throw new RuntimeException('Operacje serwera są dostępne tylko w trybie wdrożenia zarządzanego.');
             $state = Modules_KitsuneservBridge_Config::readState();
             if ($action === 'start' && empty($state['service']['installed'])) $action = 'sync-deploy';
             if ($action === 'proxy' && $config['proxy_mode'] !== 'managed') throw new RuntimeException('Automatyczna konfiguracja proxy jest wyłączona.');
@@ -107,7 +107,36 @@ class IndexController extends pm_Controller_Action
         } catch (Throwable $exception) {
             $this->_status->addMessage('error', 'Nie uruchomiono operacji: ' . $exception->getMessage());
         }
-        $this->_helper->redirector('index');
+        $this->_helper->redirector('index', 'index', null, $action === 'showcase-sync' ? ['tab' => 'showcase'] : []);
+    }
+
+    public function showcaseSaveAction()
+    {
+        $this->requireAdmin();
+        if (!$this->getRequest()->isPost()) throw new pm_Exception('POST is required.');
+        try {
+            $post = (array) $this->getRequest()->getPost();
+            $domains = $this->domainOptions();
+            $domain = strtolower(trim((string) ($post['showcase_domain'] ?? '')));
+            if ($domain === '' || !isset($domains[$domain])) throw new RuntimeException('Wybierz aktywną domenę Showcase z listy Pleska.');
+            $values = [
+                'showcase_domain' => $domain,
+                'showcase_repositories' => $this->validatedShowcaseRepositories((string) ($post['showcase_repositories'] ?? ''), false),
+                'showcase_open_repositories' => $this->validatedShowcaseRepositories((string) ($post['showcase_open_repositories'] ?? ''), true),
+                'git_username' => trim((string) ($post['git_username'] ?? 'x-access-token')),
+                'git_ssh_known_hosts' => trim((string) ($post['git_ssh_known_hosts'] ?? '')),
+            ];
+            foreach (['git_token', 'git_ssh_private_key'] as $secret) if (trim((string) ($post[$secret] ?? '')) !== '') $values[$secret] = trim((string) $post[$secret]);
+            if (($values['git_ssh_private_key'] ?? '') !== '' && strpos($values['git_ssh_private_key'], 'PRIVATE KEY') === false) throw new RuntimeException('Nieprawidłowy klucz prywatny SSH.');
+            Modules_KitsuneservBridge_Config::save($values);
+            $clear = [];
+            foreach (['git_token', 'git_ssh_private_key'] as $secret) if (!empty($post['clear_' . $secret])) $clear[] = $secret;
+            Modules_KitsuneservBridge_Config::clearSecrets($clear);
+            $this->_status->addMessage('info', 'Konfiguracja Showcase została zapisana. Użyj „Synchronizuj”, aby opublikować stronę.');
+        } catch (Throwable $exception) {
+            $this->_status->addMessage('error', 'Nie zapisano Showcase: ' . $exception->getMessage());
+        }
+        $this->_helper->redirector('index', 'index', null, ['tab' => 'showcase']);
     }
 
     public function extensionUploadAction()
@@ -303,6 +332,11 @@ class IndexController extends pm_Controller_Action
             $apiDomains[$apiDomain] = $apiDomain;
         }
         $values['api_domains'] = implode(',', array_values($apiDomains));
+        $showcaseDomain = strtolower(trim((string) ($values['showcase_domain'] ?? '')));
+        if ($showcaseDomain !== '' && !isset($domains[$showcaseDomain])) throw new RuntimeException('Domena Showcase musi być aktywną domeną z hostingiem WWW w Plesku.');
+        $values['showcase_domain'] = $showcaseDomain;
+        $values['showcase_repositories'] = $this->validatedShowcaseRepositories((string) ($values['showcase_repositories'] ?? ''), false);
+        $values['showcase_open_repositories'] = $this->validatedShowcaseRepositories((string) ($values['showcase_open_repositories'] ?? ''), true);
 
         if (($values['url_mode'] ?? '') === 'automatic') $values['hub_url'] = 'https://' . $domain;
         $values['hub_url'] = rtrim((string) ($values['hub_url'] ?? ''), '/');
@@ -383,6 +417,31 @@ class IndexController extends pm_Controller_Action
         if (($state['extensionUpdate']['status'] ?? '') === 'available') $warnings[] = ['info', 'Dostępna jest aktualizacja Plesk Bridge do ' . ($state['extensionUpdate']['candidate'] ?? 'nowszej wersji') . '. Otwórz zakładkę Wdrożenie, aby ją zainstalować.'];
         if (!empty($state['lastError'])) $warnings[] = ['critical', 'Ostatnia operacja zakończyła się błędem: ' . $state['lastError']];
         return $warnings;
+    }
+
+    private function validatedShowcaseRepositories($value, $open)
+    {
+        $lines = preg_split('/\r\n|\r|\n/', trim((string) $value), -1, PREG_SPLIT_NO_EMPTY);
+        if (count($lines) > 50) throw new RuntimeException('Showcase obsługuje maksymalnie 50 repozytoriów w jednej sekcji.');
+        $clean = [];
+        $seen = [];
+        foreach ($lines as $line) {
+            $parts = array_map('trim', explode('|', $line));
+            if ($open) {
+                if (count($parts) < 2 || count($parts) > 4 || !filter_var($parts[0], FILTER_VALIDATE_URL) || strpos($parts[0], 'https://') !== 0) throw new RuntimeException('Otwarte repozytorium wpisz jako: URL HTTPS | nazwa | opis PL | opis EN.');
+                $key = strtolower($parts[0]);
+            } else {
+                if (count($parts) < 2 || count($parts) > 3 || !preg_match('/^[a-z0-9][a-z0-9._-]{0,63}$/', $parts[0])) throw new RuntimeException('Bibliotekę Showcase wpisz jako: slug | URL repozytorium | nazwa.');
+                if (!preg_match('#^(?:https://[^\s]+|ssh://[^\s]+|git@[A-Za-z0-9.-]+:[A-Za-z0-9._~/-]+)$#', $parts[1])) throw new RuntimeException('Repozytorium biblioteki Showcase musi używać HTTPS albo SSH.');
+                $key = strtolower($parts[0]);
+            }
+            if (isset($seen[$key])) throw new RuntimeException('Repozytorium Showcase występuje więcej niż raz: ' . $key);
+            foreach ($parts as $part) if (strpos($part, "\0") !== false || strlen($part) > 2000) throw new RuntimeException('Nieprawidłowa wartość konfiguracji Showcase.');
+            $seen[$key] = true;
+            $clean[] = implode('|', $parts);
+        }
+        if (!$open && !$clean) throw new RuntimeException('Dodaj co najmniej jedno repozytorium biblioteki do Showcase.');
+        return implode("\n", $clean);
     }
 
     private function refreshStatus()
@@ -571,7 +630,7 @@ class IndexController extends pm_Controller_Action
 
     private function operationLabel($action)
     {
-        return ['check' => 'sprawdź', 'sync' => 'pobierz kod', 'deploy' => 'wdrożenie', 'sync-deploy' => 'pobierz i wdróż', 'start' => 'uruchom', 'stop' => 'zatrzymaj', 'restart' => 'restart', 'proxy' => 'skonfiguruj proxy', 'extension-check' => 'sprawdź aktualizację Bridge', 'extension-update' => 'zaktualizuj Bridge'][$action] ?? $action;
+        return ['check' => 'sprawdź', 'sync' => 'pobierz kod', 'deploy' => 'wdrożenie', 'sync-deploy' => 'pobierz i wdróż', 'start' => 'uruchom', 'stop' => 'zatrzymaj', 'restart' => 'restart', 'proxy' => 'skonfiguruj proxy', 'extension-check' => 'sprawdź aktualizację Bridge', 'extension-update' => 'zaktualizuj Bridge', 'showcase-sync' => 'synchronizuj Showcase'][$action] ?? $action;
     }
 
     private function currentPleskOrigin()

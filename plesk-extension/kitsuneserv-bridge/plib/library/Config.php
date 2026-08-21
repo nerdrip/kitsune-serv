@@ -2,7 +2,7 @@
 
 class Modules_KitsuneservBridge_Config
 {
-    public const EXTENSION_VERSION = '3.1.3-r3';
+    public const EXTENSION_VERSION = '3.1.3-r5';
 
     private const SECRET_FIELDS = [
         'git_token' => 'secret_git_token',
@@ -30,6 +30,9 @@ class Modules_KitsuneservBridge_Config
             'data_path' => '/var/lib/kitsuneserv',
             'git_username' => 'x-access-token',
             'git_ssh_known_hosts' => '',
+            'showcase_domain' => '',
+            'showcase_repositories' => "adictlibrary|ssh://git@git.servx.site:32785/boberski/adictlibrary.git|ADict Library\nkitsune-db|ssh://git@git.servx.site:32785/boberski/kitsune-db.git|Kitsune DB\nkitsune-net|ssh://git@git.servx.site:32785/boberski/kitsune-net.git|Kitsune NET\nkitsunescript|ssh://git@git.servx.site:32785/boberski/kitsunescript.git|KitsuneScript\nwpkit|ssh://git@git.servx.site:32785/boberski/wpkit.git|WPKit",
+            'showcase_open_repositories' => '',
             'node_binary' => 'auto',
             'npm_binary' => 'auto',
             'service_user' => 'root',
@@ -124,6 +127,7 @@ class Modules_KitsuneservBridge_Config
             'service' => ['installed' => false, 'active' => false, 'enabled' => false, 'health' => null, 'pid' => null],
             'proxy' => ['mode' => null, 'domain' => null, 'configuredAt' => null, 'path' => null],
             'extensionUpdate' => ['status' => 'never-checked', 'current' => self::EXTENSION_VERSION, 'candidate' => null, 'checkedAt' => null],
+            'showcase' => ['domain' => null, 'lastSync' => null, 'libraries' => []],
             'log' => [],
         ];
         $path = pm_Context::getVarDir() . '/state.json';
@@ -152,7 +156,7 @@ class Modules_KitsuneservBridge_Config
 
     public static function createRuntimeConfig($action, array $extra = [])
     {
-        $allowed = ['status', 'check', 'sync', 'deploy', 'sync-deploy', 'start', 'stop', 'restart', 'proxy', 'extension-check', 'extension-update', 'suite-extension-check', 'suite-extension-install'];
+        $allowed = ['status', 'check', 'sync', 'deploy', 'sync-deploy', 'start', 'stop', 'restart', 'proxy', 'extension-check', 'extension-update', 'showcase-sync', 'suite-extension-check', 'suite-extension-install'];
         if (!in_array($action, $allowed, true)) throw new InvalidArgumentException('Unsupported operation.');
         $varDir = rtrim((string) pm_Context::getVarDir(), '/\\');
         if (!is_dir($varDir) && !mkdir($varDir, 0700, true) && !is_dir($varDir)) {
@@ -167,6 +171,20 @@ class Modules_KitsuneservBridge_Config
         $config['action'] = $action;
         $config['requested_at'] = gmdate('c');
         $config = array_merge($config, $extra);
+        if ($action === 'showcase-sync') {
+            $domain = self::hostedDomain((string) ($config['showcase_domain'] ?? ''));
+            $vhost = realpath((string) $domain->getVhostSystemPath());
+            if ($vhost === false || !is_dir($vhost)) throw new RuntimeException('Nie udało się ustalić katalogu vhost domeny Showcase.');
+            $documentRoot = method_exists($domain, 'getDocumentRoot') ? (string) $domain->getDocumentRoot() : $vhost . '/httpdocs';
+            if ($documentRoot === '' || $documentRoot[0] !== '/') $documentRoot = $vhost . '/' . ltrim($documentRoot, '/');
+            $documentRoot = rtrim(str_replace('\\', '/', $documentRoot), '/');
+            if (strpos($documentRoot . '/', rtrim(str_replace('\\', '/', $vhost), '/') . '/') !== 0) throw new RuntimeException('Katalog dokumentów Showcase musi znajdować się wewnątrz wybranej domeny.');
+            $template = realpath(dirname(__DIR__, 2) . '/resources/showcase');
+            if ($template === false || !is_file($template . '/index.php')) throw new RuntimeException('Brakuje szablonu strony Showcase w rozszerzeniu.');
+            $config['showcase_document_root'] = $documentRoot;
+            $config['showcase_vhost_path'] = rtrim(str_replace('\\', '/', $vhost), '/');
+            $config['showcase_template_path'] = $template;
+        }
         if (in_array($action, ['suite-extension-check', 'suite-extension-install'], true)) {
             $config['gitToken'] = (string) ($config['git_token'] ?? '');
             $config['gitSshPrivateKey'] = (string) ($config['git_ssh_private_key'] ?? '');

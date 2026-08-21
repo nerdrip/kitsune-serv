@@ -10,6 +10,7 @@ $runtime = (array) ($state['runtime'] ?? []);
 $deployment = (array) ($state['deployment'] ?? []);
 $proxy = (array) ($state['proxy'] ?? []);
 $extensionUpdate = (array) ($state['extensionUpdate'] ?? []);
+$showcase = (array) ($state['showcase'] ?? []);
 $serviceActive = !empty($service['active']);
 $serviceInstalled = !empty($service['installed']);
 $healthOk = ($service['health'] ?? null) === true;
@@ -53,6 +54,7 @@ $suiteAvailableCount = count(array_filter($suiteExtensions, static function ($ex
       <button type="button" data-ks-tab="deployment">Wdrożenie</button>
       <button type="button" data-ks-tab="plesk">Plesk Management</button>
       <button type="button" data-ks-tab="configuration">Domeny i ustawienia</button>
+      <button type="button" data-ks-tab="showcase">Showcase</button>
       <button type="button" data-ks-tab="access">Połączenie z Hubem</button>
       <button type="button" data-ks-tab="manual">Konfiguracja ręczna</button>
       <button type="button" data-ks-tab="logs">Diagnostyka</button>
@@ -252,6 +254,32 @@ $suiteAvailableCount = count(array_filter($suiteExtensions, static function ($ex
 
         <div class="ks-sticky-save"><div><strong>Zmiany nie są wdrażane automatycznie</strong><small>Po zapisie uruchom „Pobierz i wdróż”, jeśli zmieniłeś konfigurację zarządzanej usługi.</small></div><button class="ks-button is-primary is-large" type="submit">Zapisz pełną konfigurację</button></div>
       </form>
+    </section>
+
+    <section class="ks-tab-panel" data-ks-panel="showcase">
+      <div class="ks-section-title"><div><span class="ks-kicker">DOKUMENTACJA BIBLIOTEK</span><h2>Showcase</h2><p>Publikuje stronę z załączonego szablonu. Gałąź <code>develop</code> trafia do wersji snapshot, a <code>main</code> do stabilnej.</p></div><?php if (!empty($c['showcase_domain'])): ?><a class="ks-button" href="https://<?php echo $e($c['showcase_domain']); ?>" target="_blank" rel="noopener noreferrer">Otwórz stronę ↗</a><?php endif; ?></div>
+      <div class="ks-grid ks-grid-2">
+        <article class="ks-card ks-config-card">
+          <div class="ks-card-head"><div><span class="ks-kicker">KONFIGURACJA</span><h2>Źródła i domena</h2></div><span class="ks-icon">◆</span></div>
+          <form method="post" action="<?php echo $e($url('showcase-save')); ?>" class="ks-subform">
+            <label class="ks-field"><span>Domena Showcase</span><select name="showcase_domain" required><option value="">Wybierz domenę</option><?php foreach ($this->domains as $domain => $label): ?><option value="<?php echo $e($domain); ?>" <?php echo $c['showcase_domain'] === $domain ? 'selected' : ''; ?>><?php echo $e($label); ?></option><?php endforeach; ?></select><small>Przy pierwszej publikacji katalog dokumentów domeny musi być pusty (poza <code>.well-known</code>).</small></label>
+            <label class="ks-field"><span>Biblioteki</span><textarea name="showcase_repositories" rows="9" required><?php echo $e($c['showcase_repositories']); ?></textarea><small>Jedna na wiersz: <code>slug | URL repozytorium | nazwa</code>. Synchronizowane są gałęzie <code>develop</code> i <code>main</code>, zawsze z katalogu <code>docs/</code>.</small></label>
+            <label class="ks-field"><span>Otwarte repozytoria</span><textarea name="showcase_open_repositories" rows="7"><?php echo $e($c['showcase_open_repositories']); ?></textarea><small>Jedno na wiersz: <code>URL HTTPS | nazwa | opis PL | opis EN</code>. Repozytoria GitHub pokażą również podgląd README.</small></label>
+            <label class="ks-field"><span>Użytkownik Git HTTPS</span><input name="git_username" value="<?php echo $e($c['git_username']); ?>" autocomplete="off"></label>
+            <label class="ks-field"><span>Token Git HTTPS</span><input type="password" name="git_token" autocomplete="new-password" placeholder="<?php echo $secrets['git_token'] ? 'Zapisany — puste pole zachowa' : 'Opcjonalny'; ?>"><em class="ks-clear"><input type="checkbox" name="clear_git_token" value="1"> wyczyść token</em></label>
+            <label class="ks-field"><span>Globalny SSH known_hosts</span><textarea name="git_ssh_known_hosts" rows="4" placeholder="git.example.com ssh-ed25519 AAAA…"><?php echo $e($c['git_ssh_known_hosts']); ?></textarea><small>Jeden zweryfikowany zestaw hostów jest współdzielony przez wszystkie biblioteki.</small></label>
+            <label class="ks-field"><span>Globalny klucz SSH tylko do odczytu</span><textarea name="git_ssh_private_key" rows="6" autocomplete="off" placeholder="<?php echo $secrets['git_ssh_private_key'] ? 'Klucz zapisany — puste pole zachowa' : '-----BEGIN OPENSSH PRIVATE KEY-----'; ?>"></textarea><em class="ks-clear"><input type="checkbox" name="clear_git_ssh_private_key" value="1"> wyczyść klucz</em></label>
+            <button class="ks-button is-primary" type="submit">Zapisz Showcase</button>
+          </form>
+        </article>
+        <article class="ks-card">
+          <div class="ks-card-head"><div><span class="ks-kicker">PUBLIKACJA RĘCZNA</span><h2>Synchronizacja</h2></div><span class="ks-icon">↻</span></div>
+          <p class="ks-muted">Przycisk wykonuje checkout obu gałęzi każdego repozytorium, sprawdza wersję biblioteki, kopiuje dokumentację i atomowo odświeża pliki zarządzane przez Showcase.</p>
+          <dl class="ks-summary"><div><dt>Domena</dt><dd><?php echo $e($showcase['domain'] ?? ($c['showcase_domain'] ?: '—')); ?></dd></div><div><dt>Ostatnia synchronizacja</dt><dd><?php echo $e($showcase['lastSync'] ?? '—'); ?></dd></div><div><dt>Biblioteki</dt><dd><?php echo count((array) ($showcase['libraries'] ?? [])); ?></dd></div></dl>
+          <form method="post" action="<?php echo $e($url('operation')); ?>"><input type="hidden" name="operation" value="showcase-sync"><button class="ks-button is-primary is-large" type="submit" <?php echo empty($c['showcase_domain']) ? 'disabled' : ''; ?>>Synchronizuj Showcase</button></form>
+          <p class="ks-muted">Po zmianie dokumentacji nie trzeba publikować strony przy każdym commicie — uruchamiasz synchronizację wtedy, kiedy chcesz.</p>
+        </article>
+      </div>
     </section>
 
     <section class="ks-tab-panel" data-ks-panel="access">
