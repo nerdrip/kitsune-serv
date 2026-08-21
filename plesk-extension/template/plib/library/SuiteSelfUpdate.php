@@ -105,7 +105,7 @@ final class KitsuneSuiteSelfUpdate
 
     private static function runUltimateTool($mode)
     {
-        $privateKey = self::chunkedSecret('deploy_source_private_key');
+        $privateKey = self::ultimateToolPrivateKey();
         if ($privateKey === '') throw new RuntimeException('Repozytorium Ultimate Tool wymaga zapisanego prywatnego klucza wdrożeniowego.');
         $source = self::source();
         $uuid = self::uuid();
@@ -195,6 +195,28 @@ final class KitsuneSuiteSelfUpdate
         $value = '';
         for ($index = 0; $index < (int) $decoded['chunks']; $index++) $value .= self::secretSetting([$name . '_chunk_' . str_pad((string) $index, 2, '0', STR_PAD_LEFT)]);
         return strlen($value) === (int) ($decoded['bytes'] ?? -1) && hash_equals((string) ($decoded['sha256'] ?? ''), hash('sha256', $value)) ? $value : '';
+    }
+
+    private static function ultimateToolPrivateKey()
+    {
+        $privateKey = '';
+        $readError = null;
+        try {
+            if (class_exists('Modules_UltimateTool_Runtime')) {
+                $stored = Modules_UltimateTool_Runtime::deploymentCredentials()->get('source_private_key');
+                if (is_string($stored)) $privateKey = $stored;
+            }
+        } catch (Throwable $exception) {
+            $readError = $exception;
+        }
+        if (trim($privateKey) === '') $privateKey = self::chunkedSecret('deploy_source_private_key');
+        if (trim($privateKey) === '') $privateKey = self::secretSetting(['secret_git_ssh_private_key', 'gitSshPrivateKey', 'source_private_key']);
+        $privateKey = trim(str_replace(["\r\n", "\r"], "\n", (string) $privateKey));
+        if ($privateKey === '' && $readError instanceof Throwable) throw new RuntimeException('Nie można odczytać zapisanego klucza wdrożeniowego Ultimate Tool: ' . $readError->getMessage(), 0, $readError);
+        if ($privateKey !== '' && (strlen($privateKey) < 64 || strlen($privateKey) > 65536 || !preg_match('/^-----BEGIN (?:OPENSSH|RSA|EC|DSA) PRIVATE KEY-----[\s\S]+-----END (?:OPENSSH|RSA|EC|DSA) PRIVATE KEY-----$/D', $privateKey))) {
+            throw new RuntimeException('Zapisany klucz wdrożeniowy Ultimate Tool ma nieprawidłowy format. Zapisz go ponownie w konfiguracji wdrożenia.');
+        }
+        return $privateKey;
     }
 
     private static function emptyState()

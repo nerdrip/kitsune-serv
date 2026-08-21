@@ -184,6 +184,7 @@ function checkSuiteContract(source, id) {
   if (!controller.includes('suiteHubActive') || !controller.includes('kitsune-platform')) throw new Error(`Extension ${id} does not load the shared Suite shell.`);
   if (!view.includes('data-kitsune-suite')) throw new Error(`Extension ${id} does not mount the shared Suite header.`);
   if (!updater.includes("callSbin('kitsune-suite-self-update'") || !updateRunner.includes("'git', 'fetch'") || !updateRunner.includes("'git', 'archive'") || !updateRunner.includes("'merge', '--ff-only'") || !updateRunner.includes("'ssh-keyscan'") || !updateRunner.includes('StrictHostKeyChecking=yes') || updateRunner.includes('Repozytorium SSH wymaga zapisanego known_hosts') || updateRunner.includes('update/manifest.json')) throw new Error(`Extension ${id} does not provide repository-backed standalone self-update with automatic SSH trust persistence.`);
+  if (id === 'ultimate-tool' && (!updater.includes("deploymentCredentials()->get('source_private_key')") || !updater.includes("chunkedSecret('deploy_source_private_key')"))) throw new Error('Ultimate Tool self-update does not reuse its canonical encrypted deployment-key store.');
   const icon = hook.match(/'icon'\s*=>\s*pm_Context::getBaseUrl\(\)\s*\.\s*'images\/([^']+)'/)?.[1];
   if (!icon || !fs.existsSync(path.join(source, 'htdocs/images', icon))) throw new Error(`Extension ${id} does not provide its declared menu icon.`);
 }
