@@ -2,7 +2,7 @@
 
 class Modules_KitsuneservBridge_Config
 {
-    public const EXTENSION_VERSION = '3.1.3-r6';
+    public const EXTENSION_VERSION = '3.1.3-r7';
 
     private const SECRET_FIELDS = [
         'git_token' => 'secret_git_token',
@@ -178,16 +178,19 @@ class Modules_KitsuneservBridge_Config
         $config = array_merge($config, $extra);
         if ($action === 'showcase-sync') {
             $domain = self::hostedDomain((string) ($config['showcase_domain'] ?? ''));
-            $vhost = realpath((string) $domain->getVhostSystemPath());
-            if ($vhost === false || !is_dir($vhost)) throw new RuntimeException('Nie udało się ustalić katalogu vhost domeny Showcase.');
-            $documentRoot = method_exists($domain, 'getDocumentRoot') ? (string) $domain->getDocumentRoot() : $vhost . '/httpdocs';
-            if ($documentRoot === '' || $documentRoot[0] !== '/') $documentRoot = $vhost . '/' . ltrim($documentRoot, '/');
+            $home = realpath((string) $domain->getHomePath());
+            if ($home === false || !is_dir($home)) throw new RuntimeException('Nie udało się ustalić katalogu webspace domeny Showcase.');
+            $documentRoot = (string) $domain->getDocumentRoot();
+            if ($documentRoot === '' || $documentRoot[0] !== '/') $documentRoot = $home . '/' . ltrim($documentRoot, '/');
+            $documentRoot = realpath($documentRoot);
+            $home = rtrim(str_replace('\\', '/', $home), '/');
+            if ($documentRoot === false || !is_dir($documentRoot)) throw new RuntimeException('Nie udało się ustalić katalogu dokumentów domeny Showcase.');
             $documentRoot = rtrim(str_replace('\\', '/', $documentRoot), '/');
-            if (strpos($documentRoot . '/', rtrim(str_replace('\\', '/', $vhost), '/') . '/') !== 0) throw new RuntimeException('Katalog dokumentów Showcase musi znajdować się wewnątrz wybranej domeny.');
+            if (strpos($documentRoot . '/', $home . '/') !== 0) throw new RuntimeException('Katalog dokumentów Showcase musi znajdować się wewnątrz webspace wybranej domeny.');
             $template = realpath(dirname(__DIR__, 2) . '/resources/showcase');
             if ($template === false || !is_file($template . '/index.php')) throw new RuntimeException('Brakuje szablonu strony Showcase w rozszerzeniu.');
             $config['showcase_document_root'] = $documentRoot;
-            $config['showcase_vhost_path'] = rtrim(str_replace('\\', '/', $vhost), '/');
+            $config['showcase_home_path'] = $home;
             $config['showcase_template_path'] = $template;
         }
         if (in_array($action, ['suite-extension-check', 'suite-extension-install'], true)) {
