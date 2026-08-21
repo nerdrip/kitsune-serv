@@ -1,123 +1,123 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-20T19:13:04.797Z",
+  "generatedAt": "2026-08-21T05:16:57.063Z",
   "packages": [
     {
       "order": 1,
       "id": "kitsuneartifactory-manager",
       "name": "Kitsune Artifactory Manager",
       "version": "1.0.0",
-      "release": "3",
-      "file": "packages/01-kitsuneartifactory-manager-1.0.0-r3.zip",
-      "sha256": "d5eb104919a1a7988900fa81645825a7e4f2f20e39f106ebc389cc9e8d5ce13a"
+      "release": "4",
+      "file": "packages/01-kitsuneartifactory-manager-1.0.0-r4.zip",
+      "sha256": "268a05ed17520600230f8f276a83ec9decdc84ef792b516c7803049ebfbd66ed"
     },
     {
       "order": 2,
       "id": "kitsuneirc-manager",
       "name": "KitsuneIRC Deployment Manager",
       "version": "1.3.4",
-      "release": "3",
-      "file": "packages/02-kitsuneirc-manager-1.3.4-r3.zip",
-      "sha256": "8bafb333104613562d5d2e395f0eb6651e34e1d53d361c30e94faaa99bd96053"
+      "release": "4",
+      "file": "packages/02-kitsuneirc-manager-1.3.4-r4.zip",
+      "sha256": "42a78b1607ced2800571912f51679309476afdca724fd16e1965415fdf76f53f"
     },
     {
       "order": 3,
       "id": "kitsunecolab-manager",
       "name": "KitsuneColab Deployment Manager",
       "version": "1.5.11",
-      "release": "3",
-      "file": "packages/03-kitsunecolab-manager-1.5.11-r3.zip",
-      "sha256": "f5493db34c5f63d51032cd4ae93121ff6ace0041120ce38f2d40d94233716392"
+      "release": "4",
+      "file": "packages/03-kitsunecolab-manager-1.5.11-r4.zip",
+      "sha256": "3309d2eb804d4985f93d78e2d2c44243045f90374858676c0cd09f81f6c0ccbf"
     },
     {
       "order": 4,
       "id": "kitsunepaint-manager",
       "name": "Kitsune Creative Suite Deployment Manager",
       "version": "2.0.5",
-      "release": "4",
-      "file": "packages/04-kitsunepaint-manager-2.0.5-r4.zip",
-      "sha256": "9e0155e83ec07001f3d071dc455ed361661d62e8abf691af8493eefea68a2968"
+      "release": "5",
+      "file": "packages/04-kitsunepaint-manager-2.0.5-r5.zip",
+      "sha256": "955da8bcd36056be27204ab3b747bff8f404e8f2b544ff67af3b1fab98038296"
     },
     {
       "order": 5,
       "id": "kitsunepnc-manager",
       "name": "KitsunePNC Deployment Manager",
       "version": "1.8.9",
-      "release": "4",
-      "file": "packages/05-kitsunepnc-manager-1.8.9-r4.zip",
-      "sha256": "ab457d9280128a6b6482d0e3c1b588be8861af11a7ccf7ceb399047eb5d6d318"
+      "release": "6",
+      "file": "packages/05-kitsunepnc-manager-1.8.9-r6.zip",
+      "sha256": "c7aadeca7a320c91d2a9faddbfac7eee7f473f142eda68b09bf58bc5ce2b43cc"
     },
     {
       "order": 6,
       "id": "kitsunetab-manager",
       "name": "KitsuneTab Deployment Manager",
       "version": "0.4.0",
-      "release": "3",
-      "file": "packages/06-kitsunetab-manager-0.4.0-r3.zip",
-      "sha256": "ee77e4cb8d2b436d27c11e5bae11f9db2b53836914137c359312f928b44429ec"
+      "release": "4",
+      "file": "packages/06-kitsunetab-manager-0.4.0-r4.zip",
+      "sha256": "22f978ba4d719bf55ed2bacd5a1b22c70ae5d8cb1195e3d35e19b66b9229ebe4"
     },
     {
       "order": 7,
       "id": "kitsunetest-manager",
       "name": "KitsuneTest Deployment Manager",
       "version": "1.4.13",
-      "release": "3",
-      "file": "packages/07-kitsunetest-manager-1.4.13-r3.zip",
-      "sha256": "86659f930ad51005be2eed786b4fe44cd31e268bca858b1ecf377768a7c6334e"
+      "release": "4",
+      "file": "packages/07-kitsunetest-manager-1.4.13-r4.zip",
+      "sha256": "f05d05db97d436eb01f22608448f9896548262e48a576843901317c9fb1c3180"
     },
     {
       "order": 8,
       "id": "nailit-manager",
       "name": "NailIT Deployment Manager",
       "version": "1.0.28",
-      "release": "3",
-      "file": "packages/08-nailit-manager-1.0.28-r3.zip",
-      "sha256": "ba61f3265626a419d6e9797d8abd1f1188a6e3b0eafcbdd2a8a714f16008ea3b"
+      "release": "4",
+      "file": "packages/08-nailit-manager-1.0.28-r4.zip",
+      "sha256": "1b5013b5df821d265853934e3e37ecf613e92b8141248f133f9e6b3aceac9e7e"
     },
     {
       "order": 9,
       "id": "kitsune-git",
       "name": "KitsuneGIT Web",
       "version": "1.4.0",
-      "release": "1",
-      "file": "packages/09-kitsune-git-1.4.0-r1.zip",
-      "sha256": "38ec30cbdffa23f5729413be21a1d7ab064563150a81ae87dac9acd8892659ec"
+      "release": "8",
+      "file": "packages/09-kitsune-git-1.4.0-r8.zip",
+      "sha256": "88a24fd0e248053ed36f6af3047cc2d3c69ae0447e26ef09096a12138dbd50a4"
     },
     {
       "order": 10,
       "id": "wpkit-parse-manager",
       "name": "WPKit Parse Manager",
       "version": "1.1.1",
-      "release": "3",
-      "file": "packages/10-wpkit-parse-manager-1.1.1-r3.zip",
-      "sha256": "fc7b541a41a138daeb74bb0b1980b76a2544c537b350fe5629edfafd00a00550"
+      "release": "4",
+      "file": "packages/10-wpkit-parse-manager-1.1.1-r4.zip",
+      "sha256": "705195ba4e92cf94f12b6ab400f0d8afdfbcba7fd5c2ea4d8094a65c14016498"
     },
     {
       "order": 11,
       "id": "nerd-apps-runtime-manager",
       "name": "Nerd Apps Runtime Manager",
       "version": "2.2.0",
-      "release": "3",
-      "file": "packages/11-nerd-apps-runtime-manager-2.2.0-r3.zip",
-      "sha256": "37844ecd835774ee9aa4118aa400000ee4cbd3005f799c8e34cf17a8649cd37e"
+      "release": "4",
+      "file": "packages/11-nerd-apps-runtime-manager-2.2.0-r4.zip",
+      "sha256": "0b1cc6bab39c33bca1177d9b829c8b23f8815ec67068f8abd510082795ed4cd5"
     },
     {
       "order": 12,
       "id": "ultimate-tool",
       "name": "Ultimate Tool",
       "version": "0.1.1",
-      "release": "89",
-      "file": "packages/12-ultimate-tool-0.1.1-r89.zip",
-      "sha256": "a121f44ec221d4d8c46048cf94a87fe38f178ee356019c62bb1ecc65a88c8fc3"
+      "release": "91",
+      "file": "packages/12-ultimate-tool-0.1.1-r91.zip",
+      "sha256": "aab4f57f4b5637a844d2c98e7234afdcfa930f22d546900e2a4632afd26580c8"
     },
     {
       "order": 99,
       "id": "kitsuneserv-bridge",
       "name": "KitsuneServ Bridge",
       "version": "3.1.3",
-      "release": "1",
-      "file": "packages/99-kitsuneserv-bridge-3.1.3-r1.zip",
-      "sha256": "129fdee5315b4a3c2be6acac7f7511c39cdf44cc93162c7a1391dc56463c1ef4"
+      "release": "2",
+      "file": "packages/99-kitsuneserv-bridge-3.1.3-r2.zip",
+      "sha256": "84aeca74790bd7d037d0902c7b40298d8337929a6752088826df69e4a53c985c"
     }
   ]
 }

@@ -167,7 +167,7 @@ test('web mode authenticates and exposes a desktop-parity API', { timeout: 30000
   assert.equal(managedConnectors[0].id, 'managed-plesk');
   assert.equal(managedConnectors[0].baseUrl, `http://127.0.0.1:${upstreamPort}`);
   assert.equal(managedConnectors[0].configured, true);
-  const enrollmentRequest = { connectorId: 'managed-plesk', timestamp: Date.now(), nonce: crypto.randomBytes(16).toString('hex'), device: { name: 'Managed Plesk', platform: 'Linux', version: '3.1.3-r1', capabilities: ['plesk-sso', 'inventory'] } };
+  const enrollmentRequest = { connectorId: 'managed-plesk', timestamp: Date.now(), nonce: crypto.randomBytes(16).toString('hex'), device: { name: 'Managed Plesk', platform: 'Linux', version: '3.1.3-r2', capabilities: ['plesk-sso', 'inventory'] } };
   const enrollmentSignature = crypto.createHmac('sha256', managedConnectorSecret).update(stable(enrollmentRequest)).digest('base64url');
   const enrollmentResponse = await fetch(`${base}/auth/plesk/enroll`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-kitsune-enrollment-signature': enrollmentSignature }, body: JSON.stringify(enrollmentRequest) });
   assert.equal(enrollmentResponse.status, 200);

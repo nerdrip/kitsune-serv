@@ -143,7 +143,7 @@ class IndexController extends pm_Controller_Action
             foreach (Modules_KitsuneservBridge_Suite::installedExtensions() as $extension) {
                 if ($extension['updateStatus'] === 'available') $available++;
             }
-            $message = 'Sprawdzono ' . count($catalog['packages']) . ' paczek z gałęzi main. ';
+            $message = 'Sprawdzono ' . count($catalog['packages']) . ' repozytoriów na gałęzi main. ';
             $message .= $available > 0 ? 'Dostępne aktualizacje: ' . $available . '.' : 'Wszystkie zainstalowane managery są aktualne.';
             $this->_status->addMessage('info', $message);
         } catch (Throwable $exception) {
@@ -159,7 +159,7 @@ class IndexController extends pm_Controller_Action
         try {
             $id = trim((string) $this->getRequest()->getPost('extension_id'));
             $metadata = Modules_KitsuneservBridge_Suite::updateFromCatalog($id);
-            $this->_status->addMessage('info', 'Zaktualizowano ' . $metadata['name'] . ' do ' . $metadata['version'] . '-r' . $metadata['release'] . '. Suma SHA-256 i meta.xml zostały zweryfikowane.');
+            $this->_status->addMessage('info', 'Zaktualizowano ' . $metadata['name'] . ' do ' . $metadata['version'] . '-r' . $metadata['release'] . ' z przypiętego commitu repozytorium.');
         } catch (Throwable $exception) {
             $this->_status->addMessage('error', 'Nie zaktualizowano managera: ' . $exception->getMessage());
         }

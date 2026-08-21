@@ -3,11 +3,7 @@
 class Modules_KitsuneservBridge_Suite
 {
     public const HUB_ID = 'kitsuneserv-bridge';
-    public const DEFAULT_MANIFEST_URL = 'https://raw.githubusercontent.com/nerdrip/kitsune-serv/main/update/manifest.json';
-
     private const CATALOG_SETTING = 'suite_update_catalog';
-    private const MAX_MANIFEST_BYTES = 2097152;
-    private const MAX_PACKAGE_BYTES = 134217728;
 
     private const KNOWN_IDS = [
         'kitsuneirc-manager',
@@ -41,6 +37,21 @@ class Modules_KitsuneservBridge_Suite
         'nerd-apps-runtime-manager' => 'nerd-runtime-menu.svg',
         'ultimate-tool' => 'ultimate-tool-menu.svg',
         self::HUB_ID => 'kitsune-hub-menu.svg',
+    ];
+
+    private const REPOSITORIES = [
+        'kitsuneartifactory-manager' => ['url' => 'https://github.com/nerdrip/KitsuneArtifactory.git', 'source' => 'tools/plesk-extension/kitsuneartifactory-manager'],
+        'kitsuneirc-manager' => ['url' => 'https://github.com/nerdrip/kitsune-irc.git', 'source' => 'tools/plesk-extension/kitsuneirc-manager'],
+        'kitsunecolab-manager' => ['url' => 'ssh://git@git.servx.site:32785/boberski/kitsunecolab.git', 'source' => 'tools/plesk-extension/kitsunecolab-manager'],
+        'kitsunepaint-manager' => ['url' => 'ssh://git@git.servx.site:32785/boberski/kitsunepaint.git', 'source' => 'tools/plesk-extension/kitsunepaint-manager'],
+        'kitsunepnc-manager' => ['url' => 'ssh://git@git.servx.site:32785/boberski/kitsunepnc.git', 'source' => 'tools/plesk-extension/kitsunepnc-manager'],
+        'kitsunetab-manager' => ['url' => 'ssh://git@git.servx.site:32785/boberski/kitsunetab.git', 'source' => 'tools/plesk-extension/kitsunetab-manager'],
+        'kitsunetest-manager' => ['url' => 'ssh://git@git.servx.site:32785/boberski/kitsunetest.git', 'source' => 'tools/plesk-extension/kitsunetest-manager'],
+        'nailit-manager' => ['url' => 'ssh://git@git.servx.site:32785/boberski/nailit.git', 'source' => 'tools/plesk-extension/nailit-manager'],
+        'kitsune-git' => ['url' => 'https://github.com/nerdrip/kitsune-git.git', 'source' => 'deploy/plesk'],
+        'wpkit-parse-manager' => ['url' => 'ssh://git@git.servx.site:32785/boberski/wpkit.git', 'source' => 'tools/plesk-extension/wpkit-parse-manager'],
+        'nerd-apps-runtime-manager' => ['url' => 'ssh://git@git.servx.site:32785/boberski/dicex.git', 'source' => 'tools/plesk-extension/nerd-apps-runtime-manager'],
+        'ultimate-tool' => ['url' => 'ssh://git@git.servx.site:32785/boberski/ultimatetool.git', 'source' => 'plesk-extension'],
     ];
 
     public static function installedExtensions()
@@ -99,22 +110,22 @@ class Modules_KitsuneservBridge_Suite
     public static function refreshCatalog()
     {
         try {
-            $body = self::downloadToMemory(self::DEFAULT_MANIFEST_URL, self::MAX_MANIFEST_BYTES);
-            $manifest = json_decode($body, true);
-            if (!is_array($manifest) || (int) ($manifest['schemaVersion'] ?? 0) !== 1 || !is_array($manifest['packages'] ?? null)) {
-                throw new RuntimeException('Repozytorium zwróciło nieprawidłowy manifest aktualizacji.');
-            }
             $packages = [];
-            $seen = [];
-            foreach ($manifest['packages'] as $package) {
-                $package = self::validateCatalogPackage($package);
-                if (isset($seen[$package['id']])) throw new RuntimeException('Manifest zawiera powtórzony identyfikator ' . $package['id'] . '.');
-                $seen[$package['id']] = true;
-                $packages[] = $package;
+            foreach (self::REPOSITORIES as $id => $repository) {
+                $metadata = self::repositoryOperation($id, 'check');
+                $packages[] = [
+                    'id' => $id,
+                    'name' => $metadata['name'],
+                    'version' => $metadata['version'],
+                    'release' => $metadata['release'],
+                    'branch' => $metadata['branch'],
+                    'commit' => $metadata['commit'],
+                    'repository' => $repository['url'],
+                ];
             }
             $catalog = [
                 'checkedAt' => gmdate('c'),
-                'generatedAt' => trim((string) ($manifest['generatedAt'] ?? '')),
+                'generatedAt' => gmdate('c'),
                 'packages' => $packages,
                 'error' => '',
             ];
@@ -147,20 +158,32 @@ class Modules_KitsuneservBridge_Suite
             throw new RuntimeException('Wersja ' . $installedVersion . '-r' . $installedRelease . ' jest już aktualna.');
         }
 
-        $temporary = tempnam(pm_Context::getVarDir(), 'suite-update-');
-        if ($temporary === false) throw new RuntimeException('Nie można utworzyć pliku tymczasowego aktualizacji.');
+        return self::repositoryOperation($id, 'install');
+    }
+
+    private static function repositoryOperation($id, $mode)
+    {
+        if (!isset(self::REPOSITORIES[$id]) || !in_array($mode, ['check', 'install'], true)) throw new RuntimeException('Nieprawidłowa operacja repozytorium Suite.');
+        $repository = self::REPOSITORIES[$id];
+        $runtime = null;
         try {
-            self::downloadToFile(self::packageUrl($package['file']), $temporary, self::MAX_PACKAGE_BYTES);
-            $digest = hash_file('sha256', $temporary);
-            if (!is_string($digest) || !hash_equals($package['sha256'], strtolower($digest))) throw new RuntimeException('Suma SHA-256 pobranej paczki jest nieprawidłowa.');
-            $metadata = self::inspectPackage($temporary);
-            foreach (['id', 'version', 'release'] as $field) {
-                if ((string) $metadata[$field] !== (string) $package[$field]) throw new RuntimeException('Metadane paczki nie odpowiadają manifestowi (' . $field . ').');
+            $runtime = Modules_KitsuneservBridge_Config::createRuntimeConfig('suite-extension-' . $mode, [
+                'extensionId' => $id,
+                'repositoryUrl' => $repository['url'],
+                'repositoryBranch' => 'main',
+                'extensionSource' => $repository['source'],
+            ]);
+            $result = pm_ApiCli::callSbin('kitsune-suite-self-update', ['--' . $mode, $runtime], pm_ApiCli::RESULT_FULL);
+            if ((int) ($result['code'] ?? 1) !== 0) {
+                $detail = trim((string) ($result['stderr'] ?? $result['stdout'] ?? ''));
+                throw new RuntimeException($detail !== '' ? mb_substr($detail, -3000) : 'Runner repozytorium Suite zakończył się błędem.');
             }
-            pm_Extension::installByFile($temporary);
+            if (!preg_match('/^KITSUNE_SELF_UPDATE_RESULT=(\{[^\r\n]+\})$/m', (string) ($result['stdout'] ?? ''), $match)) throw new RuntimeException('Runner repozytorium Suite nie zwrócił metadanych.');
+            $metadata = json_decode($match[1], true);
+            if (!is_array($metadata) || (string) ($metadata['id'] ?? '') !== $id || !preg_match('/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/', (string) ($metadata['version'] ?? '')) || !preg_match('/^[1-9]\d{0,8}$/', (string) ($metadata['release'] ?? '')) || !preg_match('/^[a-f0-9]{40,64}$/', (string) ($metadata['commit'] ?? ''))) throw new RuntimeException('Runner repozytorium Suite zwrócił nieprawidłowe metadane.');
             return $metadata;
         } finally {
-            if (is_file($temporary)) @unlink($temporary);
+            if ($runtime !== null && is_file($runtime)) @unlink($runtime);
         }
     }
 
@@ -215,86 +238,10 @@ class Modules_KitsuneservBridge_Suite
         return ['id' => $id, 'name' => $name, 'version' => $version, 'release' => $release];
     }
 
-    private static function validateCatalogPackage($package)
-    {
-        if (!is_array($package)) throw new RuntimeException('Manifest zawiera nieprawidłowy wpis paczki.');
-        $normalized = [];
-        foreach (['id', 'name', 'version', 'release', 'file', 'sha256'] as $field) $normalized[$field] = trim((string) ($package[$field] ?? ''));
-        if (!in_array($normalized['id'], self::KNOWN_IDS, true)) throw new RuntimeException('Manifest zawiera nieznane rozszerzenie ' . $normalized['id'] . '.');
-        if ($normalized['name'] === '' || strlen($normalized['name']) > 160) throw new RuntimeException('Manifest zawiera nieprawidłową nazwę rozszerzenia.');
-        if (!preg_match('/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/', $normalized['version'])) throw new RuntimeException('Manifest zawiera nieprawidłową wersję dla ' . $normalized['id'] . '.');
-        if (!preg_match('/^\d+$/', $normalized['release'])) throw new RuntimeException('Manifest zawiera nieprawidłowe wydanie dla ' . $normalized['id'] . '.');
-        if (!preg_match('#^packages/[A-Za-z0-9][A-Za-z0-9._-]*\.zip$#', $normalized['file'])) throw new RuntimeException('Manifest zawiera nieprawidłową ścieżkę paczki dla ' . $normalized['id'] . '.');
-        if (!preg_match('/^[a-f0-9]{64}$/', $normalized['sha256'])) throw new RuntimeException('Manifest nie zawiera prawidłowej sumy SHA-256 dla ' . $normalized['id'] . '.');
-        return $normalized;
-    }
-
     private static function isNewer($currentVersion, $currentRelease, $candidateVersion, $candidateRelease)
     {
         $comparison = version_compare((string) $candidateVersion, (string) $currentVersion);
         return $comparison > 0 || ($comparison === 0 && (int) $candidateRelease > (int) $currentRelease);
     }
 
-    private static function packageUrl($relative)
-    {
-        $base = substr(self::DEFAULT_MANIFEST_URL, 0, strrpos(self::DEFAULT_MANIFEST_URL, '/') + 1);
-        return $base . $relative;
-    }
-
-    private static function downloadToMemory($url, $maximumBytes)
-    {
-        $body = '';
-        self::request($url, function ($chunk) use (&$body, $maximumBytes) {
-            if (strlen($body) + strlen($chunk) > $maximumBytes) return 0;
-            $body .= $chunk;
-            return strlen($chunk);
-        });
-        return $body;
-    }
-
-    private static function downloadToFile($url, $path, $maximumBytes)
-    {
-        $stream = fopen($path, 'wb');
-        if ($stream === false) throw new RuntimeException('Nie można zapisać pobieranej paczki.');
-        $written = 0;
-        try {
-            self::request($url, function ($chunk) use ($stream, &$written, $maximumBytes) {
-                $length = strlen($chunk);
-                if ($written + $length > $maximumBytes) return 0;
-                $result = fwrite($stream, $chunk);
-                if ($result !== $length) return 0;
-                $written += $result;
-                return $result;
-            });
-        } finally {
-            fclose($stream);
-        }
-        if ($written < 1) throw new RuntimeException('Repozytorium zwróciło pustą paczkę.');
-    }
-
-    private static function request($url, callable $writer)
-    {
-        $parts = parse_url((string) $url);
-        if (!is_array($parts) || ($parts['scheme'] ?? '') !== 'https' || empty($parts['host']) || isset($parts['user']) || isset($parts['pass']) || isset($parts['fragment'])) {
-            throw new RuntimeException('Kanał aktualizacji musi używać bezpiecznego adresu HTTPS.');
-        }
-        $handle = curl_init($url);
-        curl_setopt_array($handle, [
-            CURLOPT_HTTPHEADER => ['Accept: application/json, application/zip', 'User-Agent: Kitsune-Plesk-Suite/' . Modules_KitsuneservBridge_Config::EXTENSION_VERSION],
-            CURLOPT_RETURNTRANSFER => false,
-            CURLOPT_FOLLOWLOCATION => false,
-            CURLOPT_CONNECTTIMEOUT => 10,
-            CURLOPT_TIMEOUT => 180,
-            CURLOPT_SSL_VERIFYPEER => true,
-            CURLOPT_SSL_VERIFYHOST => 2,
-            CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
-            CURLOPT_WRITEFUNCTION => static function ($handle, $chunk) use ($writer) { return $writer($chunk); },
-        ]);
-        $ok = curl_exec($handle);
-        $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
-        $error = curl_error($handle);
-        curl_close($handle);
-        if ($ok === false) throw new RuntimeException('Nie pobrano danych aktualizacji: ' . ($error !== '' ? $error : 'przekroczono dozwolony rozmiar odpowiedzi'));
-        if ($status < 200 || $status >= 300) throw new RuntimeException('Repozytorium aktualizacji zwróciło HTTP ' . $status . '.');
-    }
 }
