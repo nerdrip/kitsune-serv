@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /**
- * Kitsune Docs Index
+ * Kitsune Showcase
  * - Lists all first-level folders in /docs with stable/snapshot channels
  * - Repo section with optional GitHub README preview
  * - Bilingual: PL / EN
@@ -89,6 +89,17 @@ $i18n = [
     'pl' => [
         'title' => 'Kitsune.WEBSITE',
         'tagline' => 'Dokumentacje lisich bibliotek — w jednym, lisim leżu.',
+        'eyebrow' => 'OPEN SOURCE · ANDROID · WEB',
+        'hero_title' => 'Kod, który rośnie razem ze społecznością.',
+        'hero_desc' => 'Jedno miejsce dla stabilnych wydań, świeżych snapshotów, interaktywnych narzędzi i projektów tworzonych pod znakiem Kitsune.',
+        'explore_docs' => 'Odkryj biblioteki',
+        'explore_repos' => 'Zobacz otwarte projekty',
+        'nav_docs' => 'Dokumentacja',
+        'nav_repos' => 'Repozytoria',
+        'stat_libraries' => 'bibliotek',
+        'stat_repositories' => 'otwartych projektów',
+        'stat_channels' => 'kanały wydań',
+        'live_catalog' => 'Katalog aktualizowany przez KitsuneServ',
         'meta_description' => 'Index dokumentacji z /docs',
         'lang_label' => 'Język',
         'lang_pl' => 'Polski',
@@ -126,6 +137,17 @@ $i18n = [
     'en' => [
         'title' => 'Kitsune.WEBSITE',
         'tagline' => 'Documentation for fox-flavored libraries — gathered in one cozy den.',
+        'eyebrow' => 'OPEN SOURCE · ANDROID · WEB',
+        'hero_title' => 'Code that grows with its community.',
+        'hero_desc' => 'One home for stable releases, fresh snapshots, interactive tools, and open projects built under the Kitsune banner.',
+        'explore_docs' => 'Explore libraries',
+        'explore_repos' => 'Browse open projects',
+        'nav_docs' => 'Documentation',
+        'nav_repos' => 'Repositories',
+        'stat_libraries' => 'libraries',
+        'stat_repositories' => 'open projects',
+        'stat_channels' => 'release channels',
+        'live_catalog' => 'Catalog updated by KitsuneServ',
         'meta_description' => 'Documentation index from /docs',
         'lang_label' => 'Language',
         'lang_pl' => 'Polski',
@@ -656,6 +678,8 @@ if (!$activeRepo && !empty($repositories)) {
 
 $title = tr($t, 'title');
 $tagline = tr($t, 'tagline');
+$publishedLibraryCount = count($cards);
+$openRepositoryCount = count($repositories);
 ?>
 <!doctype html>
 <html lang="<?= htmlspecialchars($lang) ?>">
@@ -681,6 +705,7 @@ $tagline = tr($t, 'tagline');
       --radius2: 26px;
     }
     *{box-sizing:border-box}
+    html{scroll-behavior:smooth}
     html,body{height:100%}
 	body{
 	  margin:0;
@@ -689,6 +714,13 @@ $tagline = tr($t, 'tagline');
 	  background: transparent;
 	  overflow-x:hidden;
 	}
+
+    body:after{
+      content:"";
+      position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.16;
+      background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.22'/%3E%3C/svg%3E");
+      mix-blend-mode:soft-light;
+    }
 
 	body::before{
 	  content:"";
@@ -704,7 +736,7 @@ $tagline = tr($t, 'tagline');
 	  background-repeat:no-repeat;
 	  background-size:cover;
 	}
-    .wrap{max-width:1200px;margin:0 auto;padding:28px 18px 60px}
+    .wrap{max-width:1240px;margin:0 auto;padding:24px 18px 70px}
     header{
       display:flex; gap:18px; align-items:center; justify-content:space-between;
       padding:22px 20px;
@@ -714,6 +746,7 @@ $tagline = tr($t, 'tagline');
       box-shadow: var(--shadow);
       position:relative;
       overflow:hidden;
+      backdrop-filter:blur(22px) saturate(130%);
     }
     header:before{
       content:"";
@@ -763,6 +796,35 @@ $tagline = tr($t, 'tagline');
       background: rgba(0,0,0,.22);
       backdrop-filter: blur(8px);
     }
+    .top-nav{display:flex;gap:6px;align-items:center}
+    .top-nav a{color:var(--muted);text-decoration:none;font-size:12px;font-weight:700;padding:10px 12px;border-radius:999px;transition:.2s ease}
+    .top-nav a:hover{color:#fff;background:rgba(255,255,255,.06)}
+    .hero{
+      position:relative;isolation:isolate;overflow:hidden;margin-top:18px;padding:74px 52px 52px;
+      border:1px solid rgba(255,255,255,.09);border-radius:32px;
+      background:linear-gradient(135deg,rgba(255,106,61,.10),rgba(15,16,34,.88) 42%,rgba(124,92,255,.14));
+      box-shadow:0 30px 90px rgba(0,0,0,.5);
+    }
+    .hero:before,.hero:after{content:"";position:absolute;border-radius:50%;filter:blur(4px);z-index:-1;animation:drift 12s ease-in-out infinite alternate}
+    .hero:before{width:420px;height:420px;right:-100px;top:-180px;background:radial-gradient(circle,rgba(124,92,255,.38),transparent 68%)}
+    .hero:after{width:360px;height:360px;left:-150px;bottom:-210px;background:radial-gradient(circle,rgba(255,106,61,.32),transparent 68%);animation-delay:-5s}
+    @keyframes drift{to{transform:translate3d(28px,18px,0) scale(1.08)}}
+    .hero-copy{max-width:820px}
+    .eyebrow{display:inline-flex;align-items:center;gap:9px;margin:0 0 18px;color:#ffd2c5;font-size:11px;font-weight:800;letter-spacing:.2em}
+    .eyebrow:before{content:"";width:30px;height:1px;background:linear-gradient(90deg,var(--glow),var(--glow2))}
+    .hero h2{margin:0;max-width:900px;font-size:clamp(42px,7vw,86px);line-height:.96;letter-spacing:-.055em;background:linear-gradient(110deg,#fff 15%,#ffd6ca 48%,#c8bdff 82%);-webkit-background-clip:text;background-clip:text;color:transparent}
+    .hero-desc{max-width:720px;margin:24px 0 0;color:#d4d5f5;font-size:clamp(16px,2vw,20px);line-height:1.65}
+    .hero-actions{display:flex;gap:11px;flex-wrap:wrap;margin-top:30px}
+    .hero-btn{display:inline-flex;align-items:center;gap:10px;padding:13px 17px;border-radius:14px;text-decoration:none;color:#fff;font-size:13px;font-weight:800;border:1px solid rgba(255,255,255,.13);background:rgba(255,255,255,.06);transition:.2s ease}
+    .hero-btn.primary{background:linear-gradient(135deg,#ff6a3d,#ef486f);box-shadow:0 14px 34px rgba(255,80,70,.24)}
+    .hero-btn:hover{transform:translateY(-2px);border-color:rgba(255,255,255,.28)}
+    .hero-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;margin-top:48px;border:1px solid rgba(255,255,255,.09);border-radius:20px;overflow:hidden;background:rgba(255,255,255,.08)}
+    .stat{padding:18px 20px;background:rgba(7,7,17,.72);backdrop-filter:blur(12px)}
+    .stat strong{display:block;color:#fff;font-size:26px;line-height:1}
+    .stat span{display:block;margin-top:7px;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.1em}
+    .live-note{position:absolute;top:25px;right:28px;display:flex;align-items:center;gap:8px;color:var(--muted);font-size:11px}
+    .live-note:before{content:"";width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 18px var(--ok);animation:pulse 2s ease-in-out infinite}
+    @keyframes pulse{50%{opacity:.45;transform:scale(.8)}}
     .lang-label{
       color:var(--muted);
       font-size:12px;
@@ -1105,6 +1167,7 @@ $tagline = tr($t, 'tagline');
       text-align:center;
       opacity:.9;
     }
+    footer:after{content:"Kitsune Suite · built in the open"}
     code{
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     }
@@ -1148,7 +1211,12 @@ $tagline = tr($t, 'tagline');
       .repo-actions{
         justify-content:flex-start;
       }
+      .top-nav{display:none}
+      .hero{padding:60px 24px 30px}
+      .hero-stats{grid-template-columns:1fr}
+      .live-note{left:24px;right:auto;top:22px}
     }
+    @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.hero:before,.hero:after,.live-note:before{animation:none}.card,.item,.hero-btn{transition:none}}
   </style>
 </head>
 <body>
@@ -1163,6 +1231,10 @@ $tagline = tr($t, 'tagline');
       </div>
 
       <div class="right">
+        <nav class="top-nav" aria-label="Primary">
+          <a href="#libraries"><?= htmlspecialchars(tr($t, 'nav_docs')) ?></a>
+          <a href="#repositories"><?= htmlspecialchars(tr($t, 'nav_repos')) ?></a>
+        </nav>
         <nav class="lang-switch" aria-label="<?= htmlspecialchars(tr($t, 'lang_label')) ?>">
           <span class="lang-label"><?= htmlspecialchars(tr($t, 'lang_label')) ?>:</span>
 
@@ -1186,6 +1258,24 @@ $tagline = tr($t, 'tagline');
         </nav>
       </div>
     </header>
+
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="live-note"><?= htmlspecialchars(tr($t, 'live_catalog')) ?></div>
+      <div class="hero-copy">
+        <p class="eyebrow"><?= htmlspecialchars(tr($t, 'eyebrow')) ?></p>
+        <h2 id="hero-title"><?= htmlspecialchars(tr($t, 'hero_title')) ?></h2>
+        <p class="hero-desc"><?= htmlspecialchars(tr($t, 'hero_desc')) ?></p>
+        <div class="hero-actions">
+          <a class="hero-btn primary" href="#libraries"><?= htmlspecialchars(tr($t, 'explore_docs')) ?> <span aria-hidden="true">↓</span></a>
+          <a class="hero-btn" href="#repositories"><?= htmlspecialchars(tr($t, 'explore_repos')) ?> <span aria-hidden="true">↗</span></a>
+        </div>
+      </div>
+      <div class="hero-stats" aria-label="Showcase statistics">
+        <div class="stat"><strong><?= $publishedLibraryCount ?></strong><span><?= htmlspecialchars(tr($t, 'stat_libraries')) ?></span></div>
+        <div class="stat"><strong><?= $openRepositoryCount ?></strong><span><?= htmlspecialchars(tr($t, 'stat_repositories')) ?></span></div>
+        <div class="stat"><strong>2</strong><span><?= htmlspecialchars(tr($t, 'stat_channels')) ?></span></div>
+      </div>
+    </section>
 
     <div class="grid">
       <?php if ($kitsuneScript): ?>
@@ -1215,7 +1305,7 @@ $tagline = tr($t, 'tagline');
         </section>
       <?php endif; ?>
 		
-      <section class="section">
+      <section class="section" id="libraries">
         <h2><?= htmlspecialchars(tr($t, 'libraries')) ?></h2>
         <p class="sub">
           <?= htmlspecialchars(tr($t, 'generated_from')) ?> <code>/docs</code>.
@@ -1259,7 +1349,7 @@ $tagline = tr($t, 'tagline');
         <?php endif; ?>
       </section>
 
-      <section class="section">
+      <section class="section" id="repositories">
         <h2><?= htmlspecialchars(tr($t, 'repos_title')) ?></h2>
         <p class="sub"><?= htmlspecialchars(tr($t, 'repos_subtitle')) ?></p>
 

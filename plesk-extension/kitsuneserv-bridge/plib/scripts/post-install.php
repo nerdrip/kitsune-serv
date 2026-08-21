@@ -26,7 +26,7 @@ try {
 } catch (Throwable $exception) {
     throw new RuntimeException('Nie udało się uruchomić uprzywilejowanego executora KitsuneServ Bridge r1 przez Plesk.', 0, $exception);
 }
-if ((int) ($selfCheck['code'] ?? 1) !== 0 || trim((string) ($selfCheck['stdout'] ?? '')) !== '3.1.3-r7') {
+if ((int) ($selfCheck['code'] ?? 1) !== 0 || trim((string) ($selfCheck['stdout'] ?? '')) !== '3.1.3-r8') {
     throw new RuntimeException('Executor KitsuneServ Bridge r1 nie przeszedł kontroli wersji przez Plesk.');
 }
 
