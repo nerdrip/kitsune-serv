@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.1.3-3
+
+- Suite SSH updates now discover host keys on first use, persist them privately and enforce strict verification on later connections.
+
 ## 3.1.3-2
 
 - Suite management now checks every product repository, fast-forwards its private checkout when required and installs packages built from pinned commits.

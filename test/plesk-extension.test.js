@@ -25,7 +25,7 @@ test('Plesk extension has an installable SDK structure and release metadata', ()
   const meta = fs.readFileSync(path.join(extension, 'meta.xml'), 'utf8');
   assert.match(meta, /<id>kitsuneserv-bridge<\/id>/);
   assert.match(meta, new RegExp(`<version>${require('../package.json').version.replaceAll('.', '\\.')}<\\/version>`));
-  assert.match(meta, /<release>2<\/release>/);
+  assert.match(meta, /<release>3<\/release>/);
   assert.match(meta, /<plesk_min_version>18\.0\.41<\/plesk_min_version>/);
   assert.match(meta, /<os>unix<\/os>/);
   const entrypoint = fs.readFileSync(path.join(extension, 'htdocs/index.php'), 'utf8');
@@ -117,6 +117,7 @@ test('suite template and aggregate update builder preserve one navigation contra
   const template = path.join(root, 'plesk-extension', 'template');
   const hook = fs.readFileSync(path.join(template, 'plib/hooks/CustomButtons.php'), 'utf8');
   const readme = fs.readFileSync(path.join(template, 'README.md'), 'utf8');
+  const repositoryRunner = fs.readFileSync(path.join(template, 'sbin/kitsune-suite-self-update'), 'utf8');
   const builder = fs.readFileSync(path.join(root, 'scripts/build-plesk-suite-update.js'), 'utf8');
   const installer = fs.readFileSync(path.join(root, 'update/install-all.sh'), 'utf8');
   for (const relative of ['meta.xml', 'htdocs/index.php', 'htdocs/css/kitsune-platform.css', 'htdocs/js/kitsune-platform.js', 'plib/controllers/IndexController.php', 'plib/controllers/SelfUpdateController.php', 'plib/library/SuiteSelfUpdate.php', 'plib/views/scripts/index/index.phtml', 'plib/views/scripts/self-update/index.phtml', 'sbin/kitsune-suite-self-update']) assert.equal(fs.existsSync(path.join(template, relative)), true, `missing template file ${relative}`);
@@ -125,6 +126,10 @@ test('suite template and aggregate update builder preserve one navigation contra
   for (const id of ['kitsuneartifactory-manager', 'kitsuneirc-manager', 'kitsunecolab-manager', 'kitsunepaint-manager', 'kitsunepnc-manager', 'kitsunetab-manager', 'kitsunetest-manager', 'nailit-manager', 'kitsune-git', 'wpkit-parse-manager', 'nerd-apps-runtime-manager', 'ultimate-tool', 'kitsuneserv-bridge']) assert.ok(builder.includes(`'${id}'`), `missing aggregate package ${id}`);
   assert.match(builder, /checkSuiteContract/);
   assert.match(builder, /repository-backed standalone self-update/);
+  assert.match(repositoryRunner, /ssh-keyscan/);
+  assert.match(repositoryRunner, /StrictHostKeyChecking=yes/);
+  assert.match(repositoryRunner, /\$this->trustFile = \$root \. '\/known_hosts'/);
+  assert.doesNotMatch(repositoryRunner, /Repozytorium SSH wymaga zapisanego known_hosts/);
   assert.match(installer, /tr -d '\\r' < SHA256SUMS \| sha256sum -c -/);
   assert.match(installer, /plesk bin extension -g/);
 });
@@ -170,7 +175,7 @@ test('all extension PHP sources and the privileged post-install self-check pass 
   const harness = `
 class pm_Context { public static function init($id) {} public static function getVarDir() { return ${JSON.stringify(runtime)}; } }
 class pm_Settings { private static $values = []; public static function get($key, $default = null) { return array_key_exists($key, self::$values) ? self::$values[$key] : $default; } public static function set($key, $value) { self::$values[$key] = $value; } }
-class pm_ApiCli { const RESULT_FULL = 1; public static function callSbin($command, $arguments, $result) { if ($command !== 'kitsuneserv-bridge-r1' || $arguments !== ['--self-check']) throw new RuntimeException('Unexpected privileged call'); return ['code' => 0, 'stdout' => "3.1.3-r2\\n", 'stderr' => '']; } }
+class pm_ApiCli { const RESULT_FULL = 1; public static function callSbin($command, $arguments, $result) { if ($command !== 'kitsuneserv-bridge-r1' || $arguments !== ['--self-check']) throw new RuntimeException('Unexpected privileged call'); return ['code' => 0, 'stdout' => "3.1.3-r3\\n", 'stderr' => '']; } }
 require ${JSON.stringify(installer)};
 echo "post-install-self-check-ok\\n";
 `;
@@ -178,7 +183,7 @@ echo "post-install-self-check-ok\\n";
   assert.equal(installResult.status, 0, installResult.stderr || installResult.stdout);
   assert.match(installResult.stdout, /post-install-self-check-ok/);
 
-  const canonicalPayload = { connectorId: 'plesk-test', timestamp: 1800000000000, nonce: '0123456789abcdef0123456789abcdef', device: { capabilities: ['inventory', 'plesk-sso'], name: 'Plesk Łódź', platform: 'Linux', version: '3.1.3-r2' } };
+  const canonicalPayload = { connectorId: 'plesk-test', timestamp: 1800000000000, nonce: '0123456789abcdef0123456789abcdef', device: { capabilities: ['inventory', 'plesk-sso'], name: 'Plesk Łódź', platform: 'Linux', version: '3.1.3-r3' } };
   const stable = value => Array.isArray(value) ? `[${value.map(stable).join(',')}]` : (value && typeof value === 'object' ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stable(value[key])}`).join(',')}}` : JSON.stringify(value));
   const hubClient = path.join(extension, 'plib/library/HubClient.php').replaceAll('\\', '/');
   const canonicalHarness = `class pm_Exception extends Exception {} require ${JSON.stringify(hubClient)}; $client = new Modules_KitsuneservBridge_HubClient('http://127.0.0.1'); $method = (new ReflectionClass($client))->getMethod('stable'); @$method->setAccessible(true); echo $method->invoke($client, json_decode(base64_decode('${Buffer.from(JSON.stringify(canonicalPayload)).toString('base64')}'), true));`;
@@ -205,7 +210,7 @@ test('managed deployment discovers and propagates a compatible Plesk Node.js run
   assert.match(installer, /chmod\(\$varDir \. '\/state\.json', 0644\)/);
   assert.match(installer, /createRuntimeConfig\('proxy'\)/);
   assert.doesNotMatch(installer, /file_get_contents\(\$utility\)|is_executable\(\$utility\)/);
-  assert.match(manager, /KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3\.1\.3-r2'/);
+  assert.match(manager, /KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3\.1\.3-r3'/);
   assert.match(manager, /--self-check/);
   const operations = fs.readFileSync(path.join(extension, 'plib/library/Task/Operate.php'), 'utf8') + fs.readFileSync(path.join(extension, 'plib/controllers/IndexController.php'), 'utf8');
   assert.doesNotMatch(operations, /callSbin\('kitsuneserv-bridge'/);
