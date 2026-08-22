@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.1.3-11
+
+- Forces installation of the corrected Showcase template instead of reusing an older extension with the same release number.
+- Every Showcase synchronization records the deployed template release and SHA-256 fingerprint.
+- Showcase responses disable browser caching, while statistics use an additional clipping fallback for consistently rounded corners.
+
 ## 3.1.3-10
 
 - Showcase library cards now expose explicit stable and snapshot versions, and only their channel buttons open documentation.
