@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.1.3-12
+
+- Fixed Showcase README rendering so inline commands remain visible instead of leaking internal `CODE0`/`CODE1` placeholder names.
+
 ## 3.1.3-11
 
 - Forces installation of the corrected Showcase template instead of reusing an older extension with the same release number.
