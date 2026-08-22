@@ -385,7 +385,9 @@ function inline_markdown_to_html(string $text): string {
 
     $codeStore = [];
     $text = preg_replace_callback('/`([^`\n]+)`/', function($m) use (&$codeStore) {
-        $key = '__CODE_' . count($codeStore) . '__';
+        // Keep the temporary token free of Markdown punctuation. Otherwise the
+        // bold/italic passes turn __CODE_0__ into the visible CODE0 placeholder.
+        $key = 'KITSUNEINLINECODE' . count($codeStore) . 'TOKEN';
         $codeStore[$key] = '<code>' . $m[1] . '</code>';
         return $key;
     }, $text);
