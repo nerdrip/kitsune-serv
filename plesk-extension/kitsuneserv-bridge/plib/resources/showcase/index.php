@@ -14,6 +14,14 @@ $baseUrl = '/docs';
 $siteConfigPath = __DIR__ . DIRECTORY_SEPARATOR . 'showcase.json';
 $siteConfig = is_file($siteConfigPath) ? json_decode((string) file_get_contents($siteConfigPath), true) : [];
 if (!is_array($siteConfig)) $siteConfig = [];
+$templateRelease = trim((string) ($siteConfig['template']['release'] ?? 'unknown'));
+if (!preg_match('/^[0-9A-Za-z._-]{1,64}$/', $templateRelease)) $templateRelease = 'unknown';
+if (!headers_sent()) {
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    header('Pragma: no-cache');
+    header('Expires: 0');
+    header('X-Kitsune-Showcase-Template: ' . $templateRelease);
+}
 $repositoriesConfig = isset($siteConfig['openRepositories']) && is_array($siteConfig['openRepositories'])
     ? $siteConfig['openRepositories']
     : [];
@@ -715,6 +723,7 @@ $openRepositoryCount = count($repositories);
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title><?= htmlspecialchars($title) ?></title>
   <meta name="description" content="<?= htmlspecialchars(tr($t, 'meta_description')) ?>">
+  <meta name="kitsune-showcase-template" content="<?= htmlspecialchars($templateRelease) ?>">
   <style>
     :root{
       --bg0:#070711;
@@ -845,8 +854,10 @@ $openRepositoryCount = count($repositories);
     .hero-btn{display:inline-flex;align-items:center;gap:10px;padding:13px 17px;border-radius:14px;text-decoration:none;color:#fff;font-size:13px;font-weight:800;border:1px solid rgba(255,255,255,.13);background:rgba(255,255,255,.06);transition:.2s ease}
     .hero-btn.primary{background:linear-gradient(135deg,#ff6a3d,#ef486f);box-shadow:0 14px 34px rgba(255,80,70,.24)}
     .hero-btn:hover{transform:translateY(-2px);border-color:rgba(255,255,255,.28)}
-    .hero-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;margin-top:48px;border:1px solid rgba(255,255,255,.09);border-radius:22px;overflow:hidden;clip-path:inset(0 round 22px);background:rgba(255,255,255,.08)}
+    .hero-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;margin-top:48px;border:1px solid rgba(255,255,255,.09);border-radius:22px;overflow:hidden;clip-path:inset(0 round 22px);isolation:isolate;transform:translateZ(0);background:rgba(255,255,255,.08)}
     .stat{padding:18px 20px;background:rgba(7,7,17,.72);backdrop-filter:blur(12px)}
+    .stat:first-child{border-radius:21px 0 0 21px}
+    .stat:last-child{border-radius:0 21px 21px 0}
     .stat strong{display:block;color:#fff;font-size:26px;line-height:1}
     .stat span{display:block;margin-top:7px;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.1em}
     .live-note{position:absolute;top:25px;right:28px;display:flex;align-items:center;gap:8px;color:var(--muted);font-size:11px}
@@ -932,7 +943,6 @@ $openRepositoryCount = count($repositories);
       overflow:hidden;
       transition: transform .12s ease, border-color .12s ease;
     }
-    .card:hover{transform: translateY(-2px); border-color: rgba(255,255,255,.18)}
     .card:before{
       content:"";
       position:absolute; inset:-1px;
@@ -979,14 +989,6 @@ $openRepositoryCount = count($repositories);
     .tool-actions .snapshot{color:#d4cdff}
     .name{font-weight:650; font-size:15px; margin:0}
     .meta{margin-top:2px;color:var(--muted);font-size:12px}
-    .arrow{
-      width:34px;height:34px;border-radius:12px;
-      border:1px solid rgba(255,255,255,.12);
-      background: rgba(0,0,0,.18);
-      display:grid; place-items:center;
-      flex:0 0 auto;
-    }
-    .arrow svg{opacity:.9}
     .smallgrid{
       display:grid;
       grid-template-columns: repeat(12, 1fr);
@@ -1271,6 +1273,8 @@ $openRepositoryCount = count($repositories);
       .top-nav{display:none}
       .hero{padding:60px 24px 30px}
       .hero-stats{grid-template-columns:1fr;border-radius:18px;clip-path:inset(0 round 18px)}
+      .stat:first-child{border-radius:17px 17px 0 0}
+      .stat:last-child{border-radius:0 0 17px 17px}
       .version-links{grid-template-columns:1fr}
       .tool-list{grid-template-columns:1fr}
       .live-note{left:24px;right:auto;top:22px}

@@ -1,7 +1,7 @@
 #!/usr/bin/env php
 <?php
 
-const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.1.3-r10';
+const KITSUNESERV_BRIDGE_EXECUTOR_RELEASE = '3.1.3-r11';
 
 final class KitsuneServBridgeManager
 {
@@ -504,11 +504,18 @@ final class KitsuneServBridgeManager
             }
             $worktrees = $stage . '/.worktrees';
             if (is_dir($worktrees)) $this->removeTree($worktrees);
-            $siteConfig = ['generatedAt' => gmdate('c'), 'libraries' => $metadata, 'openRepositories' => $this->parseShowcaseOpenRepositories((string) ($this->config['showcase_open_repositories'] ?? ''))];
+            $templateHash = hash_file('sha256', $template . '/index.php');
+            if ($templateHash === false) throw new RuntimeException('Could not fingerprint the Showcase template.');
+            $siteConfig = [
+                'generatedAt' => gmdate('c'),
+                'template' => ['release' => KITSUNESERV_BRIDGE_EXECUTOR_RELEASE, 'sha256' => $templateHash],
+                'libraries' => $metadata,
+                'openRepositories' => $this->parseShowcaseOpenRepositories((string) ($this->config['showcase_open_repositories'] ?? '')),
+            ];
             $json = json_encode($siteConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             if ($json === false) throw new RuntimeException('Could not encode Showcase configuration.');
             $this->writeAtomicFile($stage . '/showcase.json', $json . "\n", 0644);
-            $this->writeAtomicFile($stage . '/.kitsune-showcase', "managed-by=kitsuneserv-bridge\n", 0644);
+            $this->writeAtomicFile($stage . '/.kitsune-showcase', "managed-by=kitsuneserv-bridge\ntemplate-release=" . KITSUNESERV_BRIDGE_EXECUTOR_RELEASE . "\ntemplate-sha256=" . $templateHash . "\n", 0644);
             $this->deployShowcaseStage($stage, $documentRoot, $backup);
             $this->makeWebReadable($documentRoot);
             $this->state['showcase'] = ['domain' => (string) ($this->config['showcase_domain'] ?? ''), 'lastSync' => gmdate('c'), 'libraries' => $metadata];
